@@ -193,11 +193,13 @@ func (s *adminServiceImpl) assignDefaultSubscriptions(ctx context.Context, userI
 }
 
 func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *UpdateUserInput) (*User, error) {
-	// 校验用户专属分组倍率：必须 > 0（nil 合法，表示清除专属倍率）
+	// 校验用户专属分组倍率：必须为可计费的正数（nil 合法，表示清除专属倍率）。
 	if input.GroupRates != nil {
 		for groupID, rate := range input.GroupRates {
-			if rate != nil && *rate <= 0 {
-				return nil, fmt.Errorf("rate_multiplier must be > 0 (group_id=%d)", groupID)
+			if rate != nil {
+				if err := ValidateRateMultiplier(*rate, false); err != nil {
+					return nil, fmt.Errorf("rate_multiplier (group_id=%d): %w", groupID, err)
+				}
 			}
 		}
 	}
@@ -1228,8 +1230,32 @@ func (s *adminServiceImpl) GetRedeemCode(ctx context.Context, id int64) (*Redeem
 }
 
 func (s *adminServiceImpl) GenerateRedeemCodes(ctx context.Context, input *GenerateRedeemCodesInput) ([]RedeemCode, error) {
+	if input == nil || input.Count <= 0 || input.Count > 1000 {
+		return nil, infraerrors.BadRequest("REDEEM_CODE_GENERATION_INVALID", "count must be between 1 and 1000")
+	}
 	if input.ExpiresAt != nil && !input.ExpiresAt.After(time.Now()) {
 		return nil, ErrRedeemCodeExpired
+	}
+	var virtualCurrencyID *int64
+	if input.Type == RedeemTypeVirtualCurrency {
+		if s.virtualCurrency == nil || strings.TrimSpace(input.CurrencyCode) == "" || input.CurrencyAmountUnits <= 0 || input.CurrencyGroupID == nil || *input.CurrencyGroupID <= 0 {
+			return nil, infraerrors.BadRequest("REDEEM_CODE_VIRTUAL_CURRENCY_INVALID", "currency_code, currency_amount_units, and currency_group_id are required")
+		}
+		currency, err := s.virtualCurrency.GetCurrencyByCode(ctx, input.CurrencyCode)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := s.virtualCurrency.ValidateGrantPolicy(ctx, currency.ID, *input.CurrencyGroupID); err != nil {
+			return nil, err
+		}
+		if input.CurrencyAmountUnits > maxVirtualCurrencyMutationUnits {
+			return nil, ErrVirtualCurrencyInvalidInput
+		}
+		virtualCurrencyID = &currency.ID
+		input.CurrencyCode = currency.Code
+		input.Value = 0
+	} else if input.CurrencyCode != "" || input.CurrencyAmountUnits != 0 || input.CurrencyGroupID != nil {
+		return nil, infraerrors.BadRequest("REDEEM_CODE_VIRTUAL_CURRENCY_FIELDS_FORBIDDEN", "virtual currency fields require virtual_currency type")
 	}
 
 	// 如果是订阅类型，验证必须有 GroupID
@@ -1259,6 +1285,12 @@ func (s *adminServiceImpl) GenerateRedeemCodes(ctx context.Context, input *Gener
 			Value:     input.Value,
 			Status:    StatusUnused,
 			ExpiresAt: input.ExpiresAt,
+		}
+		if input.Type == RedeemTypeVirtualCurrency {
+			amountUnits := input.CurrencyAmountUnits
+			code.CurrencyID = virtualCurrencyID
+			code.CurrencyAmountUnits = &amountUnits
+			code.CurrencyGroupID = input.CurrencyGroupID
 		}
 		// 订阅类型专用字段
 		if input.Type == RedeemTypeSubscription {

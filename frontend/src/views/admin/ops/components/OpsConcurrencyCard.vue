@@ -16,11 +16,12 @@ const props = withDefaults(defineProps<Props>(), {
 
 const { t } = useI18n()
 
-const loading = ref(false)
+const loading = ref(true)
 const errorMessage = ref('')
 const concurrency = ref<OpsConcurrencyStatsResponse | null>(null)
 const availability = ref<OpsAccountAvailabilityStatsResponse | null>(null)
 const userConcurrency = ref<OpsUserConcurrencyStatsResponse | null>(null)
+let loadSequence = 0
 
 // 用户视图开关
 const showByUser = ref(false)
@@ -260,12 +261,14 @@ const displayTitle = computed(() => {
 })
 
 async function loadData() {
+  const requestSequence = ++loadSequence
   loading.value = true
   errorMessage.value = ''
   try {
     if (showByUser.value) {
       // 用户视图模式只加载用户并发数据
       const userData = await opsAPI.getUserConcurrencyStats()
+      if (requestSequence !== loadSequence) return
       userConcurrency.value = userData
     } else {
       // 常规模式加载账号/平台/分组数据
@@ -273,14 +276,18 @@ async function loadData() {
         opsAPI.getConcurrencyStats(props.platformFilter, props.groupIdFilter),
         opsAPI.getAccountAvailabilityStats(props.platformFilter, props.groupIdFilter)
       ])
+      if (requestSequence !== loadSequence) return
       concurrency.value = concData
       availability.value = availData
     }
   } catch (err: any) {
+    if (requestSequence !== loadSequence) return
     console.error('[OpsConcurrencyCard] Failed to load data', err)
     errorMessage.value = err?.response?.data?.detail || t('admin.ops.concurrency.loadFailed')
   } finally {
-    loading.value = false
+    if (requestSequence === loadSequence) {
+      loading.value = false
+    }
   }
 }
 
@@ -341,7 +348,7 @@ watch(
 </script>
 
 <template>
-  <div class="flex h-full flex-col rounded-3xl bg-white p-6 shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700">
+  <div class="flex h-full min-h-0 flex-col rounded-3xl bg-white p-6 shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700">
     <!-- 头部 -->
     <div class="mb-4 flex shrink-0 items-center justify-between gap-3">
       <h3 class="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white">
@@ -409,7 +416,7 @@ watch(
       </div>
 
       <!-- 用户视图 -->
-      <div v-else-if="displayDimension === 'user'" class="custom-scrollbar max-h-[360px] flex-1 space-y-2 overflow-y-auto p-3">
+      <div v-else-if="displayDimension === 'user'" class="custom-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
         <div v-for="row in (displayRows as UserRow[])" :key="row.key" class="rounded-lg bg-gray-50 p-2.5 dark:bg-dark-900">
           <!-- 用户信息和并发 -->
           <div class="mb-1.5 flex items-center justify-between gap-2">
@@ -442,7 +449,7 @@ watch(
       </div>
 
       <!-- 汇总视图（平台/分组） -->
-      <div v-else-if="displayDimension === 'platform' || displayDimension === 'group'" class="custom-scrollbar max-h-[360px] flex-1 space-y-2 overflow-y-auto p-3">
+      <div v-else-if="displayDimension === 'platform' || displayDimension === 'group'" class="custom-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
         <div v-for="row in (displayRows as SummaryRow[])" :key="row.key" class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
           <!-- 标题行 -->
           <div class="mb-2 flex items-center justify-between gap-2">
@@ -516,7 +523,7 @@ watch(
       </div>
 
       <!-- 账号详细视图 -->
-      <div v-else class="custom-scrollbar max-h-[360px] flex-1 space-y-2 overflow-y-auto p-3">
+      <div v-else class="custom-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
         <div v-for="row in (displayRows as AccountRow[])" :key="row.key" class="rounded-lg bg-gray-50 p-2.5 dark:bg-dark-900">
           <!-- 账号名称和并发 -->
           <div class="mb-1.5 flex items-center justify-between gap-2">

@@ -706,6 +706,8 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/available-channels', label: t('nav.availableChannels'), icon: ChannelIcon, hideInSimpleMode: true, featureFlag: flagAvailableChannels },
     { path: '/monitor', label: t('nav.channelStatus'), icon: SignalIcon, featureFlag: flagChannelMonitor },
     { path: '/subscriptions', label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
+    { path: '/currencies', label: t('nav.virtualCurrency'), icon: CreditCardIcon, hideInSimpleMode: true },
+    { path: '/city', label: t('nav.citySimulation'), icon: GlobeIcon, hideInSimpleMode: true },
     { path: '/purchase', label: t('nav.buySubscription'), icon: RechargeSubscriptionIcon, hideInSimpleMode: true, featureFlag: flagPayment },
     { path: '/orders', label: t('nav.myOrders'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
     { path: '/redeem', label: t('nav.redeem'), icon: GiftIcon, hideInSimpleMode: true },
@@ -756,6 +758,8 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring },
     { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true },
     { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, hideInSimpleMode: true },
+    { path: '/admin/currencies', label: t('nav.virtualCurrencies'), icon: CreditCardIcon, hideInSimpleMode: true },
+    { path: '/admin/currency-integrations', label: t('nav.virtualCurrencyIntegrations'), icon: KeyIcon, hideInSimpleMode: true },
     {
       path: '/admin/channels',
       label: t('nav.channelManagement'),
@@ -1025,14 +1029,10 @@ onBeforeUnmount(() => {
   right: 0.75rem;
   top: 50%;
   height: 1px;
-  background: rgb(229 231 235);
+  background: var(--ui-separator);
   opacity: 0;
   transform: translateY(-50%);
   transition: opacity 0.18s ease;
-}
-
-.dark .sidebar-section-title::after {
-  background: rgb(55 65 81);
 }
 
 .sidebar-section-title-text-collapsed {

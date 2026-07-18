@@ -98,10 +98,13 @@ func NewGroupService(groupRepo GroupRepository, authCacheInvalidator APIKeyAuthC
 
 // Create 创建分组
 func (s *GroupService) Create(ctx context.Context, req CreateGroupRequest) (*Group, error) {
+	if err := ValidateRateMultiplier(req.RateMultiplier, false); err != nil {
+		return nil, fmt.Errorf("rate_multiplier: %w", err)
+	}
 	imageRateMultiplier := 1.0
 	if req.ImageRateMultiplier != nil {
-		if *req.ImageRateMultiplier < 0 {
-			return nil, fmt.Errorf("image_rate_multiplier must be >= 0")
+		if err := ValidateRateMultiplier(*req.ImageRateMultiplier, true); err != nil {
+			return nil, fmt.Errorf("image_rate_multiplier: %w", err)
 		}
 		imageRateMultiplier = *req.ImageRateMultiplier
 	}
@@ -187,6 +190,9 @@ func (s *GroupService) Update(ctx context.Context, id int64, req UpdateGroupRequ
 	}
 
 	if req.RateMultiplier != nil {
+		if err := ValidateRateMultiplier(*req.RateMultiplier, false); err != nil {
+			return nil, fmt.Errorf("rate_multiplier: %w", err)
+		}
 		group.RateMultiplier = *req.RateMultiplier
 	}
 
@@ -204,8 +210,8 @@ func (s *GroupService) Update(ctx context.Context, id int64, req UpdateGroupRequ
 		group.ImageRateIndependent = *req.ImageRateIndependent
 	}
 	if req.ImageRateMultiplier != nil {
-		if *req.ImageRateMultiplier < 0 {
-			return nil, fmt.Errorf("image_rate_multiplier must be >= 0")
+		if err := ValidateRateMultiplier(*req.ImageRateMultiplier, true); err != nil {
+			return nil, fmt.Errorf("image_rate_multiplier: %w", err)
 		}
 		group.ImageRateMultiplier = *req.ImageRateMultiplier
 	}

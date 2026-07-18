@@ -67,6 +67,12 @@
 
             <!-- Right: actions -->
             <div class="flex w-full flex-wrap items-center justify-end gap-3 sm:w-auto">
+              <SavedViewsControl
+                storage-key="admin-audit"
+                :state="savedViewState"
+                :disabled="loading"
+                @apply="applySavedView"
+              />
               <button type="button" class="btn btn-primary" :disabled="loading" @click="search">
                 {{ t('common.search') }}
               </button>
@@ -84,7 +90,14 @@
 
       <!-- Table -->
       <template #table>
-        <DataTable :columns="columns" :data="logs" :loading="loading" row-key="id">
+        <DataTable
+          :columns="columns"
+          :data="logs"
+          :loading="loading"
+          :error="loadError"
+          row-key="id"
+          @retry="fetchLogs"
+        >
           <template #cell-created_at="{ value }">
             <span class="whitespace-nowrap text-gray-600 dark:text-gray-300">{{ formatTime(value) }}</span>
           </template>
@@ -352,7 +365,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI, type AuditLog } from '@/api/admin'
 import { totpAPI } from '@/api'
@@ -361,20 +374,25 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import type { Column } from '@/components/common/types'
 import Pagination from '@/components/common/Pagination.vue'
+import SavedViewsControl from '@/components/common/SavedViewsControl.vue'
 import Select from '@/components/common/Select.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores'
+import { getPersistedPageSize, setPersistedPageSize } from '@/composables/usePersistedPageSize'
 
 const { t } = useI18n()
 const appStore = useAppStore()
 
-const loading = ref(false)
+const loading = ref(true)
 const logs = ref<AuditLog[]>([])
 const total = ref(0)
 const page = ref(1)
-const pageSize = ref(20)
+const pageSize = ref(getPersistedPageSize())
+const loadError = ref<string | null>(null)
+let logsAbortController: AbortController | null = null
+let logsRequestSequence = 0
 
 const filters = reactive({
   q: '',
@@ -393,6 +411,27 @@ const customEndTime = ref('')
 const showCustomTimeRangeDialog = ref(false)
 const customStartTimeInput = ref('')
 const customEndTimeInput = ref('')
+
+const savedViewState = computed<Record<string, unknown>>(() => ({
+  ...filters,
+  timeRange: timeRange.value,
+  customStartTime: customStartTime.value,
+  customEndTime: customEndTime.value,
+  page: page.value,
+  page_size: pageSize.value
+}))
+
+const applySavedView = (state: Record<string, unknown>) => {
+  for (const key of ['q', 'actor_email', 'action', 'client_ip', 'method', 'auth_method', 'success']) {
+    filters[key as keyof typeof filters] = typeof state[key] === 'string' ? state[key] as string : ''
+  }
+  timeRange.value = typeof state.timeRange === 'string' ? state.timeRange : ''
+  customStartTime.value = typeof state.customStartTime === 'string' ? state.customStartTime : ''
+  customEndTime.value = typeof state.customEndTime === 'string' ? state.customEndTime : ''
+  page.value = Number.isFinite(Number(state.page)) ? Math.max(1, Number(state.page)) : 1
+  pageSize.value = Number.isFinite(Number(state.page_size)) ? Math.max(1, Number(state.page_size)) : pageSize.value
+  void fetchLogs()
+}
 
 const TIME_RANGE_MINUTES: Record<string, number> = {
   '30m': 30,
@@ -534,15 +573,32 @@ function buildQuery() {
 }
 
 async function fetchLogs() {
+  logsAbortController?.abort()
+  const requestController = new AbortController()
+  logsAbortController = requestController
+  const requestSequence = ++logsRequestSequence
   loading.value = true
+  loadError.value = null
   try {
-    const res = await adminAPI.audit.list(buildQuery())
+    const res = await adminAPI.audit.list(buildQuery(), { signal: requestController.signal })
+    if (requestController.signal.aborted || requestSequence !== logsRequestSequence) return
     logs.value = res.items
     total.value = res.total
   } catch (err: any) {
-    appStore.showError(err?.message || t('admin.audit.loadFailed'))
+    if (
+      requestController.signal.aborted ||
+      requestSequence !== logsRequestSequence ||
+      err?.name === 'AbortError' ||
+      err?.code === 'ERR_CANCELED'
+    ) return
+    const message = err?.message || t('admin.audit.loadFailed')
+    loadError.value = message
+    appStore.showError(message)
   } finally {
-    loading.value = false
+    if (logsAbortController === requestController) {
+      loading.value = false
+      logsAbortController = null
+    }
   }
 }
 
@@ -572,6 +628,7 @@ function onPageChange(p: number) {
 
 function onPageSizeChange(ps: number) {
   pageSize.value = ps
+  setPersistedPageSize(ps)
   page.value = 1
   fetchLogs()
 }
@@ -682,4 +739,9 @@ function statusDotClass(status: number): string {
 }
 
 onMounted(fetchLogs)
+
+onUnmounted(() => {
+  logsAbortController?.abort()
+  logsAbortController = null
+})
 </script>

@@ -325,6 +325,21 @@ func (s *AnnouncementService) MarkRead(ctx context.Context, userID, announcement
 	return nil
 }
 
+func (s *AnnouncementService) MarkAllRead(ctx context.Context, userID int64) (int, error) {
+	items, err := s.ListForUser(ctx, userID, true)
+	if err != nil {
+		return 0, err
+	}
+	announcementIDs := make([]int64, 0, len(items))
+	for i := range items {
+		announcementIDs = append(announcementIDs, items[i].Announcement.ID)
+	}
+	if err := s.readRepo.MarkReadBatch(ctx, announcementIDs, userID, time.Now()); err != nil {
+		return 0, fmt.Errorf("mark all read: %w", err)
+	}
+	return len(announcementIDs), nil
+}
+
 func (s *AnnouncementService) ListUserReadStatus(
 	ctx context.Context,
 	announcementID int64,

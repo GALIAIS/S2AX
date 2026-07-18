@@ -5,7 +5,7 @@
  */
 
 import { apiClient } from '../client'
-import type { PaginatedResponse } from '@/types'
+import type { FetchOptions, PaginatedResponse } from '@/types'
 
 export interface AffiliateAdminEntry {
   user_id: number
@@ -111,6 +111,7 @@ export interface SimpleUser {
 
 export async function listUsers(
   params: ListAffiliateUsersParams = {},
+  options: FetchOptions = {},
 ): Promise<PaginatedResponse<AffiliateAdminEntry>> {
   const { data } = await apiClient.get<PaginatedResponse<AffiliateAdminEntry>>(
     '/admin/affiliates/users',
@@ -120,6 +121,7 @@ export async function listUsers(
         page_size: params.page_size ?? 20,
         search: params.search ?? '',
       },
+      signal: options.signal,
     },
   )
   return data
@@ -178,30 +180,33 @@ function recordParams(params: ListAffiliateRecordsParams = {}) {
 
 export async function listInviteRecords(
   params: ListAffiliateRecordsParams = {},
+  options: FetchOptions = {},
 ): Promise<PaginatedResponse<AffiliateInviteRecord>> {
   const { data } = await apiClient.get<PaginatedResponse<AffiliateInviteRecord>>(
     '/admin/affiliates/invites',
-    { params: recordParams(params) },
+    { params: recordParams(params), signal: options.signal },
   )
   return data
 }
 
 export async function listRebateRecords(
   params: ListAffiliateRecordsParams = {},
+  options: FetchOptions = {},
 ): Promise<PaginatedResponse<AffiliateRebateRecord>> {
   const { data } = await apiClient.get<PaginatedResponse<AffiliateRebateRecord>>(
     '/admin/affiliates/rebates',
-    { params: recordParams(params) },
+    { params: recordParams(params), signal: options.signal },
   )
   return data
 }
 
 export async function listTransferRecords(
   params: ListAffiliateRecordsParams = {},
+  options: FetchOptions = {},
 ): Promise<PaginatedResponse<AffiliateTransferRecord>> {
   const { data } = await apiClient.get<PaginatedResponse<AffiliateTransferRecord>>(
     '/admin/affiliates/transfers',
-    { params: recordParams(params) },
+    { params: recordParams(params), signal: options.signal },
   )
   return data
 }

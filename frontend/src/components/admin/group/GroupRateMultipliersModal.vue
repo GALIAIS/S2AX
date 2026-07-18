@@ -11,7 +11,7 @@
         <span class="font-medium text-gray-900 dark:text-white">{{ group.name }}</span>
         <span class="text-gray-400">|</span>
         <span class="text-gray-600 dark:text-gray-400">
-          {{ t('admin.groups.columns.rateMultiplier') }}: {{ group.rate_multiplier }}x
+          {{ t('admin.groups.columns.rateMultiplier') }}: {{ formatMultiplier(group.rate_multiplier ?? 1) }}x
         </span>
       </div>
 
@@ -53,8 +53,8 @@
             <input
               v-model.number="newRate"
               type="number"
-              step="0.001"
-              min="0"
+              :step="RATE_MULTIPLIER_STEP"
+              :min="MIN_RATE_MULTIPLIER"
               autocomplete="off"
               class="hide-spinner input w-full"
               placeholder="1.0"
@@ -165,8 +165,8 @@
                     <td class="whitespace-nowrap px-3 py-2">
                       <input
                         type="number"
-                        step="0.001"
-                        min="0.001"
+                        :step="RATE_MULTIPLIER_STEP"
+                        :min="MIN_RATE_MULTIPLIER"
                         autocomplete="off"
                         :value="entry.rate_multiplier ?? ''"
                         :placeholder="String(props.group?.rate_multiplier ?? 1)"
@@ -249,6 +249,12 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Icon from '@/components/icons/Icon.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
+import {
+  MIN_RATE_MULTIPLIER,
+  RATE_MULTIPLIER_STEP,
+  formatMultiplier,
+  parseRateMultiplier
+} from '@/utils/formatters'
 
 interface LocalEntry extends GroupRateMultiplierEntry {}
 
@@ -297,8 +303,8 @@ const showFinalRate = computed(() => {
 // 计算最终倍率预览
 const computeFinalRate = (rate: number | null | undefined) => {
   const base = rate ?? props.group?.rate_multiplier ?? 1
-  if (!batchFactor.value) return base
-  return parseFloat((base * batchFactor.value).toFixed(6))
+  if (!batchFactor.value) return formatMultiplier(base)
+  return formatMultiplier(parseFloat((base * batchFactor.value).toFixed(8)))
 }
 
 // 检测是否有未保存的修改
@@ -386,7 +392,8 @@ const selectUser = (user: AdminUser) => {
 
 // 本地添加（或覆盖已有用户）
 const handleAddLocal = () => {
-  if (!selectedUser.value || !newRate.value) return
+  const rate = parseRateMultiplier(newRate.value)
+  if (!selectedUser.value || rate === null) return
   const user = selectedUser.value
   const idx = localEntries.value.findIndex(e => e.user_id === user.id)
   const entry: LocalEntry = {
@@ -395,7 +402,7 @@ const handleAddLocal = () => {
     user_email: user.email,
     user_notes: user.notes || '',
     user_status: user.status || 'active',
-    rate_multiplier: newRate.value,
+    rate_multiplier: rate,
     rpm_override: null
   }
   if (idx >= 0) {
@@ -417,9 +424,9 @@ const updateLocalRate = (userId: number, value: string) => {
     entry.rate_multiplier = null
     return
   }
-  const num = parseFloat(value)
-  if (isNaN(num)) return
-  entry.rate_multiplier = num
+  const parsed = parseRateMultiplier(value)
+  if (parsed === null) return
+  entry.rate_multiplier = parsed
 }
 
 // 本地删除
@@ -433,7 +440,7 @@ const applyBatchFactor = () => {
   if (!batchFactor.value || batchFactor.value <= 0) return
   for (const entry of localEntries.value) {
     if (entry.rate_multiplier != null) {
-      entry.rate_multiplier = parseFloat((entry.rate_multiplier * batchFactor.value).toFixed(6))
+      entry.rate_multiplier = parseFloat((entry.rate_multiplier * batchFactor.value).toFixed(8))
     }
   }
   batchFactor.value = null
@@ -458,10 +465,11 @@ const handleSave = async () => {
   try {
     const entries = localEntries.value
       .filter(e => e.rate_multiplier != null)
-      .map(e => ({
-        user_id: e.user_id,
-        rate_multiplier: e.rate_multiplier as number
-      }))
+      .map(e => {
+        const rate = parseRateMultiplier(e.rate_multiplier)
+        if (rate === null) throw new Error('invalid rate multiplier')
+        return { user_id: e.user_id, rate_multiplier: rate }
+      })
     await adminAPI.groups.batchSetGroupRateMultipliers(props.group.id, entries)
     appStore.showSuccess(t('admin.groups.rateSaved'))
     emit('success')

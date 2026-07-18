@@ -48,6 +48,7 @@
         <div
           v-if="user"
           class="group relative hidden items-center gap-2 rounded-xl bg-primary-50 px-3 py-1.5 dark:bg-primary-900/20 sm:flex"
+          @mouseenter="loadVirtualWallets()"
         >
           <svg
             class="h-4 w-4 text-primary-600 dark:text-primary-400"
@@ -71,8 +72,15 @@
           >
             {{ balanceFrozenLabel }}
           </span>
+          <span
+            v-if="virtualWallets.length > 0"
+            class="rounded-full bg-primary-100 px-1.5 py-0.5 text-[11px] font-semibold text-primary-700 dark:bg-primary-900/40 dark:text-primary-200"
+            :title="t('virtualCurrency.assetCount', { count: virtualWallets.length })"
+          >
+            +{{ virtualWallets.length }}
+          </span>
           <div
-            class="pointer-events-none absolute right-0 top-full mt-2 hidden w-56 rounded-lg border border-gray-200 bg-white p-3 text-xs shadow-lg group-hover:block dark:border-dark-700 dark:bg-dark-800"
+            class="pointer-events-none absolute right-0 top-full mt-2 hidden w-72 rounded-lg border border-gray-200 bg-white p-3 text-xs shadow-lg group-hover:block dark:border-dark-700 dark:bg-dark-800"
           >
             <div class="flex items-center justify-between">
               <span class="text-gray-500 dark:text-dark-400">{{ balanceAvailableText }}</span>
@@ -86,6 +94,38 @@
               <div class="flex items-center justify-between">
                 <span class="text-gray-500 dark:text-dark-400">{{ balanceTotalText }}</span>
                 <span class="font-semibold text-gray-900 dark:text-white">{{ formatHeaderMoney(totalBalance) }}</span>
+              </div>
+            </div>
+            <div
+              v-if="virtualWallets.length > 0 || virtualWalletsLoading"
+              class="mt-3 border-t border-gray-100 pt-3 dark:border-dark-700"
+            >
+              <div class="mb-2 flex items-center justify-between">
+                <span class="font-medium text-gray-700 dark:text-dark-200">{{ t('virtualCurrency.otherAssets') }}</span>
+                <span v-if="virtualWalletsLoading" class="text-gray-400 dark:text-dark-500">{{ t('common.loading') }}</span>
+              </div>
+              <div class="space-y-1.5">
+                <div
+                  v-for="wallet in virtualWallets"
+                  :key="wallet.currency_id"
+                  class="flex items-center justify-between gap-3 rounded-lg bg-gray-50 px-2 py-1.5 dark:bg-dark-700/60"
+                >
+                  <div class="flex min-w-0 items-center gap-2">
+                    <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-white text-sm dark:bg-dark-800" aria-hidden="true">
+                      {{ wallet.currency_symbol || '¤' }}
+                    </span>
+                    <div class="min-w-0">
+                      <p class="truncate font-medium text-gray-800 dark:text-dark-100">{{ wallet.currency_name }}</p>
+                      <p class="truncate font-mono text-[10px] uppercase text-gray-400 dark:text-dark-500">{{ wallet.currency_code }}</p>
+                    </div>
+                  </div>
+                  <div class="shrink-0 text-right">
+                    <p class="font-mono font-semibold text-gray-900 dark:text-white">{{ formatWalletUnits(wallet.available_units, wallet.currency_scale) }}</p>
+                    <p v-if="wallet.reserved_units > 0" class="font-mono text-[10px] text-amber-700 dark:text-amber-300">
+                      {{ t('virtualCurrency.reserved') }} {{ formatWalletUnits(wallet.reserved_units, wallet.currency_scale) }}
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -140,6 +180,17 @@
                 <div v-if="frozenBalance > 0" class="mt-1 text-xs text-amber-600 dark:text-amber-300">
                   {{ balanceFrozenText }} {{ formatHeaderMoney(frozenBalance) }}
                 </div>
+                <div v-if="virtualWallets.length > 0" class="mt-2 space-y-1.5 border-t border-gray-100 pt-2 dark:border-dark-700">
+                  <p class="text-xs font-medium text-gray-600 dark:text-dark-300">{{ t('virtualCurrency.otherAssets') }}</p>
+                  <div v-for="wallet in virtualWallets" :key="wallet.currency_id" class="flex items-center justify-between gap-3 text-xs">
+                    <span class="min-w-0 truncate text-gray-500 dark:text-dark-400">
+                      {{ wallet.currency_symbol || '¤' }} {{ wallet.currency_name }}
+                    </span>
+                    <span class="shrink-0 font-mono font-semibold text-gray-900 dark:text-white">
+                      {{ formatWalletUnits(wallet.available_units, wallet.currency_scale) }}
+                    </span>
+                  </div>
+                </div>
               </div>
 
               <div class="py-1">
@@ -155,7 +206,7 @@
 
                 <a
                   v-if="authStore.isAdmin"
-                  href="https://github.com/Wei-Shaw/sub2api"
+                  :href="PROJECT_URL"
                   target="_blank"
                   rel="noopener noreferrer"
                   @click="closeDropdown"
@@ -240,7 +291,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
@@ -250,6 +301,8 @@ import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMi
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { sanitizeUrl } from '@/utils/url'
+import { PROJECT_URL } from '@/config/project'
+import virtualCurrencyAPI, { type VirtualCurrencyWallet } from '@/api/virtualCurrency'
 
 const router = useRouter()
 const route = useRoute()
@@ -272,6 +325,11 @@ const balanceAvailableText = computed(() => t('common.availableBalance') === 'co
 const balanceFrozenText = computed(() => t('common.frozenBalance') === 'common.frozenBalance' ? '冻结金额' : t('common.frozenBalance'))
 const balanceTotalText = computed(() => t('common.totalBalance') === 'common.totalBalance' ? '总余额' : t('common.totalBalance'))
 const balanceFrozenLabel = computed(() => `${balanceFrozenText.value} ${formatHeaderMoney(frozenBalance.value)}`)
+const virtualWallets = ref<VirtualCurrencyWallet[]>([])
+const virtualWalletsLoading = ref(false)
+let virtualWalletsLastAttempt = 0
+let virtualWalletsRequestID = 0
+let virtualWalletsReloadQueued = false
 
 // 只在标准模式的管理员下显示新手引导按钮
 const showOnboardingButton = computed(() => {
@@ -354,6 +412,53 @@ function formatHeaderMoney(value: number) {
   return `$${value.toFixed(2)}`
 }
 
+function formatWalletUnits(units: number, scale: number) {
+  const value = Number(units)
+  if (!Number.isFinite(value)) return '0'
+  if (!scale) return String(value)
+  const negative = value < 0
+  const magnitude = Math.abs(value)
+  const base = 10 ** scale
+  const whole = Math.floor(magnitude / base)
+  const fraction = String(magnitude % base).padStart(scale, '0')
+  return `${negative ? '-' : ''}${whole}.${fraction}`
+}
+
+async function loadVirtualWallets(force = false) {
+  if (!user.value) return
+  if (virtualWalletsLoading.value) {
+    if (force) virtualWalletsReloadQueued = true
+    return
+  }
+  const now = Date.now()
+  if (!force && now - virtualWalletsLastAttempt < 15_000) return
+  virtualWalletsLastAttempt = now
+  const requestID = ++virtualWalletsRequestID
+  virtualWalletsLoading.value = true
+  try {
+    const wallets = await virtualCurrencyAPI.listWallets()
+    if (requestID === virtualWalletsRequestID) virtualWallets.value = wallets
+  } catch {
+    // Keep the last successful snapshot and retry after the freshness window.
+  } finally {
+    if (requestID === virtualWalletsRequestID) {
+      virtualWalletsLoading.value = false
+      if (virtualWalletsReloadQueued) {
+        virtualWalletsReloadQueued = false
+        void loadVirtualWallets(true)
+      }
+    }
+  }
+}
+
+function handleWindowFocus() {
+  void loadVirtualWallets()
+}
+
+function handleVirtualWalletsChanged() {
+  void loadVirtualWallets(true)
+}
+
 function handleClickOutside(event: MouseEvent) {
   if (dropdownRef.value && !dropdownRef.value.contains(event.target as Node)) {
     closeDropdown()
@@ -362,10 +467,25 @@ function handleClickOutside(event: MouseEvent) {
 
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
+  window.addEventListener('focus', handleWindowFocus)
+  window.addEventListener('virtual-currency-wallets-changed', handleVirtualWalletsChanged)
+  void loadVirtualWallets(true)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', handleClickOutside)
+  window.removeEventListener('focus', handleWindowFocus)
+  window.removeEventListener('virtual-currency-wallets-changed', handleVirtualWalletsChanged)
+})
+
+watch(() => user.value?.id, (userID, previousUserID) => {
+  if (userID === previousUserID) return
+  virtualWalletsRequestID += 1
+  virtualWallets.value = []
+  virtualWalletsLoading.value = false
+  virtualWalletsLastAttempt = 0
+  virtualWalletsReloadQueued = false
+  if (userID) void loadVirtualWallets(true)
 })
 </script>
 

@@ -85,6 +85,29 @@ func TestOpenAICompatibleHandlersRejectInvalidStreamFieldType(t *testing.T) {
 	}
 }
 
+func TestOpenAIChatCompletionsRejectsImageModelsBeforeScheduling(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, model := range []string{"gpt-image-1", "gpt-image-1.5", "gpt-image-2"} {
+		t.Run(model, func(t *testing.T) {
+			c, rec := newOpenAICompatibleStreamValidationContext(
+				"/openai/v1/chat/completions",
+				`{"model":"`+model+`","messages":[{"role":"user","content":"draw a cat"}]}`,
+				false,
+			)
+
+			newOpenAIHandlerForPreviousResponseIDValidation(t, nil).ChatCompletions(c)
+
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.Equal(t, "invalid_request_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
+			require.Equal(t,
+				"This model is not supported on the Chat Completions endpoint",
+				gjson.GetBytes(rec.Body.Bytes(), "error.message").String(),
+			)
+		})
+	}
+}
+
 func TestGatewayOpenAICompatibleHandlersAllowBooleanStreamToContinue(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

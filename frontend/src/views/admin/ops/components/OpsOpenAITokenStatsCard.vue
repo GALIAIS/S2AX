@@ -5,6 +5,7 @@ import Select from '@/components/common/Select.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { opsAPI, type OpsOpenAITokenStatsResponse, type OpsOpenAITokenStatsTimeRange } from '@/api/admin/ops'
 import { formatNumber } from '@/utils/format'
+import { useInitialLoading } from '@/composables/useInitialLoading'
 
 interface Props {
   platformFilter?: string
@@ -21,9 +22,11 @@ const props = withDefaults(defineProps<Props>(), {
 
 const { t } = useI18n()
 
-const loading = ref(false)
+const loading = ref(true)
+const { isInitialLoading } = useInitialLoading(loading)
 const errorMessage = ref('')
 const response = ref<OpsOpenAITokenStatsResponse | null>(null)
+let loadSequence = 0
 
 const timeRange = ref<OpsOpenAITokenStatsTimeRange>('30d')
 const viewMode = ref<ViewMode>('topn')
@@ -93,21 +96,28 @@ function buildParams() {
 }
 
 async function loadData() {
+  const requestSequence = ++loadSequence
   loading.value = true
   errorMessage.value = ''
   try {
-    response.value = await opsAPI.getOpenAITokenStats(buildParams())
+    const nextResponse = await opsAPI.getOpenAITokenStats(buildParams())
+    if (requestSequence !== loadSequence) return
+    response.value = nextResponse
     // 防御：若 total 变化导致当前页超出最大页，则回退到末页并重新拉取一次。
     if (viewMode.value === 'pagination' && page.value > totalPages.value) {
       page.value = totalPages.value
-      response.value = await opsAPI.getOpenAITokenStats(buildParams())
+      const correctedResponse = await opsAPI.getOpenAITokenStats(buildParams())
+      if (requestSequence !== loadSequence) return
+      response.value = correctedResponse
     }
   } catch (err: any) {
+    if (requestSequence !== loadSequence) return
     console.error('[OpsOpenAITokenStatsCard] Failed to load data', err)
-    response.value = null
     errorMessage.value = err?.message || t('admin.ops.openaiTokenStats.failedToLoad')
   } finally {
-    loading.value = false
+    if (requestSequence === loadSequence) {
+      loading.value = false
+    }
   }
 }
 
@@ -154,7 +164,7 @@ function onNextPage() {
 </script>
 
 <template>
-  <section class="card p-4 md:p-5">
+  <section class="card relative p-4 md:p-5">
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
       <h3 class="text-sm font-bold text-gray-900 dark:text-white">
         {{ t('admin.ops.openaiTokenStats.title') }}
@@ -174,6 +184,7 @@ function onNextPage() {
             <Select v-model="pageSize" :options="pageSizeOptions" />
           </div>
           <button
+            type="button"
             class="btn btn-secondary btn-sm"
             :disabled="loading || page <= 1"
             @click="onPrevPage"
@@ -181,6 +192,7 @@ function onNextPage() {
             {{ t('admin.ops.openaiTokenStats.prevPage') }}
           </button>
           <button
+            type="button"
             class="btn btn-secondary btn-sm"
             :disabled="loading || page >= totalPages"
             @click="onNextPage"
@@ -198,12 +210,16 @@ function onNextPage() {
       {{ errorMessage }}
     </div>
 
-    <div v-if="loading" class="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+    <div v-if="loading && items.length > 0" class="absolute right-4 top-4 rounded-md bg-white/95 px-2.5 py-1 text-xs text-gray-500 shadow-sm ring-1 ring-gray-200 backdrop-blur dark:bg-dark-800/95 dark:text-gray-300 dark:ring-dark-600" role="status">
+      {{ t('common.refreshing') }}
+    </div>
+
+    <div v-if="isInitialLoading" class="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
       {{ t('admin.ops.loadingText') }}
     </div>
 
     <EmptyState
-      v-else-if="items.length === 0"
+      v-else-if="!loading && items.length === 0"
       :title="t('common.noData')"
       :description="t('admin.ops.openaiTokenStats.empty')"
     />

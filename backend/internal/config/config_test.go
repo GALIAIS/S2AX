@@ -38,6 +38,7 @@ func TestLoadServerTimingConfig(t *testing.T) {
 func TestLoadForBootstrapAllowsMissingJWTSecret(t *testing.T) {
 	viper.Reset()
 	t.Setenv("JWT_SECRET", "")
+	t.Setenv("TOTP_ENCRYPTION_KEY", "")
 
 	cfg, err := LoadForBootstrap()
 	if err != nil {
@@ -45,6 +46,12 @@ func TestLoadForBootstrapAllowsMissingJWTSecret(t *testing.T) {
 	}
 	if cfg.JWT.Secret != "" {
 		t.Fatalf("LoadForBootstrap() should keep empty jwt.secret during bootstrap")
+	}
+	if cfg.Totp.EncryptionKey != "" {
+		t.Fatalf("LoadForBootstrap() should keep empty totp.encryption_key during bootstrap")
+	}
+	if cfg.Totp.EncryptionKeyConfigured {
+		t.Fatalf("LoadForBootstrap() should not mark an empty totp.encryption_key as configured")
 	}
 }
 

@@ -28,6 +28,7 @@ export function formatPeakRateWindow(
   tzLabel?: string
 ): string {
   if (!hasPeakRate(fields) || !fields) return ''
-  const base = `${fields.peak_start}-${fields.peak_end} ×${fields.peak_rate_multiplier ?? 1}`
+  const base = `${fields.peak_start}-${fields.peak_end} ×${formatMultiplier(fields.peak_rate_multiplier ?? 1)}`
   return tzLabel ? `${base} (${tzLabel})` : base
 }
+import { formatMultiplier } from '@/utils/formatters'

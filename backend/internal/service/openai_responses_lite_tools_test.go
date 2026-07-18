@@ -309,3 +309,55 @@ func TestOpenAIGatewayServiceForward_NormalizesResponsesLiteToolsForOAuth(t *tes
 		})
 	}
 }
+
+func TestOpenAIGatewayServiceForward_RetriesWithoutLiteHeaderForUnsupportedModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"gpt-5.4mini","stream":true,"input":"identify this image"}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.144.1")
+	c.Request.Header.Set(responsesLiteHeader, "true")
+
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","code":"unsupported_value","message":"This model is not supported when using X-OpenAI-Internal-Codex-Responses-Lite.","param":"model"}}`)),
+		},
+		{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body: io.NopCloser(strings.NewReader(
+				"data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_lite_fallback\",\"model\":\"gpt-5.4-mini\"}}\n\n" +
+					"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_lite_fallback\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n" +
+					"data: [DONE]\n\n",
+			)),
+		},
+	}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{
+		ID:          902,
+		Name:        "responses-lite-fallback",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"},
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, body)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.requests, 2)
+	require.Equal(t, "true", upstream.requests[0].Header.Get(responsesLiteHeader))
+	require.Empty(t, upstream.requests[1].Header.Get(responsesLiteHeader))
+	// The fallback restarts from the original client body, so Lite-only
+	// additional_tools normalization cannot leak into the regular Responses request.
+	require.Equal(t, "gpt-5.4-mini", gjson.GetBytes(upstream.bodies[1], "model").String())
+	require.False(t, gjson.GetBytes(upstream.bodies[1], `input.#(type=="additional_tools")`).Exists())
+}

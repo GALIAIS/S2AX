@@ -8,16 +8,19 @@ import Icon from '@/components/icons/Icon.vue'
 import { opsAPI, type AlertEventsQuery } from '@/api/admin/ops'
 import type { AlertEvent } from '../types'
 import { formatDateTime } from '../utils/opsFormatters'
+import { useInitialLoading } from '@/composables/useInitialLoading'
 
 const { t } = useI18n()
 const appStore = useAppStore()
 
 const PAGE_SIZE = 10
 
-const loading = ref(false)
+const loading = ref(true)
+const { isInitialLoading } = useInitialLoading(loading)
 const loadingMore = ref(false)
 const events = ref<AlertEvent[]>([])
 const hasMore = ref(true)
+let loadSequence = 0
 
 // Detail modal
 const showDetail = ref(false)
@@ -88,18 +91,19 @@ function buildQuery(overrides: Partial<AlertEventsQuery> = {}): AlertEventsQuery
 }
 
 async function loadFirstPage() {
+  const sequence = ++loadSequence
   loading.value = true
   try {
     const data = await opsAPI.listAlertEvents(buildQuery())
+    if (sequence !== loadSequence) return
     events.value = data
     hasMore.value = data.length === PAGE_SIZE
   } catch (err: any) {
+    if (sequence !== loadSequence) return
     console.error('[OpsAlertEventsCard] Failed to load alert events', err)
     appStore.showError(err?.response?.data?.detail || t('admin.ops.alertEvents.loadFailed'))
-    events.value = []
-    hasMore.value = false
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
@@ -355,7 +359,7 @@ const empty = computed(() => events.value.length === 0 && !loading.value)
 </script>
 
 <template>
-  <div class="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700">
+  <div class="relative rounded-3xl bg-white p-6 shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700">
     <div class="mb-4 flex items-start justify-between gap-4">
       <div>
         <h3 class="text-sm font-bold text-gray-900 dark:text-white">{{ t('admin.ops.alertEvents.title') }}</h3>
@@ -368,6 +372,7 @@ const empty = computed(() => events.value.length === 0 && !loading.value)
         <Select :model-value="status" :options="statusOptions" class="w-[110px]" @change="status = String($event || '')" />
         <Select :model-value="emailSent" :options="emailSentOptions" class="w-[110px]" @change="emailSent = String($event || '')" />
         <button
+          type="button"
           class="flex items-center gap-1.5 rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600"
           :disabled="loading"
           @click="loadFirstPage"
@@ -380,7 +385,11 @@ const empty = computed(() => events.value.length === 0 && !loading.value)
       </div>
     </div>
 
-    <div v-if="loading" class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+    <div v-if="loading && events.length > 0" class="absolute right-4 top-4 rounded-md bg-white/95 px-2.5 py-1 text-xs text-gray-500 shadow-sm ring-1 ring-gray-200 backdrop-blur dark:bg-dark-800/95 dark:text-gray-300 dark:ring-dark-600" role="status">
+      {{ t('common.refreshing') }}
+    </div>
+
+    <div v-if="isInitialLoading && events.length === 0" class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
       <svg class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -388,7 +397,7 @@ const empty = computed(() => events.value.length === 0 && !loading.value)
       {{ t('admin.ops.alertEvents.loading') }}
     </div>
 
-    <div v-else-if="empty" class="rounded-xl border border-dashed border-gray-200 p-8 text-center text-sm text-gray-500 dark:border-dark-700 dark:text-gray-400">
+    <div v-else-if="!loading && empty" class="rounded-xl border border-dashed border-gray-200 p-8 text-center text-sm text-gray-500 dark:border-dark-700 dark:text-gray-400">
       {{ t('admin.ops.alertEvents.empty') }}
     </div>
 
@@ -645,4 +654,3 @@ const empty = computed(() => events.value.length === 0 && !loading.value)
     </BaseDialog>
   </div>
 </template>
-

@@ -20,6 +20,7 @@ import (
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
+	inboundBody := body
 	// 固定渠道映射后的请求级 canonical body；账号 normalize/strip 不得改写跨 failover hint。
 	canonicalImageIntentBody := body
 
@@ -44,7 +45,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if normalized {
 		body = normalizedBody
 	}
-	if account.IsOpenAIOAuth() && isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) {
+	if account.IsOpenAIOAuth() && isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) && !isOpenAIResponsesLiteDisabled(c) {
 		liteBody, changed, liteErr := normalizeOpenAIResponsesLiteToolsPayload(body)
 		if liteErr != nil {
 			setOpsUpstreamError(c, http.StatusBadRequest, liteErr.Error(), "")
@@ -211,7 +212,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		imageGenerationAllowed = GroupAllowsImageGeneration(apiKey.Group)
 	}
 	codexImageGenerationBridgeEnabled := isCodexCLI &&
-		!isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) &&
+		(!isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) || isOpenAIResponsesLiteDisabled(c)) &&
 		imageGenerationAllowed &&
 		codexImageGenerationExplicitToolPolicy != codexImageGenerationExplicitToolPolicyStrip &&
 		s.isCodexImageGenerationBridgeEnabled(ctx, account, apiKey)
@@ -821,6 +822,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 			upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 			upstreamCode := extractUpstreamErrorCode(respBody)
+			if account.IsOpenAIOAuth() && isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) &&
+				!isOpenAIResponsesLiteDisabled(c) && isOpenAIResponsesLiteUnsupportedModelResponse(resp.StatusCode, respBody) {
+				markOpenAIResponsesLiteDisabled(c)
+				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying Responses request without Lite header after unsupported model response (account: %s, model: %s)", account.Name, originalModel)
+				return s.Forward(ctx, c, account, inboundBody)
+			}
 			if !agentTaskRecoveryTried && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
 				agentTaskRecoveryTried = true
 				expectedTaskID := account.GetCredential("task_id")
@@ -1014,6 +1021,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	for key, values := range c.Request.Header {
 		lowerKey := strings.ToLower(key)
 		if openaiAllowedHeaders[lowerKey] {
+			if lowerKey == responsesLiteHeaderKey && isOpenAIResponsesLiteDisabled(c) {
+				continue
+			}
 			for _, v := range values {
 				req.Header.Add(key, v)
 			}

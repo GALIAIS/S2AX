@@ -1122,8 +1122,14 @@ export type OpsErrorListQueryParams = {
 }
 
 // Legacy unified endpoints
-export async function listErrorLogs(params: OpsErrorListQueryParams): Promise<OpsErrorLogsResponse> {
-  const { data } = await apiClient.get<OpsErrorLogsResponse>('/admin/ops/errors', { params })
+export async function listErrorLogs(
+  params: OpsErrorListQueryParams,
+  options: OpsRequestOptions = {}
+): Promise<OpsErrorLogsResponse> {
+  const { data } = await apiClient.get<OpsErrorLogsResponse>('/admin/ops/errors', {
+    params,
+    signal: options.signal
+  })
   return data
 }
 
@@ -1137,13 +1143,25 @@ export async function updateErrorResolved(errorId: number, resolved: boolean): P
 }
 
 // New split endpoints
-export async function listRequestErrors(params: OpsErrorListQueryParams): Promise<OpsErrorLogsResponse> {
-  const { data } = await apiClient.get<OpsErrorLogsResponse>('/admin/ops/request-errors', { params })
+export async function listRequestErrors(
+  params: OpsErrorListQueryParams,
+  options: OpsRequestOptions = {}
+): Promise<OpsErrorLogsResponse> {
+  const { data } = await apiClient.get<OpsErrorLogsResponse>('/admin/ops/request-errors', {
+    params,
+    signal: options.signal
+  })
   return data
 }
 
-export async function listUpstreamErrors(params: OpsErrorListQueryParams): Promise<OpsErrorLogsResponse> {
-  const { data } = await apiClient.get<OpsErrorLogsResponse>('/admin/ops/upstream-errors', { params })
+export async function listUpstreamErrors(
+  params: OpsErrorListQueryParams,
+  options: OpsRequestOptions = {}
+): Promise<OpsErrorLogsResponse> {
+  const { data } = await apiClient.get<OpsErrorLogsResponse>('/admin/ops/upstream-errors', {
+    params,
+    signal: options.signal
+  })
   return data
 }
 
@@ -1176,8 +1194,14 @@ export async function listRequestErrorUpstreamErrors(
   return data
 }
 
-export async function listRequestDetails(params: OpsRequestDetailsParams): Promise<OpsRequestDetailsResponse> {
-  const { data } = await apiClient.get<OpsRequestDetailsResponse>('/admin/ops/requests', { params })
+export async function listRequestDetails(
+  params: OpsRequestDetailsParams,
+  options: OpsRequestOptions = {}
+): Promise<OpsRequestDetailsResponse> {
+  const { data } = await apiClient.get<OpsRequestDetailsResponse>('/admin/ops/requests', {
+    params,
+    signal: options.signal,
+  })
   return data
 }
 
@@ -1277,8 +1301,14 @@ export async function resetRuntimeLogConfig(): Promise<OpsRuntimeLogConfig> {
   return data
 }
 
-export async function listSystemLogs(params: OpsSystemLogQuery): Promise<OpsSystemLogListResponse> {
-  const { data } = await apiClient.get<OpsSystemLogListResponse>('/admin/ops/system-logs', { params })
+export async function listSystemLogs(
+  params: OpsSystemLogQuery,
+  options: OpsRequestOptions = {}
+): Promise<OpsSystemLogListResponse> {
+  const { data } = await apiClient.get<OpsSystemLogListResponse>('/admin/ops/system-logs', {
+    params,
+    signal: options.signal,
+  })
   return data
 }
 

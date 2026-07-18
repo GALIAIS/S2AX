@@ -22,8 +22,11 @@ func NewContentModerationHandler(svc *service.ContentModerationService) *Content
 type contentModerationConfigRequest struct {
 	Enabled              *bool               `json:"enabled"`
 	Mode                 *string             `json:"mode"`
+	EndpointType         *string             `json:"endpoint_type"`
 	BaseURL              *string             `json:"base_url"`
 	Model                *string             `json:"model"`
+	AuditPrompt          *string             `json:"audit_prompt"`
+	ConfidenceThreshold  *float64            `json:"confidence_threshold"`
 	APIKey               *string             `json:"api_key"`
 	APIKeys              *[]string           `json:"api_keys"`
 	APIKeysMode          string              `json:"api_keys_mode"`
@@ -34,6 +37,7 @@ type contentModerationConfigRequest struct {
 	AllGroups            *bool               `json:"all_groups"`
 	GroupIDs             *[]int64            `json:"group_ids"`
 	RecordNonHits        *bool               `json:"record_non_hits"`
+	ContextMessageLimit  *int                `json:"context_message_limit"`
 	Thresholds           *map[string]float64 `json:"thresholds"`
 	WorkerCount          *int                `json:"worker_count"`
 	QueueSize            *int                `json:"queue_size"`
@@ -52,16 +56,24 @@ type contentModerationConfigRequest struct {
 	PreHashCheckEnabled            *bool                                 `json:"pre_hash_check_enabled"`
 	BlockedKeywords                *[]string                             `json:"blocked_keywords"`
 	KeywordBlockingMode            *string                               `json:"keyword_blocking_mode"`
+	BuiltinRegexEnabled            *bool                                 `json:"builtin_regex_enabled"`
+	BuiltinRegexThreshold          *int                                  `json:"builtin_regex_threshold"`
+	BuiltinRegexStrictThreshold    *int                                  `json:"builtin_regex_strict_threshold"`
+	BuiltinRegexRules              *[]service.ContentModerationRegexRule `json:"builtin_regex_rules"`
+	DisabledBuiltinRegexRules      *[]string                             `json:"disabled_builtin_regex_rules"`
 	ModelFilter                    *service.ContentModerationModelFilter `json:"model_filter"`
 }
 
 type contentModerationAPIKeyTestRequest struct {
-	APIKeys   []string `json:"api_keys"`
-	BaseURL   string   `json:"base_url"`
-	Model     string   `json:"model"`
-	TimeoutMS int      `json:"timeout_ms"`
-	Prompt    string   `json:"prompt"`
-	Images    []string `json:"images"`
+	APIKeys             []string `json:"api_keys"`
+	EndpointType        string   `json:"endpoint_type"`
+	BaseURL             string   `json:"base_url"`
+	Model               string   `json:"model"`
+	AuditPrompt         string   `json:"audit_prompt"`
+	ConfidenceThreshold float64  `json:"confidence_threshold"`
+	TimeoutMS           int      `json:"timeout_ms"`
+	Prompt              string   `json:"prompt"`
+	Images              []string `json:"images"`
 }
 
 type contentModerationHashRequest struct {
@@ -86,8 +98,11 @@ func (h *ContentModerationHandler) UpdateConfig(c *gin.Context) {
 	cfg, err := h.service.UpdateConfig(c.Request.Context(), service.UpdateContentModerationConfigInput{
 		Enabled:                        req.Enabled,
 		Mode:                           req.Mode,
+		EndpointType:                   req.EndpointType,
 		BaseURL:                        req.BaseURL,
 		Model:                          req.Model,
+		AuditPrompt:                    req.AuditPrompt,
+		ConfidenceThreshold:            req.ConfidenceThreshold,
 		APIKey:                         req.APIKey,
 		APIKeys:                        req.APIKeys,
 		APIKeysMode:                    req.APIKeysMode,
@@ -98,6 +113,7 @@ func (h *ContentModerationHandler) UpdateConfig(c *gin.Context) {
 		AllGroups:                      req.AllGroups,
 		GroupIDs:                       req.GroupIDs,
 		RecordNonHits:                  req.RecordNonHits,
+		ContextMessageLimit:            req.ContextMessageLimit,
 		Thresholds:                     req.Thresholds,
 		WorkerCount:                    req.WorkerCount,
 		QueueSize:                      req.QueueSize,
@@ -114,6 +130,11 @@ func (h *ContentModerationHandler) UpdateConfig(c *gin.Context) {
 		PreHashCheckEnabled:            req.PreHashCheckEnabled,
 		BlockedKeywords:                req.BlockedKeywords,
 		KeywordBlockingMode:            req.KeywordBlockingMode,
+		BuiltinRegexEnabled:            req.BuiltinRegexEnabled,
+		BuiltinRegexThreshold:          req.BuiltinRegexThreshold,
+		BuiltinRegexStrictThreshold:    req.BuiltinRegexStrictThreshold,
+		BuiltinRegexRules:              req.BuiltinRegexRules,
+		DisabledBuiltinRegexRules:      req.DisabledBuiltinRegexRules,
 		ModelFilter:                    req.ModelFilter,
 	})
 	if err != nil {
@@ -130,12 +151,15 @@ func (h *ContentModerationHandler) TestAPIKeys(c *gin.Context) {
 		return
 	}
 	result, err := h.service.TestAPIKeys(c.Request.Context(), service.TestContentModerationAPIKeysInput{
-		APIKeys:   req.APIKeys,
-		BaseURL:   req.BaseURL,
-		Model:     req.Model,
-		TimeoutMS: req.TimeoutMS,
-		Prompt:    req.Prompt,
-		Images:    req.Images,
+		APIKeys:             req.APIKeys,
+		EndpointType:        req.EndpointType,
+		BaseURL:             req.BaseURL,
+		Model:               req.Model,
+		AuditPrompt:         req.AuditPrompt,
+		ConfidenceThreshold: req.ConfidenceThreshold,
+		TimeoutMS:           req.TimeoutMS,
+		Prompt:              req.Prompt,
+		Images:              req.Images,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

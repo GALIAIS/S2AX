@@ -871,6 +871,7 @@ func ensureOpenAIResponsesImageGenerationTool(reqBody map[string]any) bool {
 
 	tool := map[string]any{
 		"type":          "image_generation",
+		"model":         openAIImagesDefaultToolModel,
 		"output_format": "png",
 	}
 

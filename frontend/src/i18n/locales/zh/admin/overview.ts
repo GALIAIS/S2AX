@@ -371,6 +371,9 @@ export default {
     },
 
     affiliates: {
+      invitesTitle: '邀请关系',
+      rebatesTitle: '返利记录',
+      transfersTitle: '返利提取',
       invitesDescription: '查看全站邀请关系和被邀请用户累计返利',
       rebatesDescription: '查看每一笔产生返利的充值订单',
       transfersDescription: '查看返利额度转入账户余额的提取流水',
@@ -537,6 +540,16 @@ export default {
       failedToUpdate: '更新用户失败',
       failedToDelete: '删除用户失败',
       failedToToggle: '更新用户状态失败',
+      bulkSelected: '已选择 {count} 个用户',
+      bulkActionTitle: '批量操作确认',
+      bulkActionConfirm: '确定要对已选择的 {count} 个用户执行“{action}”吗？管理员账号不会被批量操作。',
+      bulkSuccess: '已对 {count} 个用户执行“{action}”',
+      bulkPartial: '批量操作完成：成功 {success} 个，失败 {failed} 个',
+      bulk: {
+        enable: '启用',
+        disable: '禁用',
+        delete: '删除'
+      },
       failedToLoadApiKeys: '加载用户 API 密钥失败',
       deleteConfirm: "确定要删除用户 '{email}' 吗？此操作无法撤销。",
       roles: {
@@ -616,6 +629,16 @@ export default {
       depositAmount: '充值金额',
       withdrawAmount: '退款金额',
       withdrawAll: '全部',
+      assetType: '资产类型',
+      accountBalance: '账户余额',
+      virtualCurrency: '虚拟货币',
+      selectVirtualCurrency: '选择虚拟货币',
+      noVirtualCurrencies: '暂无已启用的虚拟货币',
+      virtualCurrencyLoadFailed: '加载虚拟货币失败',
+      virtualBalanceLoadFailed: '加载虚拟货币余额失败',
+      virtualAmountHint: '最多支持 {scale} 位小数',
+      virtualDepositReason: '管理员充值',
+      virtualWithdrawReason: '管理员退款',
       depositNotesPlaceholder: '例如：新用户注册奖励、活动充值、补偿充值等',
       withdrawNotesPlaceholder: '例如：服务问题退款、错误充值退回、账户注销退款等',
       notesOptional: '备注为可选项，有助于未来查账',
@@ -813,7 +836,7 @@ export default {
         descriptionLabel: '描述',
         descriptionPlaceholder: '请输入描述（可选）',
         rateMultiplierLabel: '费率倍数',
-        rateMultiplierHint: '1.0 = 标准费率，0.5 = 半价，2.0 = 双倍',
+        rateMultiplierHint: '1.0 = 标准费率，0.5 = 半价，2.0 = 双倍；非零值最低为 0.000001',
         rpmLimit: '每分钟请求数 (RPM)',
         rpmLimitPlaceholder: '0 表示不限制',
         rpmLimitHint: '每用户在本分组每分钟最大请求数，0 = 不限制；一旦设置即接管该用户的限流（覆盖用户级 rpm_limit）',
@@ -841,7 +864,7 @@ export default {
         exampleContent:
           '公开分组费率 0.8，您可以创建一个费率 0.7 的专属分组，手动分配给 VIP 用户，让他们享受更优惠的价格。'
       },
-      rateMultiplierHint: '1.0 = 标准费率，0.5 = 半价，2.0 = 双倍',
+      rateMultiplierHint: '1.0 = 标准费率，0.5 = 半价，2.0 = 双倍；非零值最低为 0.000001',
       platforms: {
         all: '全部平台',
         anthropic: 'Anthropic',
@@ -892,6 +915,11 @@ export default {
       groupDeleted: '分组删除成功',
       failedToCreate: '创建分组失败',
       failedToUpdate: '更新分组失败',
+      selectedCount: '已选 {count} 个分组',
+      bulkDelete: '批量删除',
+      bulkDeleteConfirm: '确定要删除选中的 {count} 个分组吗？此操作不可撤销。',
+      bulkDeleteSuccess: '已删除 {count} 个分组',
+      bulkDeletePartial: '已删除 {success} 个分组，{failed} 个删除失败',
       nameRequired: '请输入分组名称',
       rateMultipliers: '专属倍率',
       rateMultipliersTitle: '分组专属倍率管理',

@@ -36146,28 +36146,34 @@ func (m *ProxyMutation) ResetEdge(name string) error {
 // RedeemCodeMutation represents an operation that mutates the RedeemCode nodes in the graph.
 type RedeemCodeMutation struct {
 	config
-	op               Op
-	typ              string
-	id               *int64
-	code             *string
-	_type            *string
-	value            *float64
-	addvalue         *float64
-	status           *string
-	used_at          *time.Time
-	notes            *string
-	created_at       *time.Time
-	expires_at       *time.Time
-	validity_days    *int
-	addvalidity_days *int
-	clearedFields    map[string]struct{}
-	user             *int64
-	cleareduser      bool
-	group            *int64
-	clearedgroup     bool
-	done             bool
-	oldValue         func(context.Context) (*RedeemCode, error)
-	predicates       []predicate.RedeemCode
+	op                       Op
+	typ                      string
+	id                       *int64
+	code                     *string
+	_type                    *string
+	value                    *float64
+	addvalue                 *float64
+	status                   *string
+	used_at                  *time.Time
+	notes                    *string
+	created_at               *time.Time
+	expires_at               *time.Time
+	validity_days            *int
+	addvalidity_days         *int
+	currency_id              *int64
+	addcurrency_id           *int64
+	currency_amount_units    *int64
+	addcurrency_amount_units *int64
+	currency_group_id        *int64
+	addcurrency_group_id     *int64
+	clearedFields            map[string]struct{}
+	user                     *int64
+	cleareduser              bool
+	group                    *int64
+	clearedgroup             bool
+	done                     bool
+	oldValue                 func(context.Context) (*RedeemCode, error)
+	predicates               []predicate.RedeemCode
 }
 
 var _ ent.Mutation = (*RedeemCodeMutation)(nil)
@@ -36769,6 +36775,216 @@ func (m *RedeemCodeMutation) ResetValidityDays() {
 	m.addvalidity_days = nil
 }
 
+// SetCurrencyID sets the "currency_id" field.
+func (m *RedeemCodeMutation) SetCurrencyID(i int64) {
+	m.currency_id = &i
+	m.addcurrency_id = nil
+}
+
+// CurrencyID returns the value of the "currency_id" field in the mutation.
+func (m *RedeemCodeMutation) CurrencyID() (r int64, exists bool) {
+	v := m.currency_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCurrencyID returns the old "currency_id" field's value of the RedeemCode entity.
+// If the RedeemCode object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RedeemCodeMutation) OldCurrencyID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCurrencyID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCurrencyID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCurrencyID: %w", err)
+	}
+	return oldValue.CurrencyID, nil
+}
+
+// AddCurrencyID adds i to the "currency_id" field.
+func (m *RedeemCodeMutation) AddCurrencyID(i int64) {
+	if m.addcurrency_id != nil {
+		*m.addcurrency_id += i
+	} else {
+		m.addcurrency_id = &i
+	}
+}
+
+// AddedCurrencyID returns the value that was added to the "currency_id" field in this mutation.
+func (m *RedeemCodeMutation) AddedCurrencyID() (r int64, exists bool) {
+	v := m.addcurrency_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearCurrencyID clears the value of the "currency_id" field.
+func (m *RedeemCodeMutation) ClearCurrencyID() {
+	m.currency_id = nil
+	m.addcurrency_id = nil
+	m.clearedFields[redeemcode.FieldCurrencyID] = struct{}{}
+}
+
+// CurrencyIDCleared returns if the "currency_id" field was cleared in this mutation.
+func (m *RedeemCodeMutation) CurrencyIDCleared() bool {
+	_, ok := m.clearedFields[redeemcode.FieldCurrencyID]
+	return ok
+}
+
+// ResetCurrencyID resets all changes to the "currency_id" field.
+func (m *RedeemCodeMutation) ResetCurrencyID() {
+	m.currency_id = nil
+	m.addcurrency_id = nil
+	delete(m.clearedFields, redeemcode.FieldCurrencyID)
+}
+
+// SetCurrencyAmountUnits sets the "currency_amount_units" field.
+func (m *RedeemCodeMutation) SetCurrencyAmountUnits(i int64) {
+	m.currency_amount_units = &i
+	m.addcurrency_amount_units = nil
+}
+
+// CurrencyAmountUnits returns the value of the "currency_amount_units" field in the mutation.
+func (m *RedeemCodeMutation) CurrencyAmountUnits() (r int64, exists bool) {
+	v := m.currency_amount_units
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCurrencyAmountUnits returns the old "currency_amount_units" field's value of the RedeemCode entity.
+// If the RedeemCode object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RedeemCodeMutation) OldCurrencyAmountUnits(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCurrencyAmountUnits is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCurrencyAmountUnits requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCurrencyAmountUnits: %w", err)
+	}
+	return oldValue.CurrencyAmountUnits, nil
+}
+
+// AddCurrencyAmountUnits adds i to the "currency_amount_units" field.
+func (m *RedeemCodeMutation) AddCurrencyAmountUnits(i int64) {
+	if m.addcurrency_amount_units != nil {
+		*m.addcurrency_amount_units += i
+	} else {
+		m.addcurrency_amount_units = &i
+	}
+}
+
+// AddedCurrencyAmountUnits returns the value that was added to the "currency_amount_units" field in this mutation.
+func (m *RedeemCodeMutation) AddedCurrencyAmountUnits() (r int64, exists bool) {
+	v := m.addcurrency_amount_units
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearCurrencyAmountUnits clears the value of the "currency_amount_units" field.
+func (m *RedeemCodeMutation) ClearCurrencyAmountUnits() {
+	m.currency_amount_units = nil
+	m.addcurrency_amount_units = nil
+	m.clearedFields[redeemcode.FieldCurrencyAmountUnits] = struct{}{}
+}
+
+// CurrencyAmountUnitsCleared returns if the "currency_amount_units" field was cleared in this mutation.
+func (m *RedeemCodeMutation) CurrencyAmountUnitsCleared() bool {
+	_, ok := m.clearedFields[redeemcode.FieldCurrencyAmountUnits]
+	return ok
+}
+
+// ResetCurrencyAmountUnits resets all changes to the "currency_amount_units" field.
+func (m *RedeemCodeMutation) ResetCurrencyAmountUnits() {
+	m.currency_amount_units = nil
+	m.addcurrency_amount_units = nil
+	delete(m.clearedFields, redeemcode.FieldCurrencyAmountUnits)
+}
+
+// SetCurrencyGroupID sets the "currency_group_id" field.
+func (m *RedeemCodeMutation) SetCurrencyGroupID(i int64) {
+	m.currency_group_id = &i
+	m.addcurrency_group_id = nil
+}
+
+// CurrencyGroupID returns the value of the "currency_group_id" field in the mutation.
+func (m *RedeemCodeMutation) CurrencyGroupID() (r int64, exists bool) {
+	v := m.currency_group_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCurrencyGroupID returns the old "currency_group_id" field's value of the RedeemCode entity.
+// If the RedeemCode object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RedeemCodeMutation) OldCurrencyGroupID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCurrencyGroupID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCurrencyGroupID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCurrencyGroupID: %w", err)
+	}
+	return oldValue.CurrencyGroupID, nil
+}
+
+// AddCurrencyGroupID adds i to the "currency_group_id" field.
+func (m *RedeemCodeMutation) AddCurrencyGroupID(i int64) {
+	if m.addcurrency_group_id != nil {
+		*m.addcurrency_group_id += i
+	} else {
+		m.addcurrency_group_id = &i
+	}
+}
+
+// AddedCurrencyGroupID returns the value that was added to the "currency_group_id" field in this mutation.
+func (m *RedeemCodeMutation) AddedCurrencyGroupID() (r int64, exists bool) {
+	v := m.addcurrency_group_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearCurrencyGroupID clears the value of the "currency_group_id" field.
+func (m *RedeemCodeMutation) ClearCurrencyGroupID() {
+	m.currency_group_id = nil
+	m.addcurrency_group_id = nil
+	m.clearedFields[redeemcode.FieldCurrencyGroupID] = struct{}{}
+}
+
+// CurrencyGroupIDCleared returns if the "currency_group_id" field was cleared in this mutation.
+func (m *RedeemCodeMutation) CurrencyGroupIDCleared() bool {
+	_, ok := m.clearedFields[redeemcode.FieldCurrencyGroupID]
+	return ok
+}
+
+// ResetCurrencyGroupID resets all changes to the "currency_group_id" field.
+func (m *RedeemCodeMutation) ResetCurrencyGroupID() {
+	m.currency_group_id = nil
+	m.addcurrency_group_id = nil
+	delete(m.clearedFields, redeemcode.FieldCurrencyGroupID)
+}
+
 // SetUserID sets the "user" edge to the User entity by id.
 func (m *RedeemCodeMutation) SetUserID(id int64) {
 	m.user = &id
@@ -36870,7 +37086,7 @@ func (m *RedeemCodeMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *RedeemCodeMutation) Fields() []string {
-	fields := make([]string, 0, 11)
+	fields := make([]string, 0, 14)
 	if m.code != nil {
 		fields = append(fields, redeemcode.FieldCode)
 	}
@@ -36904,6 +37120,15 @@ func (m *RedeemCodeMutation) Fields() []string {
 	if m.validity_days != nil {
 		fields = append(fields, redeemcode.FieldValidityDays)
 	}
+	if m.currency_id != nil {
+		fields = append(fields, redeemcode.FieldCurrencyID)
+	}
+	if m.currency_amount_units != nil {
+		fields = append(fields, redeemcode.FieldCurrencyAmountUnits)
+	}
+	if m.currency_group_id != nil {
+		fields = append(fields, redeemcode.FieldCurrencyGroupID)
+	}
 	return fields
 }
 
@@ -36934,6 +37159,12 @@ func (m *RedeemCodeMutation) Field(name string) (ent.Value, bool) {
 		return m.GroupID()
 	case redeemcode.FieldValidityDays:
 		return m.ValidityDays()
+	case redeemcode.FieldCurrencyID:
+		return m.CurrencyID()
+	case redeemcode.FieldCurrencyAmountUnits:
+		return m.CurrencyAmountUnits()
+	case redeemcode.FieldCurrencyGroupID:
+		return m.CurrencyGroupID()
 	}
 	return nil, false
 }
@@ -36965,6 +37196,12 @@ func (m *RedeemCodeMutation) OldField(ctx context.Context, name string) (ent.Val
 		return m.OldGroupID(ctx)
 	case redeemcode.FieldValidityDays:
 		return m.OldValidityDays(ctx)
+	case redeemcode.FieldCurrencyID:
+		return m.OldCurrencyID(ctx)
+	case redeemcode.FieldCurrencyAmountUnits:
+		return m.OldCurrencyAmountUnits(ctx)
+	case redeemcode.FieldCurrencyGroupID:
+		return m.OldCurrencyGroupID(ctx)
 	}
 	return nil, fmt.Errorf("unknown RedeemCode field %s", name)
 }
@@ -37051,6 +37288,27 @@ func (m *RedeemCodeMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetValidityDays(v)
 		return nil
+	case redeemcode.FieldCurrencyID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCurrencyID(v)
+		return nil
+	case redeemcode.FieldCurrencyAmountUnits:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCurrencyAmountUnits(v)
+		return nil
+	case redeemcode.FieldCurrencyGroupID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCurrencyGroupID(v)
+		return nil
 	}
 	return fmt.Errorf("unknown RedeemCode field %s", name)
 }
@@ -37065,6 +37323,15 @@ func (m *RedeemCodeMutation) AddedFields() []string {
 	if m.addvalidity_days != nil {
 		fields = append(fields, redeemcode.FieldValidityDays)
 	}
+	if m.addcurrency_id != nil {
+		fields = append(fields, redeemcode.FieldCurrencyID)
+	}
+	if m.addcurrency_amount_units != nil {
+		fields = append(fields, redeemcode.FieldCurrencyAmountUnits)
+	}
+	if m.addcurrency_group_id != nil {
+		fields = append(fields, redeemcode.FieldCurrencyGroupID)
+	}
 	return fields
 }
 
@@ -37077,6 +37344,12 @@ func (m *RedeemCodeMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedValue()
 	case redeemcode.FieldValidityDays:
 		return m.AddedValidityDays()
+	case redeemcode.FieldCurrencyID:
+		return m.AddedCurrencyID()
+	case redeemcode.FieldCurrencyAmountUnits:
+		return m.AddedCurrencyAmountUnits()
+	case redeemcode.FieldCurrencyGroupID:
+		return m.AddedCurrencyGroupID()
 	}
 	return nil, false
 }
@@ -37100,6 +37373,27 @@ func (m *RedeemCodeMutation) AddField(name string, value ent.Value) error {
 		}
 		m.AddValidityDays(v)
 		return nil
+	case redeemcode.FieldCurrencyID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddCurrencyID(v)
+		return nil
+	case redeemcode.FieldCurrencyAmountUnits:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddCurrencyAmountUnits(v)
+		return nil
+	case redeemcode.FieldCurrencyGroupID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddCurrencyGroupID(v)
+		return nil
 	}
 	return fmt.Errorf("unknown RedeemCode numeric field %s", name)
 }
@@ -37122,6 +37416,15 @@ func (m *RedeemCodeMutation) ClearedFields() []string {
 	}
 	if m.FieldCleared(redeemcode.FieldGroupID) {
 		fields = append(fields, redeemcode.FieldGroupID)
+	}
+	if m.FieldCleared(redeemcode.FieldCurrencyID) {
+		fields = append(fields, redeemcode.FieldCurrencyID)
+	}
+	if m.FieldCleared(redeemcode.FieldCurrencyAmountUnits) {
+		fields = append(fields, redeemcode.FieldCurrencyAmountUnits)
+	}
+	if m.FieldCleared(redeemcode.FieldCurrencyGroupID) {
+		fields = append(fields, redeemcode.FieldCurrencyGroupID)
 	}
 	return fields
 }
@@ -37151,6 +37454,15 @@ func (m *RedeemCodeMutation) ClearField(name string) error {
 		return nil
 	case redeemcode.FieldGroupID:
 		m.ClearGroupID()
+		return nil
+	case redeemcode.FieldCurrencyID:
+		m.ClearCurrencyID()
+		return nil
+	case redeemcode.FieldCurrencyAmountUnits:
+		m.ClearCurrencyAmountUnits()
+		return nil
+	case redeemcode.FieldCurrencyGroupID:
+		m.ClearCurrencyGroupID()
 		return nil
 	}
 	return fmt.Errorf("unknown RedeemCode nullable field %s", name)
@@ -37192,6 +37504,15 @@ func (m *RedeemCodeMutation) ResetField(name string) error {
 		return nil
 	case redeemcode.FieldValidityDays:
 		m.ResetValidityDays()
+		return nil
+	case redeemcode.FieldCurrencyID:
+		m.ResetCurrencyID()
+		return nil
+	case redeemcode.FieldCurrencyAmountUnits:
+		m.ResetCurrencyAmountUnits()
+		return nil
+	case redeemcode.FieldCurrencyGroupID:
+		m.ResetCurrencyGroupID()
 		return nil
 	}
 	return fmt.Errorf("unknown RedeemCode field %s", name)

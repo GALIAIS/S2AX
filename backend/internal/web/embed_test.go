@@ -150,7 +150,15 @@ func TestReplaceNoncePlaceholder(t *testing.T) {
 
 		result := replaceNoncePlaceholder(html, nonce)
 
-		assert.Equal(t, string(html), string(result))
+		assert.Equal(t, `<script nonce="abc123">console.log('test');</script>`, string(result))
+	})
+
+	t.Run("adds_nonce_to_all_script_tags_without_touching_content", func(t *testing.T) {
+		html := []byte(`<script src="app.js"></script><script>const markup = "<script>";</script><script nonce="old">ok</script>`)
+
+		result := replaceNoncePlaceholder(html, "abc123")
+
+		assert.Equal(t, `<script nonce="abc123" src="app.js"></script><script nonce="abc123">const markup = "<script>";</script><script nonce="old">ok</script>`, string(result))
 	})
 
 	t.Run("handles_empty_html", func(t *testing.T) {
@@ -453,7 +461,6 @@ func TestOverrideFilesNeverReceiveImmutableCacheHeaders(t *testing.T) {
 	require.NoError(t, os.WriteFile(filePath, []byte("override"), 0o644))
 
 	t.Run("frontend_server_override", func(t *testing.T) {
-		t.Parallel()
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest(http.MethodGet, "/"+cleanPath, nil)
@@ -464,7 +471,6 @@ func TestOverrideFilesNeverReceiveImmutableCacheHeaders(t *testing.T) {
 	})
 
 	t.Run("legacy_override", func(t *testing.T) {
-		t.Parallel()
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest(http.MethodGet, "/"+cleanPath, nil)
@@ -585,9 +591,9 @@ func TestFrontendServer_Middleware(t *testing.T) {
 
 		spaPaths := []string{
 			"/",
-			"/dashboard",
-			"/users/123",
-			"/settings/profile",
+			"/dashboard/",
+			"/users/123/",
+			"/settings/profile/",
 		}
 
 		for _, path := range spaPaths {
@@ -622,16 +628,18 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		assert.Contains(t, w.Header().Get("Content-Type"), "image/png")
 		assert.Empty(t, w.Header().Get("Cache-Control"))
 
-		entries, err := fs.ReadDir(server.distFS, "assets")
-		require.NoError(t, err)
 		fingerprintedPath := ""
-		for _, entry := range entries {
-			candidate := "assets/" + entry.Name()
+		err = fs.WalkDir(server.distFS, ".", func(candidate string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
 			if !entry.IsDir() && isFingerprintedEmbeddedAssetPath(candidate) {
 				fingerprintedPath = candidate
-				break
+				return fs.SkipAll
 			}
-		}
+			return nil
+		})
+		require.NoError(t, err)
 		require.NotEmpty(t, fingerprintedPath)
 
 		assetWriter := httptest.NewRecorder()
@@ -680,7 +688,7 @@ func TestNewFrontendServer(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.NotEmpty(t, server.baseHTML)
-		assert.Contains(t, string(server.baseHTML), "<!doctype html>")
+		assert.Contains(t, string(server.baseHTML), "<!DOCTYPE html>")
 	})
 }
 
@@ -719,7 +727,7 @@ func TestServeEmbeddedFrontend(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
-		assert.Contains(t, w.Body.String(), "<!doctype html>")
+		assert.Contains(t, w.Body.String(), "<!DOCTYPE html>")
 	})
 
 	t.Run("serves_index_html_for_spa_routes", func(t *testing.T) {
@@ -728,7 +736,7 @@ func TestServeEmbeddedFrontend(t *testing.T) {
 		router := gin.New()
 		router.Use(middleware)
 
-		spaPaths := []string{"/dashboard", "/users/123", "/settings"}
+		spaPaths := []string{"/dashboard/", "/users/123/", "/settings/"}
 
 		for _, path := range spaPaths {
 			t.Run(path, func(t *testing.T) {

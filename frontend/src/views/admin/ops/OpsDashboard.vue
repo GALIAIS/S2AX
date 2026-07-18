@@ -41,7 +41,7 @@
 
       <!-- Row: Concurrency + Throughput -->
       <div v-if="opsEnabled && !(loading && !hasLoadedOnce)" class="grid grid-cols-1 gap-6 lg:grid-cols-4">
-        <div class="lg:col-span-1 min-h-[360px]">
+        <div class="h-[360px] min-h-0 lg:col-span-1">
           <OpsConcurrencyCard :platform-filter="platform" :group-id-filter="groupId" :refresh-token="dashboardRefreshToken" />
         </div>
         <div class="lg:col-span-1 h-[360px]">
@@ -354,13 +354,13 @@ const switchTrend = ref<OpsThroughputTrendResponse | null>(null)
 const loadingSwitchTrend = ref(false)
 
 const latencyHistogram = ref<OpsLatencyHistogramResponse | null>(null)
-const loadingLatency = ref(false)
+const loadingLatency = ref(true)
 
 const errorTrend = ref<OpsErrorTrendResponse | null>(null)
-const loadingErrorTrend = ref(false)
+const loadingErrorTrend = ref(true)
 
 const errorDistribution = ref<OpsErrorDistributionResponse | null>(null)
-const loadingErrorDistribution = ref(false)
+const loadingErrorDistribution = ref(true)
 
 const selectedErrorId = ref<number | null>(null)
 const showErrorModal = ref(false)
@@ -555,7 +555,6 @@ async function refreshOverviewWithCancel(fetchSeq: number, signal: AbortSignal) 
     overview.value = data
   } catch (err: any) {
     if (fetchSeq !== dashboardFetchSeq || isCanceledRequest(err)) return
-    overview.value = null
     appStore.showError(err?.message || t('admin.ops.failedToLoadOverview'))
   }
 }
@@ -569,7 +568,6 @@ async function refreshSwitchTrendWithCancel(fetchSeq: number, signal: AbortSigna
     switchTrend.value = data
   } catch (err: any) {
     if (fetchSeq !== dashboardFetchSeq || isCanceledRequest(err)) return
-    switchTrend.value = null
     appStore.showError(err?.message || t('admin.ops.failedToLoadSwitchTrend'))
   } finally {
     if (fetchSeq === dashboardFetchSeq) {
@@ -587,7 +585,6 @@ async function refreshThroughputTrendWithCancel(fetchSeq: number, signal: AbortS
     throughputTrend.value = data
   } catch (err: any) {
     if (fetchSeq !== dashboardFetchSeq || isCanceledRequest(err)) return
-    throughputTrend.value = null
     appStore.showError(err?.message || t('admin.ops.failedToLoadThroughputTrend'))
   } finally {
     if (fetchSeq === dashboardFetchSeq) {
@@ -631,7 +628,6 @@ async function refreshLatencyHistogramWithCancel(fetchSeq: number, signal: Abort
     latencyHistogram.value = data
   } catch (err: any) {
     if (fetchSeq !== dashboardFetchSeq || isCanceledRequest(err)) return
-    latencyHistogram.value = null
     appStore.showError(err?.message || t('admin.ops.failedToLoadLatencyHistogram'))
   } finally {
     if (fetchSeq === dashboardFetchSeq) {
@@ -649,7 +645,6 @@ async function refreshErrorTrendWithCancel(fetchSeq: number, signal: AbortSignal
     errorTrend.value = data
   } catch (err: any) {
     if (fetchSeq !== dashboardFetchSeq || isCanceledRequest(err)) return
-    errorTrend.value = null
     appStore.showError(err?.message || t('admin.ops.failedToLoadErrorTrend'))
   } finally {
     if (fetchSeq === dashboardFetchSeq) {
@@ -667,7 +662,6 @@ async function refreshErrorDistributionWithCancel(fetchSeq: number, signal: Abor
     errorDistribution.value = data
   } catch (err: any) {
     if (fetchSeq !== dashboardFetchSeq || isCanceledRequest(err)) return
-    errorDistribution.value = null
     appStore.showError(err?.message || t('admin.ops.failedToLoadErrorDistribution'))
   } finally {
     if (fetchSeq === dashboardFetchSeq) {

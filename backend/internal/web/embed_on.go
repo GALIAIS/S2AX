@@ -97,10 +97,29 @@ func (s *FrontendServer) Middleware() gin.HandlerFunc {
 		if cleanPath == "" {
 			cleanPath = "index.html"
 		}
+		normalizedPath := strings.TrimSuffix(cleanPath, "/")
+		if normalizedPath == "" {
+			normalizedPath = "index.html"
+		}
+		isDirectory := normalizedPath != "index.html" && s.isDirectory(normalizedPath)
+		if isDirectory && !strings.HasSuffix(path, "/") {
+			c.Redirect(http.StatusPermanentRedirect, path+"/")
+			c.Abort()
+			return
+		}
 
 		// For index.html or SPA routes, serve with injected settings
-		if cleanPath == "index.html" || !s.fileExists(cleanPath) {
+		pathExists := s.fileExists(cleanPath) || (strings.HasSuffix(cleanPath, "/") && s.fileExists(normalizedPath))
+		if cleanPath == "index.html" || !pathExists {
 			s.serveIndexHTML(c)
+			return
+		}
+		if isDirectory {
+			s.serveRouteHTML(c, normalizedPath+"/index.html")
+			return
+		}
+		if strings.HasSuffix(cleanPath, ".html") {
+			s.serveRouteHTML(c, cleanPath)
 			return
 		}
 
@@ -123,6 +142,16 @@ func (s *FrontendServer) fileExists(path string) bool {
 	}
 	_ = file.Close()
 	return true
+}
+
+func (s *FrontendServer) isDirectory(path string) bool {
+	file, err := s.distFS.Open(path)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	return err == nil && info.IsDir()
 }
 
 // tryServeOverride checks if a local override file exists and serves it.
@@ -172,7 +201,7 @@ func (s *FrontendServer) serveIndexHTML(c *gin.Context) {
 	settings, err := s.settings.GetPublicSettingsForInjection(ctx)
 	if err != nil {
 		// Fallback: serve without injection
-		c.Data(http.StatusOK, "text/html; charset=utf-8", s.baseHTML)
+		c.Data(http.StatusOK, "text/html; charset=utf-8", replaceNoncePlaceholder(s.baseHTML, nonce))
 		c.Abort()
 		return
 	}
@@ -180,7 +209,7 @@ func (s *FrontendServer) serveIndexHTML(c *gin.Context) {
 	settingsJSON, err := json.Marshal(settings)
 	if err != nil {
 		// Fallback: serve without injection
-		c.Data(http.StatusOK, "text/html; charset=utf-8", s.baseHTML)
+		c.Data(http.StatusOK, "text/html; charset=utf-8", replaceNoncePlaceholder(s.baseHTML, nonce))
 		c.Abort()
 		return
 	}
@@ -200,14 +229,47 @@ func (s *FrontendServer) serveIndexHTML(c *gin.Context) {
 	c.Abort()
 }
 
+func (s *FrontendServer) serveRouteHTML(c *gin.Context, filePath string) {
+	file, err := s.distFS.Open(filePath)
+	if err != nil {
+		c.String(http.StatusNotFound, "Frontend route not found")
+		c.Abort()
+		return
+	}
+	defer func() { _ = file.Close() }()
+
+	content, err := io.ReadAll(file)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Failed to read frontend route")
+		c.Abort()
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+	defer cancel()
+	if settings, settingsErr := s.settings.GetPublicSettingsForInjection(ctx); settingsErr == nil {
+		if settingsJSON, marshalErr := json.Marshal(settings); marshalErr == nil {
+			content = injectSettingsIntoHTML(content, settingsJSON)
+		}
+	}
+
+	c.Header("Cache-Control", "no-cache")
+	c.Data(http.StatusOK, "text/html; charset=utf-8", replaceNoncePlaceholder(content, middleware.GetNonceFromContext(c)))
+	c.Abort()
+}
+
 func (s *FrontendServer) injectSettings(settingsJSON []byte) []byte {
+	return injectSettingsIntoHTML(s.baseHTML, settingsJSON)
+}
+
+func injectSettingsIntoHTML(baseHTML, settingsJSON []byte) []byte {
 	// Create the script tag to inject with nonce placeholder
 	// The placeholder will be replaced with actual nonce at request time
 	script := []byte(`<script nonce="` + NonceHTMLPlaceholder + `">window.__APP_CONFIG__=` + string(settingsJSON) + `;</script>`)
 
 	// Inject before </head>
 	headClose := []byte("</head>")
-	result := bytes.Replace(s.baseHTML, headClose, append(script, headClose...), 1)
+	result := bytes.Replace(baseHTML, headClose, append(script, headClose...), 1)
 
 	// Replace <title> with custom site name so the browser tab shows it immediately
 	result = injectSiteTitle(result, settingsJSON)
@@ -242,7 +304,63 @@ func injectSiteTitle(html, settingsJSON []byte) []byte {
 
 // replaceNoncePlaceholder replaces the nonce placeholder with actual nonce value
 func replaceNoncePlaceholder(html []byte, nonce string) []byte {
-	return bytes.ReplaceAll(html, []byte(NonceHTMLPlaceholder), []byte(nonce))
+	html = bytes.ReplaceAll(html, []byte(NonceHTMLPlaceholder), []byte(nonce))
+	if nonce == "" {
+		return html
+	}
+
+	// Next.js emits inline bootstrap scripts without nonce attributes. Add the
+	// request nonce to every opening script tag so the embedded export remains
+	// compatible with the server CSP without enabling unsafe-inline.
+	const scriptPrefix = "<script"
+	const scriptClose = "</script>"
+	var result bytes.Buffer
+	result.Grow(len(html) + bytes.Count(html, []byte(scriptPrefix))*(len(nonce)+10))
+	for offset := 0; offset < len(html); {
+		relStart := bytes.Index(html[offset:], []byte(scriptPrefix))
+		if relStart == -1 {
+			result.Write(html[offset:])
+			break
+		}
+		start := offset + relStart
+		if start+len(scriptPrefix) >= len(html) || !isScriptTagBoundary(html[start+len(scriptPrefix)]) {
+			result.Write(html[offset : start+len(scriptPrefix)])
+			offset = start + len(scriptPrefix)
+			continue
+		}
+
+		relEnd := bytes.IndexByte(html[start:], '>')
+		if relEnd == -1 {
+			result.Write(html[offset:])
+			break
+		}
+		end := start + relEnd + 1
+		result.Write(html[offset:start])
+		tag := html[start:end]
+		if bytes.Contains(tag, []byte("nonce=")) {
+			result.Write(tag)
+		} else {
+			result.WriteString(scriptPrefix)
+			result.WriteString(` nonce="`)
+			result.WriteString(nonce)
+			result.WriteByte('"')
+			result.Write(tag[len(scriptPrefix):])
+		}
+
+		contentEnd := bytes.Index(html[end:], []byte(scriptClose))
+		if contentEnd == -1 {
+			result.Write(html[end:])
+			break
+		}
+		closeEnd := end + contentEnd + len(scriptClose)
+		result.Write(html[end:closeEnd])
+		offset = closeEnd
+	}
+	return result.Bytes()
+}
+
+func isScriptTagBoundary(char byte) bool {
+	return char == '>' || char == '/' || char == ' ' || char == '\t' || char == '\r' || char == '\n'
 }
 
 // ServeEmbeddedFrontend returns a middleware for serving embedded frontend
@@ -267,9 +385,31 @@ func ServeEmbeddedFrontend() gin.HandlerFunc {
 		if cleanPath == "" {
 			cleanPath = "index.html"
 		}
+		normalizedPath := strings.TrimSuffix(cleanPath, "/")
+		if normalizedPath == "" {
+			normalizedPath = "index.html"
+		}
+		if normalizedPath == "index.html" {
+			serveIndexHTML(c, distFS)
+			return
+		}
 
-		if file, err := distFS.Open(cleanPath); err == nil {
+		if file, err := distFS.Open(normalizedPath); err == nil {
+			info, statErr := file.Stat()
 			_ = file.Close()
+			if statErr == nil && info.IsDir() && !strings.HasSuffix(path, "/") {
+				c.Redirect(http.StatusPermanentRedirect, path+"/")
+				c.Abort()
+				return
+			}
+			if statErr == nil && info.IsDir() {
+				serveStaticHTML(c, distFS, normalizedPath+"/index.html")
+				return
+			}
+			if strings.HasSuffix(normalizedPath, ".html") {
+				serveStaticHTML(c, distFS, normalizedPath)
+				return
+			}
 			// Try local override first
 			if tryServeOverrideFile(c, overrideDir, cleanPath) {
 				return
@@ -317,7 +457,11 @@ func shouldBypassEmbeddedFrontend(path string) bool {
 }
 
 func serveIndexHTML(c *gin.Context, fsys fs.FS) {
-	file, err := fsys.Open("index.html")
+	serveStaticHTML(c, fsys, "index.html")
+}
+
+func serveStaticHTML(c *gin.Context, fsys fs.FS, filePath string) {
+	file, err := fsys.Open(filePath)
 	if err != nil {
 		c.String(http.StatusNotFound, "Frontend not found")
 		c.Abort()
@@ -332,7 +476,7 @@ func serveIndexHTML(c *gin.Context, fsys fs.FS) {
 		return
 	}
 
-	c.Data(http.StatusOK, "text/html; charset=utf-8", content)
+	c.Data(http.StatusOK, "text/html; charset=utf-8", replaceNoncePlaceholder(content, middleware.GetNonceFromContext(c)))
 	c.Abort()
 }
 

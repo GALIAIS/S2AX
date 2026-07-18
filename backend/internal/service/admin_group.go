@@ -130,8 +130,8 @@ func defaultAllowImageGenerationForPlatform(platform string) bool {
 }
 
 func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error) {
-	if input.RateMultiplier <= 0 {
-		return nil, errors.New("rate_multiplier must be > 0")
+	if err := ValidateRateMultiplier(input.RateMultiplier, false); err != nil {
+		return nil, fmt.Errorf("rate_multiplier: %w", err)
 	}
 
 	platform := input.Platform
@@ -159,22 +159,22 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	webSearchPricePerCall := normalizePrice(input.WebSearchPricePerCall)
 	imageRateMultiplier := 1.0
 	if input.ImageRateMultiplier != nil {
-		if *input.ImageRateMultiplier < 0 {
-			return nil, errors.New("image_rate_multiplier must be >= 0")
+		if err := ValidateRateMultiplier(*input.ImageRateMultiplier, true); err != nil {
+			return nil, fmt.Errorf("image_rate_multiplier: %w", err)
 		}
 		imageRateMultiplier = *input.ImageRateMultiplier
 	}
 	batchImageDiscountMultiplier := defaultBatchImageDiscountMultiplier
 	if input.BatchImageDiscountMultiplier != nil {
-		if *input.BatchImageDiscountMultiplier < 0 {
-			return nil, errors.New("batch_image_discount_multiplier must be >= 0")
+		if err := ValidateRateMultiplier(*input.BatchImageDiscountMultiplier, true); err != nil {
+			return nil, fmt.Errorf("batch_image_discount_multiplier: %w", err)
 		}
 		batchImageDiscountMultiplier = *input.BatchImageDiscountMultiplier
 	}
 	batchImageHoldMultiplier := defaultBatchImageHoldMultiplier
 	if input.BatchImageHoldMultiplier != nil {
-		if *input.BatchImageHoldMultiplier < 0 {
-			return nil, errors.New("batch_image_hold_multiplier must be >= 0")
+		if err := ValidateRateMultiplier(*input.BatchImageHoldMultiplier, true); err != nil {
+			return nil, fmt.Errorf("batch_image_hold_multiplier: %w", err)
 		}
 		batchImageHoldMultiplier = *input.BatchImageHoldMultiplier
 	}
@@ -185,8 +185,8 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	}
 	videoRateMultiplier := 1.0
 	if input.VideoRateMultiplier != nil {
-		if *input.VideoRateMultiplier < 0 {
-			return nil, errors.New("video_rate_multiplier must be >= 0")
+		if err := ValidateRateMultiplier(*input.VideoRateMultiplier, true); err != nil {
+			return nil, fmt.Errorf("video_rate_multiplier: %w", err)
 		}
 		videoRateMultiplier = *input.VideoRateMultiplier
 	}
@@ -441,8 +441,8 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		group.Platform = input.Platform
 	}
 	if input.RateMultiplier != nil {
-		if *input.RateMultiplier <= 0 {
-			return nil, errors.New("rate_multiplier must be > 0")
+		if err := ValidateRateMultiplier(*input.RateMultiplier, false); err != nil {
+			return nil, fmt.Errorf("rate_multiplier: %w", err)
 		}
 		group.RateMultiplier = *input.RateMultiplier
 	}
@@ -476,20 +476,20 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		group.ImageRateIndependent = *input.ImageRateIndependent
 	}
 	if input.ImageRateMultiplier != nil {
-		if *input.ImageRateMultiplier < 0 {
-			return nil, errors.New("image_rate_multiplier must be >= 0")
+		if err := ValidateRateMultiplier(*input.ImageRateMultiplier, true); err != nil {
+			return nil, fmt.Errorf("image_rate_multiplier: %w", err)
 		}
 		group.ImageRateMultiplier = *input.ImageRateMultiplier
 	}
 	if input.BatchImageDiscountMultiplier != nil {
-		if *input.BatchImageDiscountMultiplier < 0 {
-			return nil, errors.New("batch_image_discount_multiplier must be >= 0")
+		if err := ValidateRateMultiplier(*input.BatchImageDiscountMultiplier, true); err != nil {
+			return nil, fmt.Errorf("batch_image_discount_multiplier: %w", err)
 		}
 		group.BatchImageDiscountMultiplier = *input.BatchImageDiscountMultiplier
 	}
 	if input.BatchImageHoldMultiplier != nil {
-		if *input.BatchImageHoldMultiplier < 0 {
-			return nil, errors.New("batch_image_hold_multiplier must be >= 0")
+		if err := ValidateRateMultiplier(*input.BatchImageHoldMultiplier, true); err != nil {
+			return nil, fmt.Errorf("batch_image_hold_multiplier: %w", err)
 		}
 		group.BatchImageHoldMultiplier = *input.BatchImageHoldMultiplier
 	}
@@ -503,8 +503,8 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		group.VideoRateIndependent = *input.VideoRateIndependent
 	}
 	if input.VideoRateMultiplier != nil {
-		if *input.VideoRateMultiplier < 0 {
-			return nil, errors.New("video_rate_multiplier must be >= 0")
+		if err := ValidateRateMultiplier(*input.VideoRateMultiplier, true); err != nil {
+			return nil, fmt.Errorf("video_rate_multiplier: %w", err)
 		}
 		group.VideoRateMultiplier = *input.VideoRateMultiplier
 	}
@@ -764,8 +764,8 @@ func (s *adminServiceImpl) BatchSetGroupRateMultipliers(ctx context.Context, gro
 		return nil
 	}
 	for _, e := range entries {
-		if e.RateMultiplier <= 0 {
-			return fmt.Errorf("rate_multiplier must be > 0 (user_id=%d)", e.UserID)
+		if err := ValidateRateMultiplier(e.RateMultiplier, false); err != nil {
+			return fmt.Errorf("rate_multiplier (user_id=%d): %w", e.UserID, err)
 		}
 	}
 	return s.userGroupRateRepo.SyncGroupRateMultipliers(ctx, groupID, entries)

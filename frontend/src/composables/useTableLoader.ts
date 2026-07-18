@@ -2,6 +2,7 @@ import { ref, reactive, onUnmounted, toRaw } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import type { BasePaginationResponse, FetchOptions } from '@/types'
 import { getPersistedPageSize, setPersistedPageSize } from './usePersistedPageSize'
+import { useInitialLoading } from './useInitialLoading'
 
 interface PaginationState {
   page: number
@@ -25,7 +26,11 @@ export function useTableLoader<T, P extends Record<string, any>>(options: TableL
   const { fetchFn, initialParams, pageSize, debounceMs = 300 } = options
 
   const items = ref<T[]>([])
-  const loading = ref(false)
+  // Start in the initial-loading state so the first paint is stable instead of
+  // rendering an empty table before the mounted request begins.
+  const loading = ref(true)
+  const { isInitialLoading, isRefreshing } = useInitialLoading(loading)
+  const error = ref<unknown>(null)
   const params = reactive<P>({ ...(initialParams || {}) } as P)
   const pagination = reactive<PaginationState>({
     page: 1,
@@ -35,9 +40,12 @@ export function useTableLoader<T, P extends Record<string, any>>(options: TableL
   })
 
   let abortController: AbortController | null = null
+  let requestSequence = 0
 
-  const isAbortError = (error: any) => {
-    return error?.name === 'AbortError' || error?.code === 'ERR_CANCELED' || error?.name === 'CanceledError'
+  const isAbortError = (value: unknown) => {
+    if (!value || typeof value !== 'object') return false
+    const candidate = value as { name?: unknown; code?: unknown }
+    return candidate.name === 'AbortError' || candidate.code === 'ERR_CANCELED' || candidate.name === 'CanceledError'
   }
 
   const load = async () => {
@@ -46,7 +54,9 @@ export function useTableLoader<T, P extends Record<string, any>>(options: TableL
     }
     const currentController = new AbortController()
     abortController = currentController
+    const currentSequence = ++requestSequence
     loading.value = true
+    error.value = null
 
     try {
       const response = await fetchFn(
@@ -56,13 +66,15 @@ export function useTableLoader<T, P extends Record<string, any>>(options: TableL
         { signal: currentController.signal }
       )
 
+      if (currentSequence !== requestSequence) return
       items.value = response.items || []
       pagination.total = response.total || 0
-      pagination.pages = response.pages || 0
-    } catch (error) {
-      if (!isAbortError(error)) {
-        console.error('Table load error:', error)
-        throw error
+      pagination.pages = response.pages || Math.ceil(pagination.total / pagination.page_size)
+    } catch (caughtError) {
+      if (!isAbortError(caughtError) && currentSequence === requestSequence) {
+        error.value = caughtError
+        console.error('Table load error:', caughtError)
+        throw caughtError
       }
     } finally {
       if (abortController === currentController) {
@@ -76,20 +88,22 @@ export function useTableLoader<T, P extends Record<string, any>>(options: TableL
     return load()
   }
 
-  const debouncedReload = useDebounceFn(reload, debounceMs)
+  const debouncedReload = useDebounceFn(() => {
+    void reload().catch(() => undefined)
+  }, debounceMs)
 
   const handlePageChange = (page: number) => {
     // 确保页码在有效范围内
     const validPage = Math.max(1, Math.min(page, pagination.pages || 1))
     pagination.page = validPage
-    load()
+    void load().catch(() => undefined)
   }
 
   const handlePageSizeChange = (size: number) => {
     pagination.page_size = size
     pagination.page = 1
     setPersistedPageSize(size)
-    load()
+    void load().catch(() => undefined)
   }
 
   onUnmounted(() => {
@@ -99,8 +113,11 @@ export function useTableLoader<T, P extends Record<string, any>>(options: TableL
   return {
     items,
     loading,
+    isInitialLoading,
+    isRefreshing,
     params,
     pagination,
+    error,
     load,
     reload,
     debouncedReload,

@@ -41,6 +41,12 @@ type RedeemCode struct {
 	GroupID *int64 `json:"group_id,omitempty"`
 	// ValidityDays holds the value of the "validity_days" field.
 	ValidityDays int `json:"validity_days,omitempty"`
+	// CurrencyID holds the value of the "currency_id" field.
+	CurrencyID *int64 `json:"currency_id,omitempty"`
+	// CurrencyAmountUnits holds the value of the "currency_amount_units" field.
+	CurrencyAmountUnits *int64 `json:"currency_amount_units,omitempty"`
+	// CurrencyGroupID holds the value of the "currency_group_id" field.
+	CurrencyGroupID *int64 `json:"currency_group_id,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the RedeemCodeQuery when eager-loading is set.
 	Edges        RedeemCodeEdges `json:"edges"`
@@ -87,7 +93,7 @@ func (*RedeemCode) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case redeemcode.FieldValue:
 			values[i] = new(sql.NullFloat64)
-		case redeemcode.FieldID, redeemcode.FieldUsedBy, redeemcode.FieldGroupID, redeemcode.FieldValidityDays:
+		case redeemcode.FieldID, redeemcode.FieldUsedBy, redeemcode.FieldGroupID, redeemcode.FieldValidityDays, redeemcode.FieldCurrencyID, redeemcode.FieldCurrencyAmountUnits, redeemcode.FieldCurrencyGroupID:
 			values[i] = new(sql.NullInt64)
 		case redeemcode.FieldCode, redeemcode.FieldType, redeemcode.FieldStatus, redeemcode.FieldNotes:
 			values[i] = new(sql.NullString)
@@ -185,6 +191,27 @@ func (_m *RedeemCode) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.ValidityDays = int(value.Int64)
 			}
+		case redeemcode.FieldCurrencyID:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field currency_id", values[i])
+			} else if value.Valid {
+				_m.CurrencyID = new(int64)
+				*_m.CurrencyID = value.Int64
+			}
+		case redeemcode.FieldCurrencyAmountUnits:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field currency_amount_units", values[i])
+			} else if value.Valid {
+				_m.CurrencyAmountUnits = new(int64)
+				*_m.CurrencyAmountUnits = value.Int64
+			}
+		case redeemcode.FieldCurrencyGroupID:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field currency_group_id", values[i])
+			} else if value.Valid {
+				_m.CurrencyGroupID = new(int64)
+				*_m.CurrencyGroupID = value.Int64
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -273,6 +300,21 @@ func (_m *RedeemCode) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("validity_days=")
 	builder.WriteString(fmt.Sprintf("%v", _m.ValidityDays))
+	builder.WriteString(", ")
+	if v := _m.CurrencyID; v != nil {
+		builder.WriteString("currency_id=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.CurrencyAmountUnits; v != nil {
+		builder.WriteString("currency_amount_units=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.CurrencyGroupID; v != nil {
+		builder.WriteString("currency_group_id=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
 	builder.WriteByte(')')
 	return builder.String()
 }

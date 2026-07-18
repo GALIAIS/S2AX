@@ -79,6 +79,26 @@ describe('DataTable', () => {
     expect(nameHeader.findAll('svg')[1].classes()).toContain('text-primary-600')
   })
 
+  it('keeps an empty result stable while a later refresh is in flight', async () => {
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [{ key: 'name', label: 'Name' }],
+        data: [],
+        loading: true,
+      },
+    })
+
+    await wrapper.vm.$nextTick()
+    expect(wrapper.findAll('tbody tr').length).toBe(5)
+
+    await wrapper.setProps({ loading: false })
+    await wrapper.setProps({ loading: true })
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.findAll('tbody tr').length).toBe(1)
+    expect(wrapper.find('tbody tr td').text()).toContain('empty.noData')
+  })
+
   it('renders every row with no virtual padding spacer for small datasets (virtualization off)', async () => {
     const data = Array.from({ length: 8 }, (_, i) => ({ id: i + 1, name: `Row ${i + 1}` }))
     const wrapper = mount(DataTable, {
@@ -323,5 +343,25 @@ describe('DataTable', () => {
     await wrapper.get('[data-test="select-all-mobile"]').setValue(true)
 
     expect(wrapper.emitted('update:selectedKeys')?.at(-1)?.[0]).toEqual([99, 1, 2])
+  })
+
+  it('excludes non-selectable rows from bulk selection in both table controls', async () => {
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [{ key: 'name', label: 'Name' }],
+        data: [
+          { id: 1, name: 'Selectable' },
+          { id: 2, name: 'Locked' }
+        ],
+        rowKey: 'id',
+        selectable: true,
+        rowSelectable: (row: { id: number }) => row.id !== 2
+      }
+    })
+
+    await wrapper.get('[data-test="select-all"]').setValue(true)
+
+    expect(wrapper.emitted('update:selectedKeys')?.at(-1)?.[0]).toEqual([1])
+    expect(wrapper.findAll('[data-test="select-row"]')[1].attributes('disabled')).toBeDefined()
   })
 })

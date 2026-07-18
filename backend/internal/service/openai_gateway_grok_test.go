@@ -41,7 +41,6 @@ func TestPatchGrokResponsesBodySetsMappedModelAndDropsUnsupportedFields(t *testi
 	require.False(t, gjson.GetBytes(patched, "safety_identifier").Exists())
 	require.Equal(t, "high", gjson.GetBytes(patched, "reasoning.effort").String())
 }
-
 func TestPatchGrokResponsesBodySanitizesComposerReasoningParameters(t *testing.T) {
 	t.Parallel()
 

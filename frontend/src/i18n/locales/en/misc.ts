@@ -105,6 +105,11 @@ export default {
     emptyUnread: 'No unread announcements',
     total: 'announcements',
     emptyDescription: 'There are no system announcements at this time',
+    allCaughtUp: 'All announcements are read',
+    filterLabel: 'Announcement filter',
+    filterAll: 'All',
+    priorityNotice: 'Important notice',
+    popupReadHint: 'Confirm to mark this notice as read and continue to the next one.',
     readStatus: 'You have read this announcement',
     markReadHint: 'Click "Mark as read" to mark this announcement'
   },

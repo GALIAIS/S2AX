@@ -560,6 +560,7 @@ func TestEnsureOpenAIResponsesImageGenerationTool_NoTools(t *testing.T) {
 	tool, ok := tools[0].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, "image_generation", tool["type"])
+	require.Equal(t, openAIImagesDefaultToolModel, tool["model"])
 	require.Equal(t, "png", tool["output_format"])
 }
 
@@ -594,6 +595,7 @@ func TestEnsureOpenAIResponsesImageGenerationTool_AppendsToExistingTools(t *test
 	second, ok := tools[1].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, "image_generation", second["type"])
+	require.Equal(t, openAIImagesDefaultToolModel, second["model"])
 	require.Equal(t, "png", second["output_format"])
 }
 
@@ -751,6 +753,14 @@ func TestCodexImageGenerationBridge_PreservesClientImageFunctionTools(t *testing
 			} else {
 				require.Equal(t, "auto", tt.reqBody["tool_choice"])
 				require.Contains(t, tt.reqBody["instructions"], codexImageGenerationBridgeMarker)
+				tools, ok := tt.reqBody["tools"].([]any)
+				require.True(t, ok)
+				for _, rawTool := range tools {
+					tool, ok := rawTool.(map[string]any)
+					if ok && firstNonEmptyString(tool["type"]) == "image_generation" {
+						require.Equal(t, openAIImagesDefaultToolModel, tool["model"])
+					}
+				}
 			}
 		})
 	}

@@ -71,6 +71,23 @@ func (h *AnnouncementHandler) MarkRead(c *gin.Context) {
 	response.Success(c, gin.H{"message": "ok"})
 }
 
+// MarkAllRead marks every currently visible unread announcement as read.
+// POST /api/v1/announcements/read-all
+func (h *AnnouncementHandler) MarkAllRead(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not found in context")
+		return
+	}
+
+	count, err := h.announcementService.MarkAllRead(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"message": "ok", "count": count})
+}
+
 func parseBoolQuery(v string) bool {
 	switch strings.TrimSpace(strings.ToLower(v)) {
 	case "1", "true", "yes", "y", "on":

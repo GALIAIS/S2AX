@@ -103,6 +103,11 @@ export default {
     emptyUnread: '暂无未读公告',
     total: '条公告',
     emptyDescription: '暂时没有任何系统公告',
+    allCaughtUp: '公告已全部阅读',
+    filterLabel: '公告筛选',
+    filterAll: '全部',
+    priorityNotice: '重要通知',
+    popupReadHint: '确认后将标记为已读，并继续显示下一条通知。',
     readStatus: '您已阅读此公告',
     markReadHint: '点击"已读"标记此公告'
   },

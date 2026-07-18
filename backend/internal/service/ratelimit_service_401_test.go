@@ -262,8 +262,8 @@ func TestRateLimitService_HandleUpstreamError_OAuth401DoesNotOverwriteCredential
 	require.Nil(t, repo.lastCredentials, "no credentials should have been persisted")
 }
 
-// 缺少 refresh_token 的 OAuth 账号 401 应直接 SetError 永久禁用，
-// 不再走 10 分钟冷却（冷却期内无人能刷新它，结束后还会被选中再 502 一次）。
+// 仅有 access_token、缺少 refresh_token 的 OAuth 账号 401 应直接 SetError 永久禁用；
+// 外部托管子令牌（本地 AT/RT 均为空）由单独测试覆盖可恢复的冷却策略。
 func TestRateLimitService_HandleUpstreamError_OAuth401NoRefreshTokenSetsError(t *testing.T) {
 	t.Run("openai_no_refresh_token", func(t *testing.T) {
 		repo := &rateLimitAccountRepoStub{}
@@ -308,6 +308,35 @@ func TestRateLimitService_HandleUpstreamError_OAuth401NoRefreshTokenSetsError(t 
 		require.True(t, shouldDisable)
 		require.Equal(t, 1, repo.setErrorCalls)
 		require.Equal(t, 0, repo.tempCalls)
+	})
+
+	t.Run("openai_external_child_token_without_local_tokens_is_recoverable", func(t *testing.T) {
+		repo := &rateLimitAccountRepoStub{}
+		invalidator := &tokenCacheInvalidatorRecorder{}
+		service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+		service.SetTokenCacheInvalidator(invalidator)
+		account := &Account{
+			ID:       2884,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeOAuth,
+			Credentials: map[string]any{
+				"session_token": "managed-child-token",
+				// No local access_token or refresh_token.
+			},
+		}
+
+		shouldDisable := service.HandleUpstreamError(
+			context.Background(),
+			account,
+			401,
+			http.Header{},
+			[]byte(`{"detail":"Unauthorized"}`),
+		)
+
+		require.True(t, shouldDisable, "the current request must fail over")
+		require.Equal(t, 0, repo.setErrorCalls, "external child-token 401 must not permanently disable the account")
+		require.Equal(t, 1, repo.tempCalls, "external child-token 401 must enter a bounded cooldown")
+		require.Len(t, invalidator.accounts, 1, "the token cache invalidation path remains safe")
 	})
 
 	t.Run("antigravity_no_refresh_token_sets_error", func(t *testing.T) {

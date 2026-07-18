@@ -110,6 +110,21 @@ func ValidityDays(v int) predicate.RedeemCode {
 	return predicate.RedeemCode(sql.FieldEQ(FieldValidityDays, v))
 }
 
+// CurrencyID applies equality check predicate on the "currency_id" field. It's identical to CurrencyIDEQ.
+func CurrencyID(v int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldEQ(FieldCurrencyID, v))
+}
+
+// CurrencyAmountUnits applies equality check predicate on the "currency_amount_units" field. It's identical to CurrencyAmountUnitsEQ.
+func CurrencyAmountUnits(v int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldEQ(FieldCurrencyAmountUnits, v))
+}
+
+// CurrencyGroupID applies equality check predicate on the "currency_group_id" field. It's identical to CurrencyGroupIDEQ.
+func CurrencyGroupID(v int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldEQ(FieldCurrencyGroupID, v))
+}
+
 // CodeEQ applies the EQ predicate on the "code" field.
 func CodeEQ(v string) predicate.RedeemCode {
 	return predicate.RedeemCode(sql.FieldEQ(FieldCode, v))
@@ -658,6 +673,156 @@ func ValidityDaysLT(v int) predicate.RedeemCode {
 // ValidityDaysLTE applies the LTE predicate on the "validity_days" field.
 func ValidityDaysLTE(v int) predicate.RedeemCode {
 	return predicate.RedeemCode(sql.FieldLTE(FieldValidityDays, v))
+}
+
+// CurrencyIDEQ applies the EQ predicate on the "currency_id" field.
+func CurrencyIDEQ(v int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldEQ(FieldCurrencyID, v))
+}
+
+// CurrencyIDNEQ applies the NEQ predicate on the "currency_id" field.
+func CurrencyIDNEQ(v int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldNEQ(FieldCurrencyID, v))
+}
+
+// CurrencyIDIn applies the In predicate on the "currency_id" field.
+func CurrencyIDIn(vs ...int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldIn(FieldCurrencyID, vs...))
+}
+
+// CurrencyIDNotIn applies the NotIn predicate on the "currency_id" field.
+func CurrencyIDNotIn(vs ...int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldNotIn(FieldCurrencyID, vs...))
+}
+
+// CurrencyIDGT applies the GT predicate on the "currency_id" field.
+func CurrencyIDGT(v int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldGT(FieldCurrencyID, v))
+}
+
+// CurrencyIDGTE applies the GTE predicate on the "currency_id" field.
+func CurrencyIDGTE(v int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldGTE(FieldCurrencyID, v))
+}
+
+// CurrencyIDLT applies the LT predicate on the "currency_id" field.
+func CurrencyIDLT(v int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldLT(FieldCurrencyID, v))
+}
+
+// CurrencyIDLTE applies the LTE predicate on the "currency_id" field.
+func CurrencyIDLTE(v int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldLTE(FieldCurrencyID, v))
+}
+
+// CurrencyIDIsNil applies the IsNil predicate on the "currency_id" field.
+func CurrencyIDIsNil() predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldIsNull(FieldCurrencyID))
+}
+
+// CurrencyIDNotNil applies the NotNil predicate on the "currency_id" field.
+func CurrencyIDNotNil() predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldNotNull(FieldCurrencyID))
+}
+
+// CurrencyAmountUnitsEQ applies the EQ predicate on the "currency_amount_units" field.
+func CurrencyAmountUnitsEQ(v int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldEQ(FieldCurrencyAmountUnits, v))
+}
+
+// CurrencyAmountUnitsNEQ applies the NEQ predicate on the "currency_amount_units" field.
+func CurrencyAmountUnitsNEQ(v int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldNEQ(FieldCurrencyAmountUnits, v))
+}
+
+// CurrencyAmountUnitsIn applies the In predicate on the "currency_amount_units" field.
+func CurrencyAmountUnitsIn(vs ...int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldIn(FieldCurrencyAmountUnits, vs...))
+}
+
+// CurrencyAmountUnitsNotIn applies the NotIn predicate on the "currency_amount_units" field.
+func CurrencyAmountUnitsNotIn(vs ...int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldNotIn(FieldCurrencyAmountUnits, vs...))
+}
+
+// CurrencyAmountUnitsGT applies the GT predicate on the "currency_amount_units" field.
+func CurrencyAmountUnitsGT(v int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldGT(FieldCurrencyAmountUnits, v))
+}
+
+// CurrencyAmountUnitsGTE applies the GTE predicate on the "currency_amount_units" field.
+func CurrencyAmountUnitsGTE(v int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldGTE(FieldCurrencyAmountUnits, v))
+}
+
+// CurrencyAmountUnitsLT applies the LT predicate on the "currency_amount_units" field.
+func CurrencyAmountUnitsLT(v int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldLT(FieldCurrencyAmountUnits, v))
+}
+
+// CurrencyAmountUnitsLTE applies the LTE predicate on the "currency_amount_units" field.
+func CurrencyAmountUnitsLTE(v int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldLTE(FieldCurrencyAmountUnits, v))
+}
+
+// CurrencyAmountUnitsIsNil applies the IsNil predicate on the "currency_amount_units" field.
+func CurrencyAmountUnitsIsNil() predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldIsNull(FieldCurrencyAmountUnits))
+}
+
+// CurrencyAmountUnitsNotNil applies the NotNil predicate on the "currency_amount_units" field.
+func CurrencyAmountUnitsNotNil() predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldNotNull(FieldCurrencyAmountUnits))
+}
+
+// CurrencyGroupIDEQ applies the EQ predicate on the "currency_group_id" field.
+func CurrencyGroupIDEQ(v int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldEQ(FieldCurrencyGroupID, v))
+}
+
+// CurrencyGroupIDNEQ applies the NEQ predicate on the "currency_group_id" field.
+func CurrencyGroupIDNEQ(v int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldNEQ(FieldCurrencyGroupID, v))
+}
+
+// CurrencyGroupIDIn applies the In predicate on the "currency_group_id" field.
+func CurrencyGroupIDIn(vs ...int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldIn(FieldCurrencyGroupID, vs...))
+}
+
+// CurrencyGroupIDNotIn applies the NotIn predicate on the "currency_group_id" field.
+func CurrencyGroupIDNotIn(vs ...int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldNotIn(FieldCurrencyGroupID, vs...))
+}
+
+// CurrencyGroupIDGT applies the GT predicate on the "currency_group_id" field.
+func CurrencyGroupIDGT(v int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldGT(FieldCurrencyGroupID, v))
+}
+
+// CurrencyGroupIDGTE applies the GTE predicate on the "currency_group_id" field.
+func CurrencyGroupIDGTE(v int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldGTE(FieldCurrencyGroupID, v))
+}
+
+// CurrencyGroupIDLT applies the LT predicate on the "currency_group_id" field.
+func CurrencyGroupIDLT(v int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldLT(FieldCurrencyGroupID, v))
+}
+
+// CurrencyGroupIDLTE applies the LTE predicate on the "currency_group_id" field.
+func CurrencyGroupIDLTE(v int64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldLTE(FieldCurrencyGroupID, v))
+}
+
+// CurrencyGroupIDIsNil applies the IsNil predicate on the "currency_group_id" field.
+func CurrencyGroupIDIsNil() predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldIsNull(FieldCurrencyGroupID))
+}
+
+// CurrencyGroupIDNotNil applies the NotNil predicate on the "currency_group_id" field.
+func CurrencyGroupIDNotNil() predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldNotNull(FieldCurrencyGroupID))
 }
 
 // HasUser applies the HasEdge predicate on the "user" edge.

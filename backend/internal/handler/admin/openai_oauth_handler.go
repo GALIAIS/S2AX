@@ -316,9 +316,11 @@ func (h *OpenAIOAuthHandler) CreateAccountFromCodexPAT(c *gin.Context) {
 		response.BadRequest(c, "priority must be >= 0")
 		return
 	}
-	if req.RateMultiplier != nil && *req.RateMultiplier < 0 {
-		response.BadRequest(c, "rate_multiplier must be >= 0")
-		return
+	if req.RateMultiplier != nil {
+		if err := service.ValidateRateMultiplier(*req.RateMultiplier, true); err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
 	}
 	if req.LoadFactor != nil && *req.LoadFactor > 10000 {
 		response.BadRequest(c, "load_factor must be <= 10000")

@@ -54,6 +54,9 @@ export default {
       title: 'Audit policy', description: 'Configure group scope, nine input-risk categories, workers, and queue bounds.', scope: 'Scope', allGroups: 'All groups', selectedGroups: 'Selected groups',
       searchGroups: 'Search groups', noGroups: 'No matching groups', missingGroups: 'Configured IDs for groups that no longer exist', selectedCount: '{count} groups selected',
       scanners: 'Qwen3Guard input-risk categories', workerCount: 'Worker count', queueCapacity: 'Persistent queue capacity', strategy: 'Node strategy', strategyHint: 'Try nodes in configuration order and fail over when allowed.',
+      deploymentTitle: 'Deployment guidance',
+      asyncDeploymentHint: 'For CPU or small VPS deployments, keep asynchronous audit: first-token latency does not wait for the model. Use blocking only with a low-latency remote guard endpoint.',
+      blockingDeploymentHint: 'Blocking adds guard latency to every request. Use a low-latency remote endpoint, short timeouts, and failover; switch CPU-local models back to async mode.',
     },
     saveBar: { enabled: 'Enable prompt audit', blocking: 'Synchronous blocking', storePass: 'Store safe events', dirty: 'Unsaved changes', synced: 'Configuration synced' },
     blockingConfirm: {

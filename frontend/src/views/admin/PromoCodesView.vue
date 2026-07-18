@@ -19,10 +19,17 @@
             class="w-36"
             @change="loadCodes"
           />
+          <SavedViewsControl
+            storage-key="admin-promo-codes"
+            :state="savedViewState"
+            :disabled="loading"
+            @apply="applySavedView"
+          />
 
           <!-- Right: Action buttons -->
           <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
             <button
+              type="button"
               @click="loadCodes"
               :disabled="loading"
               class="btn btn-secondary"
@@ -30,7 +37,7 @@
             >
               <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
             </button>
-            <button @click="showCreateDialog = true" class="btn btn-primary">
+            <button type="button" @click="showCreateDialog = true" class="btn btn-primary">
               <Icon name="plus" size="md" class="mr-1" />
               {{ t('admin.promo.createCode') }}
             </button>
@@ -38,20 +45,60 @@
         </div>
       </template>
 
+      <div v-if="selectedCount > 0" class="mb-4 flex flex-wrap items-center gap-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20" role="toolbar" :aria-label="t('common.actions')">
+        <span class="mr-auto text-sm font-medium text-primary-900 dark:text-primary-100">{{ t('common.selectedCount', { count: selectedCount }) }}</span>
+        <button
+          type="button"
+          class="btn btn-danger btn-sm"
+          :disabled="bulkDeleting"
+          @click="showBulkDeleteDialog = true"
+        >
+          <Icon name="trash" size="sm" :class="bulkDeleting ? 'animate-pulse' : ''" />
+          {{ t('admin.promo.bulkDelete') }}
+        </button>
+        <button type="button" class="btn btn-ghost btn-sm" :disabled="bulkDeleting" @click="clearSelection">
+          {{ t('common.clear') }}
+        </button>
+      </div>
+
       <template #table>
         <DataTable
           :columns="columns"
           :data="codes"
           :loading="loading"
+          :error="loadError"
           :server-side-sort="true"
           default-sort-key="created_at"
           default-sort-order="desc"
           @sort="handleSort"
+          @retry="loadCodes"
         >
+          <template #header-select>
+            <input
+              type="checkbox"
+              :checked="allVisibleSelected"
+              :indeterminate="someVisibleSelected && !allVisibleSelected"
+              :aria-label="t('common.selectAll')"
+              @click.stop
+              @change="toggleSelectAllVisible($event)"
+            />
+          </template>
+
+          <template #cell-select="{ row }">
+            <input
+              type="checkbox"
+              :checked="selectedCodeIds.has(row.id)"
+              :aria-label="t('common.selectRow', { name: row.code })"
+              @click.stop
+              @change="toggleSelectRow(row.id, $event)"
+            />
+          </template>
+
           <template #cell-code="{ value }">
             <div class="flex items-center space-x-2">
               <code class="font-mono text-sm text-gray-900 dark:text-gray-100">{{ value }}</code>
               <button
+                type="button"
                 @click="copyToClipboard(value)"
                 :class="[
                   'flex items-center transition-colors',
@@ -112,33 +159,18 @@
           <template #cell-actions="{ row }">
             <div class="flex items-center space-x-1">
               <button
+                type="button"
                 @click="copyRegisterLink(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/20 dark:hover:text-green-400"
                 :title="t('admin.promo.copyRegisterLink')"
               >
                 <Icon name="link" size="sm" />
               </button>
-              <button
-                @click="handleViewUsages(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
-                :title="t('admin.promo.viewUsages')"
-              >
-                <Icon name="eye" size="sm" />
-              </button>
-              <button
-                @click="handleEdit(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-dark-600 dark:hover:text-gray-300"
-                :title="t('common.edit')"
-              >
-                <Icon name="edit" size="sm" />
-              </button>
-              <button
-                @click="handleDelete(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
-                :title="t('common.delete')"
-              >
-                <Icon name="trash" size="sm" />
-              </button>
+              <RowActionMenu
+                :items="promoActionItems"
+                :aria-label="t('common.more')"
+                @select="(key) => handlePromoAction(key, row)"
+              />
             </div>
           </template>
         </DataTable>
@@ -155,6 +187,17 @@
         />
       </template>
     </TablePageLayout>
+
+    <ConfirmDialog
+      :show="showBulkDeleteDialog"
+      :title="t('admin.promo.bulkDelete')"
+      :message="t('admin.promo.bulkDeleteConfirm', { count: selectedCount })"
+      :confirm-text="t('common.delete')"
+      :cancel-text="t('common.cancel')"
+      :danger="true"
+      @confirm="confirmBulkDelete"
+      @cancel="showBulkDeleteDialog = false"
+    />
 
     <!-- Create Dialog -->
     <BaseDialog
@@ -391,6 +434,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useClipboard } from '@/composables/useClipboard'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
+import { useUrlQueryBindings, parseNumberQuery, parseStringQuery } from '@/composables/useUrlQueryBindings'
 import { adminAPI } from '@/api/admin'
 import { formatDateTime } from '@/utils/format'
 import type { PromoCode, PromoCodeUsage } from '@/types'
@@ -399,6 +443,8 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
+import SavedViewsControl from '@/components/common/SavedViewsControl.vue'
+import RowActionMenu, { type RowActionMenuItem } from '@/components/common/RowActionMenu.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
@@ -410,11 +456,15 @@ const { copyToClipboard: clipboardCopy } = useClipboard()
 
 // State
 const codes = ref<PromoCode[]>([])
-const loading = ref(false)
+const loading = ref(true)
+const loadError = ref<string | null>(null)
 const creating = ref(false)
 const updating = ref(false)
+const bulkDeleting = ref(false)
 const searchQuery = ref('')
 const copiedCode = ref<string | null>(null)
+const selectedCodeIds = ref<Set<number>>(new Set())
+const showBulkDeleteDialog = ref(false)
 
 const filters = reactive({
   status: ''
@@ -429,6 +479,82 @@ const sortState = reactive({
   sort_by: 'created_at',
   sort_order: 'desc' as 'asc' | 'desc'
 })
+
+const promoActionItems = computed<RowActionMenuItem[]>(() => [
+  { key: 'usages', label: t('admin.promo.viewUsages'), icon: 'eye' },
+  { key: 'edit', label: t('common.edit'), icon: 'edit' },
+  { key: 'delete', label: t('common.delete'), icon: 'trash', tone: 'danger' }
+])
+
+const handlePromoAction = (key: string, code: PromoCode) => {
+  if (key === 'usages') handleViewUsages(code)
+  else if (key === 'edit') handleEdit(code)
+  else if (key === 'delete') handleDelete(code)
+}
+
+const savedViewState = computed<Record<string, unknown>>(() => ({
+  search: searchQuery.value,
+  status: filters.status,
+  page: pagination.page,
+  page_size: pagination.page_size,
+  sort_by: sortState.sort_by,
+  sort_order: sortState.sort_order
+}))
+
+const applySavedView = (state: Record<string, unknown>) => {
+  searchQuery.value = typeof state.search === 'string' ? state.search : ''
+  filters.status = typeof state.status === 'string' ? state.status : ''
+  pagination.page = Number.isFinite(Number(state.page)) ? Math.max(1, Number(state.page)) : 1
+  pagination.page_size = Number.isFinite(Number(state.page_size)) ? Math.max(1, Number(state.page_size)) : pagination.page_size
+  sortState.sort_by = typeof state.sort_by === 'string' ? state.sort_by : 'created_at'
+  sortState.sort_order = state.sort_order === 'asc' ? 'asc' : 'desc'
+  void loadCodes()
+}
+
+useUrlQueryBindings([
+  {
+    key: 'search',
+    get: () => searchQuery.value,
+    set: (value: string) => { searchQuery.value = value },
+    parse: parseStringQuery,
+    omit: (value: string) => !value
+  },
+  {
+    key: 'status',
+    get: () => filters.status,
+    set: (value: string) => { filters.status = value },
+    parse: parseStringQuery,
+    omit: (value: string) => !value
+  },
+  {
+    key: 'page',
+    get: () => pagination.page,
+    set: (value: number) => { pagination.page = Math.max(1, Math.floor(value)) },
+    parse: parseNumberQuery,
+    omit: (value: number) => value <= 1
+  },
+  {
+    key: 'page_size',
+    get: () => pagination.page_size,
+    set: (value: number) => { pagination.page_size = Math.max(1, Math.floor(value)) },
+    parse: parseNumberQuery,
+    omit: (value: number) => value === getPersistedPageSize()
+  },
+  {
+    key: 'sort_by',
+    get: () => sortState.sort_by,
+    set: (value: string) => { sortState.sort_by = value },
+    parse: parseStringQuery,
+    omit: (value: string) => !value || value === 'created_at'
+  },
+  {
+    key: 'sort_order',
+    get: () => sortState.sort_order,
+    set: (value: string) => { sortState.sort_order = value === 'asc' ? 'asc' : 'desc' },
+    parse: parseStringQuery,
+    omit: (value: string) => !value || value === 'desc'
+  }
+])
 
 // Dialogs
 const showCreateDialog = ref(false)
@@ -478,6 +604,7 @@ const statusOptions = computed(() => [
 ])
 
 const columns = computed<Column[]>(() => [
+  { key: 'select', label: '', sortable: false, class: 'w-10 text-center' },
   { key: 'code', label: t('admin.promo.columns.code') },
   { key: 'bonus_amount', label: t('admin.promo.columns.bonusAmount'), sortable: true },
   { key: 'usage', label: t('admin.promo.columns.usage') },
@@ -518,6 +645,7 @@ const loadCodes = async () => {
   const currentController = new AbortController()
   abortController = currentController
   loading.value = true
+  loadError.value = null
 
   try {
     const response = await adminAPI.promo.list(
@@ -535,6 +663,8 @@ const loadCodes = async () => {
 
     codes.value = response.items
     pagination.total = response.total
+    const visibleIds = new Set(response.items.map((item) => item.id))
+    selectedCodeIds.value = new Set([...selectedCodeIds.value].filter((id) => visibleIds.has(id)))
   } catch (error: any) {
     if (
       currentController.signal.aborted ||
@@ -544,7 +674,9 @@ const loadCodes = async () => {
     ) {
       return
     }
-    appStore.showError(t('admin.promo.failedToLoad'))
+    const message = t('admin.promo.failedToLoad')
+    loadError.value = message
+    appStore.showError(message)
     console.error('Error loading promo codes:', error)
   } finally {
     if (abortController === currentController) {
@@ -552,6 +684,34 @@ const loadCodes = async () => {
       abortController = null
     }
   }
+}
+
+const selectedCount = computed(() => selectedCodeIds.value.size)
+const allVisibleSelected = computed(() => (
+  codes.value.length > 0 && codes.value.every((code) => selectedCodeIds.value.has(code.id))
+))
+const someVisibleSelected = computed(() => codes.value.some((code) => selectedCodeIds.value.has(code.id)))
+
+const toggleSelectRow = (id: number, event: Event) => {
+  const checked = (event.target as HTMLInputElement).checked
+  const next = new Set(selectedCodeIds.value)
+  if (checked) next.add(id)
+  else next.delete(id)
+  selectedCodeIds.value = next
+}
+
+const toggleSelectAllVisible = (event: Event) => {
+  const checked = (event.target as HTMLInputElement).checked
+  const next = new Set(selectedCodeIds.value)
+  codes.value.forEach((code) => {
+    if (checked) next.add(code.id)
+    else next.delete(code.id)
+  })
+  selectedCodeIds.value = next
+}
+
+const clearSelection = () => {
+  selectedCodeIds.value = new Set()
 }
 
 let searchTimeout: ReturnType<typeof setTimeout>
@@ -690,14 +850,43 @@ const handleDelete = (code: PromoCode) => {
 const confirmDelete = async () => {
   if (!deletingCode.value) return
 
+  const deletedId = deletingCode.value.id
   try {
-    await adminAPI.promo.delete(deletingCode.value.id)
+    await adminAPI.promo.delete(deletedId)
     appStore.showSuccess(t('admin.promo.codeDeleted'))
     showDeleteDialog.value = false
     deletingCode.value = null
+    const next = new Set(selectedCodeIds.value)
+    next.delete(deletedId)
+    selectedCodeIds.value = next
     loadCodes()
   } catch (error: any) {
     appStore.showError(error.response?.data?.detail || t('admin.promo.failedToDelete'))
+  }
+}
+
+const confirmBulkDelete = async () => {
+  const ids = Array.from(selectedCodeIds.value)
+  if (ids.length === 0 || bulkDeleting.value) return
+
+  bulkDeleting.value = true
+  try {
+    const results = await Promise.allSettled(ids.map((id) => adminAPI.promo.delete(id)))
+    const success = results.filter((result) => result.status === 'fulfilled').length
+    const failed = results.length - success
+    if (failed === 0) {
+      appStore.showSuccess(t('admin.promo.bulkDeleteSuccess', { count: success }))
+    } else {
+      appStore.showWarning(t('admin.promo.bulkDeletePartial', { success, failed }))
+    }
+    clearSelection()
+    showBulkDeleteDialog.value = false
+    await loadCodes()
+  } catch (error) {
+    appStore.showError(t('admin.promo.failedToDelete'))
+    console.error('Error bulk deleting promo codes:', error)
+  } finally {
+    bulkDeleting.value = false
   }
 }
 

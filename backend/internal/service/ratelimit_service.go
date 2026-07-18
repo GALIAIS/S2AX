@@ -167,6 +167,19 @@ func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Accoun
 	return ErrorPolicyNone
 }
 
+// isOpenAI401WithoutLocalToken identifies OpenAI OAuth accounts whose upstream
+// authentication is managed outside the local AT/RT lifecycle (for example a
+// child-token integration). Such accounts can recover after a transient 401,
+// so the 401 handler must not permanently disable them solely because the
+// refresh token is absent.
+func isOpenAI401WithoutLocalToken(account *Account) bool {
+	return account != nil &&
+		account.Platform == PlatformOpenAI &&
+		account.Type == AccountTypeOAuth &&
+		strings.TrimSpace(account.GetOpenAIAccessToken()) == "" &&
+		strings.TrimSpace(account.GetOpenAIRefreshToken()) == ""
+}
+
 // HandleUpstreamError 处理上游错误响应，标记账号状态
 // 返回是否应该停止该账号的调度
 func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, requestedModel ...string) (shouldDisable bool) {
@@ -259,7 +272,9 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			break
 		}
 		// OpenAI: {"detail":"Unauthorized"} 表示 token 完全无效（非标准 OpenAI 错误格式），直接标记 error
-		if authAccount.Platform == PlatformOpenAI && gjson.GetBytes(responseBody, "detail").String() == "Unauthorized" {
+		if authAccount.Platform == PlatformOpenAI &&
+			gjson.GetBytes(responseBody, "detail").String() == "Unauthorized" &&
+			!isOpenAI401WithoutLocalToken(authAccount) {
 			msg := "Unauthorized (401): account authentication failed permanently"
 			if upstreamMsg != "" {
 				msg = "Unauthorized (401): " + upstreamMsg
@@ -276,9 +291,11 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 					slog.Warn("oauth_401_invalidate_cache_failed", "account_id", authAccount.ID, "error", err)
 				}
 			}
-			// 缺少 refresh_token 的 OAuth 账号无法在冷却期内自愈（后台刷新服务也会跳过），
-			// 直接走 SetError 永久禁用，避免冷却结束后再被选中产生一发无意义的 502。
-			if strings.TrimSpace(authAccount.GetCredential("refresh_token")) == "" {
+			// 仅有本地 access_token、没有 refresh_token 的 OAuth 账号无法在冷却期内自愈
+			// （后台刷新服务也会跳过），直接永久禁用；外部托管的子令牌没有本地 AT/RT，
+			// 由 isOpenAI401WithoutLocalToken 分支保留 active 并走有界冷却。
+			if strings.TrimSpace(authAccount.GetCredential("refresh_token")) == "" &&
+				!isOpenAI401WithoutLocalToken(authAccount) {
 				msg := "Authentication failed (401): refresh_token missing, cannot recover"
 				if upstreamMsg != "" {
 					msg = "OAuth 401 (no refresh_token): " + upstreamMsg
@@ -297,7 +314,11 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			// 这里仅依赖 InvalidateToken + SetTempUnschedulable 让账号在冷却期内不被调度，
 			// 冷却结束后由 token_provider 的 NeedsRefresh / token_refresh_service 走带分布式锁的正路刷新。
 			msg := "Authentication failed (401): invalid or expired credentials"
-			if upstreamMsg != "" {
+			if isOpenAI401WithoutLocalToken(authAccount) {
+				// 子令牌/外部托管凭据不在本地保存 AT/RT，401 无法证明凭据已永久失效；
+				// 保持 active 并短暂冷却，避免一次瞬时 401 将账号永久移出调度池。
+				msg = "OAuth 401: external token has no local refresh state"
+			} else if upstreamMsg != "" {
 				msg = "OAuth 401: " + upstreamMsg
 			}
 			if authAccount.Platform == PlatformAntigravity {

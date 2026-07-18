@@ -133,6 +133,28 @@ const DataTableStub = defineComponent({
   template: '<div><div v-for="row in data" :key="row.id"><slot name="cell-actions" :row="row" /></div></div>'
 })
 
+const RowActionMenuStub = defineComponent({
+  props: {
+    items: { type: Array, default: () => [] }
+  },
+  emits: ['select'],
+  template: `
+    <div>
+      <button
+        v-for="item in items"
+        :key="item.key"
+        type="button"
+        :data-testid="'row-action-' + item.key"
+        :disabled="item.disabled"
+        :title="item.title"
+        @click="$emit('select', item.key)"
+      >
+        {{ item.label }}
+      </button>
+    </div>
+  `
+})
+
 function mountView() {
   return mount(GroupsView, {
     global: {
@@ -148,6 +170,7 @@ function mountView() {
         PlatformIcon: true,
         Icon: true,
         GroupCapacityBadge: true,
+        RowActionMenu: RowActionMenuStub,
         GroupRateMultipliersModal: true,
         GroupRPMOverridesModal: true,
         VueDraggable: true
@@ -198,7 +221,7 @@ describe('GroupsView duplicate action', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    await wrapper.get('[data-testid="group-duplicate"]').trigger('click')
+    await wrapper.get('[data-testid="row-action-duplicate"]').trigger('click')
     await flushPromises()
 
     expect(duplicateGroup).toHaveBeenCalledTimes(1)
@@ -216,7 +239,7 @@ describe('GroupsView duplicate action', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    const button = wrapper.get('[data-testid="group-duplicate"]')
+    const button = wrapper.get('[data-testid="row-action-duplicate"]')
     void button.trigger('click')
     void button.trigger('click')
     await wrapper.vm.$nextTick()
@@ -227,7 +250,7 @@ describe('GroupsView duplicate action', () => {
 
     resolveDuplicate({ ...sourceGroup, id: 43, name: 'Primary (Copy)', status: 'inactive' })
     await flushPromises()
-    expect(wrapper.get('[data-testid="group-duplicate"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-testid="row-action-duplicate"]').attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
 
@@ -236,11 +259,11 @@ describe('GroupsView duplicate action', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    await wrapper.get('[data-testid="group-duplicate"]').trigger('click')
+    await wrapper.get('[data-testid="row-action-duplicate"]').trigger('click')
     await flushPromises()
 
     expect(showError).toHaveBeenCalledWith('duplicate failed')
-    expect(wrapper.get('[data-testid="group-duplicate"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-testid="row-action-duplicate"]').attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
 
@@ -257,7 +280,7 @@ describe('GroupsView duplicate action', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    await wrapper.get('[data-testid="group-duplicate"]').trigger('click')
+    await wrapper.get('[data-testid="row-action-duplicate"]').trigger('click')
     await flushPromises()
 
     expect(showSuccess).toHaveBeenCalledWith('admin.groups.duplicateSuccess')

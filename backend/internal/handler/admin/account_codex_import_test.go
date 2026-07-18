@@ -56,6 +56,82 @@ func TestParseCodexSessionImportEntriesSupportsRawTokenJSONAndArray(t *testing.T
 	}
 }
 
+func TestParseCodexSessionImportEntriesUnwrapsSub2APIExport(t *testing.T) {
+	expiresAt := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	token := buildCodexImportTestJWT(t, expiresAt, map[string]any{
+		"email": "export@example.com",
+	})
+	req := CodexSessionImportRequest{
+		Content: fmt.Sprintf(`{"exported_at":"2026-07-16T00:00:00Z","proxies":[],"accounts":[{"name":"Exported account","platform":"openai","type":"oauth","expires_at":%d,"auto_pause_on_expired":true,"credentials":{"access_token":%q,"chatgpt_account_id":"acct-export","chatgpt_user_id":"user-export","email":"export@example.com","plan_type":"plus"},"extra":{"name":"Exported account"}}]}`,
+			expiresAt.Unix(), token),
+	}
+
+	entries, err := parseCodexSessionImportEntries(req)
+	if err != nil {
+		t.Fatalf("parseCodexSessionImportEntries error = %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1", len(entries))
+	}
+
+	item, err := normalizeCodexImportEntry(entries[0])
+	if err != nil {
+		t.Fatalf("normalizeCodexImportEntry error = %v", err)
+	}
+	if item.Name != "Exported account" {
+		t.Fatalf("name = %q, want Exported account", item.Name)
+	}
+	if item.Credentials["chatgpt_account_id"] != "acct-export" {
+		t.Fatalf("chatgpt_account_id = %v, want acct-export", item.Credentials["chatgpt_account_id"])
+	}
+	if item.Credentials["chatgpt_user_id"] != "user-export" {
+		t.Fatalf("chatgpt_user_id = %v, want user-export", item.Credentials["chatgpt_user_id"])
+	}
+	if item.Extra["import_source"] != "sub2api_export" {
+		t.Fatalf("import_source = %v, want sub2api_export", item.Extra["import_source"])
+	}
+	if item.TokenExpiresAt == nil || item.TokenExpiresAt.Unix() != expiresAt.Unix() {
+		t.Fatalf("TokenExpiresAt = %v, want %s", item.TokenExpiresAt, expiresAt)
+	}
+}
+
+func TestNormalizeCodexCPAImportUsesCPAExpiry(t *testing.T) {
+	expiresAt := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	item, err := normalizeCodexImportEntry(codexImportEntry{Index: 1, Value: map[string]any{
+		"type":               "codex",
+		"access_token":       "opaque-cpa-access-token",
+		"refresh_token":      "",
+		"account_id":         "acct-cpa",
+		"chatgpt_account_id": "acct-cpa",
+		"email":              "cpa@example.com",
+		"plan_type":          "plus",
+		"expired":            expiresAt.Format(time.RFC3339),
+	}})
+	if err != nil {
+		t.Fatalf("normalizeCodexImportEntry error = %v", err)
+	}
+	if item.Extra["import_source"] != "cpa" {
+		t.Fatalf("import_source = %v, want cpa", item.Extra["import_source"])
+	}
+	if item.Credentials["expires_at"] != expiresAt.Format(time.RFC3339) {
+		t.Fatalf("expires_at = %v, want %s", item.Credentials["expires_at"], expiresAt.Format(time.RFC3339))
+	}
+
+	accountExpiresAt, credentialExpiresAt, autoPause, _, err := resolveCodexImportExpiry(CodexSessionImportRequest{}, item)
+	if err != nil {
+		t.Fatalf("resolveCodexImportExpiry error = %v", err)
+	}
+	if accountExpiresAt == nil || *accountExpiresAt != expiresAt.Unix() {
+		t.Fatalf("account expires_at = %v, want %d", accountExpiresAt, expiresAt.Unix())
+	}
+	if credentialExpiresAt == nil || credentialExpiresAt.Unix() != expiresAt.Unix() {
+		t.Fatalf("credential expires_at = %v, want %s", credentialExpiresAt, expiresAt)
+	}
+	if autoPause == nil || !*autoPause {
+		t.Fatalf("autoPause = %v, want true", autoPause)
+	}
+}
+
 func TestParseCodexSessionImportEntriesFallsBackToLineModeForMixedJSONAndToken(t *testing.T) {
 	req := CodexSessionImportRequest{
 		Content: "{\"accessToken\":\"json-line-token\"}\nraw-line-token",

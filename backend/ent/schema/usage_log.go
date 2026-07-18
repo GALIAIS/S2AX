@@ -99,7 +99,7 @@ func (UsageLog) Fields() []ent.Field {
 			SchemaType(map[string]string{dialect.Postgres: "decimal(20,10)"}),
 		field.Float("rate_multiplier").
 			Default(1).
-			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}),
+			SchemaType(map[string]string{dialect.Postgres: "decimal(18,8)"}),
 		field.Bool("long_context_billing_applied").
 			Default(false).
 			Comment("Whether long-context pricing changed token prices for this request"),
@@ -108,7 +108,7 @@ func (UsageLog) Fields() []ent.Field {
 		field.Float("account_rate_multiplier").
 			Optional().
 			Nillable().
-			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}),
+			SchemaType(map[string]string{dialect.Postgres: "decimal(18,8)"}),
 
 		// 其他字段
 		field.Int8("billing_type").

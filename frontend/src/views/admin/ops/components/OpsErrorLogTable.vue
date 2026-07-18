@@ -68,6 +68,7 @@
           <div v-if="row.user_id" class="text-sm">
             <button
               v-if="userClickable && row.user_email"
+              type="button"
               class="font-medium text-primary-600 underline decoration-dashed underline-offset-2 transition-colors hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
               :title="t('admin.usage.clickToViewBalance')"
               @click.stop="emit('userClick', row.user_id, row.user_email)"
@@ -81,6 +82,7 @@
           <div v-else-if="row.deleted_key_owner_user_id" class="text-sm">
             <button
               v-if="userClickable && row.deleted_key_owner_email"
+              type="button"
               class="font-medium text-primary-600 underline decoration-dashed underline-offset-2 transition-colors hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
               :title="t('admin.usage.clickToViewBalance')"
               @click.stop="emit('userClick', row.deleted_key_owner_user_id, row.deleted_key_owner_email ?? undefined)"

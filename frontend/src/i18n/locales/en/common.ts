@@ -1,12 +1,20 @@
 export default {
   common: {
     loading: 'Loading...',
+    refreshing: 'Refreshing…',
     submitting: 'Submitting...',
     justNow: 'just now',
     peakRateTooltip: 'Peak rate: {window}',
     peakRateImageNote: '; image tokens billed as tokens are also affected, per-image billing is unaffected',
     save: 'Save',
     saved: 'Saved successfully',
+    savedViews: 'Saved views',
+    savedViewsPlaceholder: 'Select a saved filter view',
+    saveView: 'Save current view',
+    savedViewName: 'View name',
+    savedViewNamePlaceholder: 'For example: Active Anthropic accounts',
+    savedViewDescription: 'Save the current search, filters, sort, and pagination for quick reuse.',
+    deleteSavedView: 'Delete saved view',
     deleted: 'Deleted successfully',
     cancel: 'Cancel',
     delete: 'Delete',
@@ -32,6 +40,7 @@ export default {
     all: 'All',
     none: 'None',
     selectAll: 'Select all',
+    selectRow: 'Select {name}',
     noData: 'No data',
     expand: 'Expand',
     collapse: 'Collapse',
@@ -43,7 +52,10 @@ export default {
     active: 'Active',
     inactive: 'Inactive',
     more: 'More',
+    menu: 'Menu',
+    userMenu: 'User menu',
     close: 'Close',
+    clear: 'Clear',
     enabled: 'Enabled',
     disabled: 'Disabled',
 	    total: 'Total',
@@ -69,6 +81,7 @@ export default {
     saving: 'Saving...',
     selectedCount: '({count} selected)',
     refresh: 'Refresh',
+    retry: 'Retry',
     autoRefresh: {
       title: 'Auto Refresh',
       enable: 'Enable auto refresh',
@@ -164,6 +177,10 @@ export default {
     channels: 'Channels',
     availableChannels: 'Available Channels',
     subscriptions: 'Subscriptions',
+    virtualCurrency: 'Assets',
+    citySimulation: 'City Simulation',
+    virtualCurrencies: 'Virtual Currencies',
+    virtualCurrencyIntegrations: 'Currency Integrations',
     accounts: 'Accounts',
     proxies: 'Proxies',
     redeemCodes: 'Redeem Codes',
@@ -194,6 +211,222 @@ export default {
     contentModeration: 'Content Moderation',
     promptAudit: 'Prompt Audit',
     auditLogs: 'Audit Logs',
+  },
+
+  virtualCurrency: {
+    title: 'My Assets',
+    description: 'View available virtual currencies, eligible groups, and the full ledger.',
+    refresh: 'Refresh assets',
+    available: 'Available',
+    reserved: 'Reserved',
+    integerUnits: 'Whole units',
+    precision: '{count} decimal places',
+    otherAssets: 'Other assets',
+    assetCount: '{count} custom assets',
+    groups: 'Eligible groups',
+    noGroups: 'No eligible groups',
+    ledger: 'Asset ledger',
+    viewLedger: 'View ledger',
+    noWallets: 'No virtual currencies are available to you yet.',
+    noLedger: 'No ledger entries yet.',
+    createdAt: 'Time',
+    type: 'Type',
+    amount: 'Change',
+    balanceAfter: 'Balance',
+    source: 'Source',
+    reason: 'Reason',
+    loading: 'Loading assets...',
+    loadFailed: 'Failed to load assets',
+    ledgerFailed: 'Failed to load ledger',
+    earnHint: 'Assets can be granted by redeem codes, activities, missions, referrals, or games.'
+  },
+
+  citySpatial: {
+    title: 'City Spatial Simulation',
+    description: 'Inspect verified Overmap and Chunk facts, terrain layers, and immutable spatial changes.',
+    classic: 'CLASSIC spatial terminal',
+    loading: 'Loading city space',
+    loadingDescription: 'Validating the rule set, Overmap, and visible Chunks…',
+    viewportAria: 'City character map. Use arrow keys to pan, the wheel to zoom, and brackets to change Z level.',
+    empty: {
+      eyebrow: 'No world established',
+      title: 'Create the first verifiable city',
+      description: 'A city world binds a fixed rule set, generator, and seed. The map displays only spatial facts generated and posted by the server.'
+    },
+    controls: {
+      world: 'City world', selectWorld: 'Select a city world', viewMode: 'View mode',
+      overmap: 'Overmap', localMap: 'Local map', zoomOut: 'Zoom out', zoomIn: 'Zoom in',
+      refresh: 'Refresh verified spatial state', export: 'Export current Chunk as text', depth: 'Z level',
+      layerUp: 'Move one level up', layerDown: 'Move one level down',
+      dragHint: 'Drag the map or use arrow keys to pan', modeHint: 'Toggle Overmap/local map',
+      depthHint: 'Change Z level', helpHint: 'Shortcuts'
+    },
+    legend: { generated: 'Generated', structure: 'Buildings and zoning', selected: 'Selected', unloaded: 'Unloaded' },
+    mapHeader: {
+      overmap: 'OVERMAP / REGIONAL SURVEY', local: 'LOCAL / CLASSIC CELL MAP',
+      overmapSubtitle: '{count} server-backed region tiles · {buildings} buildings',
+      localSubtitle: '{count} verified Chunks cached · {buildings} buildings on this level'
+    },
+    live: {
+      overmap: 'Overmap, selected Chunk coordinate {coordinate}',
+      local: 'Local map, selected coordinate {coordinate}, {layers} content layers'
+    },
+    inspector: {
+      eyebrow: 'Spatial facts', title: 'Inspector', chunk: 'Chunk coordinate', district: 'District',
+      terrain: 'Base terrain', variant: 'Generator variant', roadMask: 'Road connections', riverMask: 'River connections',
+      state: 'Projection state', generated: 'Generated', notGenerated: 'Not generated', tileHash: 'Tile hash',
+      worldCoordinate: 'World coordinate X / Y / Z', localCoordinate: 'Local Chunk coordinate', revision: 'Revision',
+      generatedTick: 'Generated at tick', cellStack: 'Cell content stack',
+      movementCost: 'Movement cost: {value}', payloadHash: 'Payload hash', none: 'None',
+      parcels: 'Parcels', buildings: 'Buildings', zoning: 'Land-use zoning',
+      floorSummary: '{count} floors · {capacity} capacity', landStack: 'Land and building facts',
+      parcel: 'Parcel', building: 'Building', area: 'Statutory area', version: 'Fact version',
+      floors: 'Z range', floorArea: 'Gross floor area', occupancy: 'Occupied / capacity', quality: 'Quality',
+      allocations: '{count} housing allocations',
+      unavailableTitle: 'No facts are available for this Cell',
+      unavailableDescription: 'The target Chunk is not generated, is not loaded, or has no data on this Z level.',
+      emptyTitle: 'Select a map position', emptyDescription: 'Select a regional Tile or local Cell to inspect the full server response.'
+    },
+    development: {
+      eyebrow: 'Deterministic development facts', title: 'Development projects',
+      description: 'Projects pass through application, review, and mobilisation, then progress only through city ticks.',
+      unavailable: 'This world does not use the F7.4 development protocol yet.',
+      tileProjects: 'Regional projects', adjustments: 'Posted adjustments',
+      addedFloors: 'Added floors', addedCapacity: 'Added capacity', qualityGain: 'Quality gain',
+      all: 'All', active: 'Active', newProject: 'Submit development request',
+      noProjects: 'No development projects match this filter.', selectedBuilding: 'Target building',
+      selectBuildingHint: 'Select a building on the local map before submitting a project.',
+      projectName: 'Project name', projectNamePlaceholder: 'Optional project name',
+      projectType: 'Project type', developer: 'Developer', targetFloors: 'Target total floors',
+      targetQuality: 'Target quality', targetQualityHint: 'Enter milli-units; 1150 represents 115%.',
+      resources: 'Deterministic requirement estimate', basicMaterial: 'Basic material', capitalGoods: 'Capital goods',
+      labor: 'Labor', duration: 'Duration', ticks: '{count} ticks',
+      serverAuthoritative: 'The bound server policy recalculates final cost, capacity, and duration.',
+      progress: 'Construction progress', submittedAt: 'Submitted T{tick}', completionAt: 'Due T{tick}',
+      reviewNote: 'Review note', cancellationReason: 'Cancellation reason',
+      actionPrompt: 'Record the factual reason for this transition.',
+      status: {
+        submitted: 'Awaiting review', approved: 'Approved', rejected: 'Rejected',
+        under_construction: 'Under construction', completed: 'Completed', cancelled: 'Cancelled'
+      },
+      type: { vertical_expansion: 'Vertical expansion', renovation: 'Renovation' },
+      action: {
+        submit: 'Submit request', approve: 'Approve', reject: 'Reject', start: 'Start',
+        cancel: 'Cancel project', confirm: 'Confirm action', processing: 'Posting fact…'
+      },
+      commandSuccess: 'The development fact was posted through a city tick.',
+      commandFailed: 'Development command failed'
+    },
+    enterprise: {
+      eyebrow: 'Enterprise spatial facts', title: 'Enterprise sites and relocation',
+      description: 'Inspect real building occupancy and execute openings, resizing, closure, and cross-district relocation through city ticks.',
+      unavailable: 'This world does not use the F7.5 enterprise-location protocol yet.',
+      noSites: 'No enterprise sites match these filters.', primary: 'Primary site',
+      version: 'Fact version v{version}',
+      filter: {
+        firm: 'Firm', district: 'District', type: 'Site type', status: 'Status',
+        allFirms: 'All firms', allDistricts: 'All districts', allTypes: 'All types', allStatuses: 'All statuses'
+      },
+      columns: { site: 'Site', firm: 'Firm entity', location: 'Building and pool', capacity: 'Occupied units', status: 'Status' },
+      siteType: { headquarters: 'Headquarters', office: 'Office', production: 'Production site', warehouse: 'Warehouse', retail: 'Retail site' },
+      status: { active: 'Active', closed: 'Closed' },
+      factType: { opened: 'Opened', resized: 'Occupancy resized', closed: 'Closed', relocated: 'Cross-district relocation' },
+      action: { open: 'Open site', resize: 'Resize occupancy', close: 'Close site', relocate: 'Relocate firm', confirm: 'Confirm and submit' },
+      form: {
+        firm: 'Firm entity', siteType: 'Site type', pool: 'Target unit pool', name: 'Site name',
+        occupiedUnits: 'Target occupied units', policyMinimum: 'Leave blank for policy minimum', reason: 'Factual reason',
+        currentDistrict: 'Current primary district', targetDistrict: 'Target district',
+        headquartersPool: 'New headquarters pool', productionPool: 'New production pool',
+        serverAuthoritative: 'The bound server policy recalculates minimum occupancy, use compatibility, capacity, and required-site constraints.',
+        relocationWarning: 'Relocation atomically closes the old primary sites, opens a new headquarters and production site, and conserves every non-zero firm inventory balance.'
+      },
+      facts: { title: 'Immutable enterprise-location facts', count: '{count} records', multiSite: 'Multiple primary sites', empty: 'No enterprise-location changes have been posted.' },
+      inspector: { tileSites: 'Regional enterprise sites', poolCapacity: 'Pool {occupied} / {effective}' },
+      commandSuccess: 'The enterprise-location fact was posted through a city tick.',
+      commandFailed: 'Enterprise-location command failed'
+    },
+    runtime: {
+      eyebrow: 'Open-world runtime', title: 'Characters, progression, and rules',
+      description: 'Server-posted facts determine character state, actions, role transitions, rule cases, and sanctions.',
+      unavailable: 'This world does not enable the open-world runtime.', actorSelection: 'Select character', unknown: 'Unknown definition',
+      processing: 'Posting…', perform: 'Perform', transition: 'Change role',
+      attributes: 'Character attributes', activities: 'Available actions', roles: 'Identity and profession', statuses: 'Statuses and sanctions',
+      cases: 'Rule cases', rules: 'Public rules', facts: 'Character fact history',
+      serverAuthoritative: 'Values are computed by the server', activitiesHint: 'Actions change attributes and may trigger world rules',
+      rolesHint: 'Transitions require the necessary attributes, history, and identity',
+      statusSummary: '{stacks} stacks · intensity {intensity}', noStatuses: 'This character has no status or sanction records.',
+      noCases: 'This character has no rule cases.', commandSuccess: 'The character fact was posted through the city tick.',
+      commandFailed: 'Open-world operation failed',
+      counters: { actors: 'Actors', facts: 'Facts', cases: 'Cases' },
+      creation: {
+        eyebrow: 'Character initialization', title: 'Choose a starter character and enter the world', archetype: 'Starter character',
+        capacity: 'Character slots {current} / {maximum}', name: 'Character name',
+        namePlaceholder: 'Enter a character name', confirm: 'Create character'
+      },
+      roleState: {
+        active: 'Currently active', eligible: 'Transition requirements satisfied', requirements: 'Requirements not yet satisfied',
+        cooldown: 'Wait {count} more ticks'
+      }
+    },
+    landUse: { residential: 'Residential', commercial: 'Commercial', industrial: 'Industrial' },
+    portalType: { entrance: 'Entrance', stair: 'Stair' },
+    context: {
+      chunk: 'Chunk {x}, {y}, {z}', inspect: 'Open local map', generate: 'Generate verified Chunk',
+      generating: 'Generating…', generatedSuccess: 'Chunk generated through a city tick and loaded',
+      generateFailed: 'Chunk generation failed'
+    },
+    changes: {
+      eyebrow: 'Immutable fact stream', title: 'Spatial change log', count: '{count} records',
+      empty: 'This world has no spatial changes yet.'
+    },
+    createWorld: {
+      action: 'New city', title: 'Create city world', name: 'City name',
+      namePlaceholder: 'For example: Harbor Test City', timezone: 'IANA time zone',
+      timezoneHint: 'Used for city calendar boundaries, for example Asia/Shanghai.', creating: 'Creating…',
+      confirm: 'Create and bind rule set', success: 'City world created', failed: 'Failed to create city world'
+    },
+    help: {
+      action: 'View shortcuts', title: 'CLASSIC map controls', pan: 'Pan by one Cell', zoom: 'Scale glyph size',
+      depth: 'Change the current Z level', surface: 'Return to surface Z=0', mode: 'Toggle Overmap and local map',
+      inspect: 'Open a selected region or inspect a Cell', back: 'Return to Overmap', openHelp: 'Open this help',
+      note: 'Map shortcuts are disabled while an input has focus. Every shortcut also has an on-screen control.'
+    },
+    export: { unavailable: 'Select a loaded Chunk first', success: 'Chunk text exported' }
+  },
+
+  worldRuntime: {
+    actorTypes: { character: 'Character' },
+    attributes: {
+      vitality: 'Vitality', reasoning: 'Reasoning', coordination: 'Coordination', communication: 'Communication', discipline: 'Discipline'
+    },
+    archetypes: {
+      residentGeneralist: 'Resident generalist', residentGeneralistDescription: 'A balanced resident with an apprentice profession.',
+      urbanApprentice: 'Urban apprentice', urbanApprenticeDescription: 'Strong reasoning and discipline for technical career progression.',
+      fieldSurvivor: 'Field survivor', fieldSurvivorDescription: 'High vitality and coordination for demanding action and exploration.'
+    },
+    roles: {
+      resident: 'Resident', residentDescription: 'A foundational identity in the city community.',
+      apprentice: 'Apprentice', apprenticeDescription: 'Builds professional capability through study and practice.',
+      technician: 'Technician', technicianDescription: 'A technical profession unlocked through reasoning, coordination, and apprenticeship.'
+    },
+    activities: {
+      technicalStudy: 'Technical study', technicalStudyDescription: 'Improves reasoning, discipline, and relevant experience.',
+      physicalTraining: 'Physical training', physicalTrainingDescription: 'Improves vitality, coordination, and relevant experience.',
+      communityService: 'Community service', communityServiceDescription: 'Improves discipline and communication through public service.',
+      disruptiveNoise: 'Create disruptive noise', disruptiveNoiseDescription: 'Reduces discipline and triggers public-order rules.'
+    },
+    statuses: {
+      civicWarning: 'Civic warning', civicWarningDescription: 'A time-limited warning for a public-order violation.',
+      communityServiceOrder: 'Community service order', communityServiceOrderDescription: 'A community-service sanction for repeated violations.'
+    },
+    rules: {
+      publicOrderNoise: 'Public order: noise', publicOrderNoiseDescription: 'Escalates disruptive-noise consequences by occurrences in a time window.'
+    },
+    facts: {
+      actor_created: 'Character created', actor_activity_performed: 'Action performed',
+      actor_role_transitioned: 'Role transitioned', actor_status_expired: 'Status expired',
+      rule_consequence_applied: 'Rule consequence applied'
+    }
   },
 
   // Auth

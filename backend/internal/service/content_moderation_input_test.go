@@ -94,6 +94,35 @@ func TestExtractContentModerationInput_OpenAIChatMultiTurnExtractsLatestUser(t *
 	require.Equal(t, "Q2", input.Text)
 }
 
+func TestExtractContentModerationInputWithContext_OpenAIChatKeepsRecentUserTurns(t *testing.T) {
+	body := []byte(`{
+		"messages": [
+			{"role":"user","content":"Q1"},
+			{"role":"assistant","content":"A1"},
+			{"role":"user","content":"Q2"}
+		]
+	}`)
+
+	input := ExtractContentModerationInputWithContext(ContentModerationProtocolOpenAIChat, body, 4)
+
+	require.Equal(t, "Q1 Q2", input.Text)
+}
+
+func TestExtractContentModerationInputWithContextKeepsToolLoopSkip(t *testing.T) {
+	body := []byte(`{
+		"messages": [
+			{"role":"user","content":"Q1"},
+			{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]},
+			{"role":"tool","tool_call_id":"call_1","content":"result"}
+		]
+	}`)
+
+	input := ExtractContentModerationInputWithContext(ContentModerationProtocolOpenAIChat, body, 4)
+
+	require.Empty(t, input.Text)
+	require.Empty(t, input.Images)
+}
+
 func TestExtractContentModerationInput_GeminiAgentToolLoopSkipsAudit(t *testing.T) {
 	body := []byte(`{
 		"contents": [

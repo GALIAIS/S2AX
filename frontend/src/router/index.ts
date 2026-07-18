@@ -291,6 +291,30 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/currencies',
+    name: 'UserCurrencies',
+    component: () => import('@/views/user/CurrenciesView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Assets',
+      titleKey: 'virtualCurrency.title',
+      descriptionKey: 'virtualCurrency.description'
+    }
+  },
+  {
+    path: '/city',
+    name: 'CitySpatial',
+    component: () => import('@/views/user/CitySpatialView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'City Simulation',
+      titleKey: 'citySpatial.title',
+      descriptionKey: 'citySpatial.description'
+    }
+  },
+  {
     path: '/purchase',
     name: 'PurchaseSubscription',
     component: () => import('@/views/user/PaymentView.vue'),
@@ -449,6 +473,30 @@ const routes: RouteRecordRaw[] = [
       title: 'Group Management',
       titleKey: 'admin.groups.title',
       descriptionKey: 'admin.groups.description'
+    }
+  },
+  {
+    path: '/admin/currencies',
+    name: 'AdminCurrencies',
+    component: () => import('@/views/admin/CurrenciesView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Virtual Currencies',
+      titleKey: 'admin.virtualCurrency.title',
+      descriptionKey: 'admin.virtualCurrency.description'
+    }
+  },
+  {
+    path: '/admin/currency-integrations',
+    name: 'AdminCurrencyIntegrations',
+    component: () => import('@/views/admin/CurrencyIntegrationsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Currency Integrations',
+      titleKey: 'admin.currencyIntegration.title',
+      descriptionKey: 'admin.currencyIntegration.description'
     }
   },
   {

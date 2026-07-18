@@ -72,6 +72,15 @@ func (RedeemCode) Fields() []ent.Field {
 			Nillable(),
 		field.Int("validity_days").
 			Default(30),
+		field.Int64("currency_id").
+			Optional().
+			Nillable(),
+		field.Int64("currency_amount_units").
+			Optional().
+			Nillable(),
+		field.Int64("currency_group_id").
+			Optional().
+			Nillable(),
 	}
 }
 

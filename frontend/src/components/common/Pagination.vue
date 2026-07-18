@@ -5,6 +5,7 @@
     <div class="flex flex-1 items-center justify-between sm:hidden">
       <!-- Mobile pagination -->
       <button
+        type="button"
         @click="goToPage(page - 1)"
         :disabled="page === 1"
         class="relative inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600"
@@ -15,6 +16,7 @@
         {{ t('pagination.pageOf', { page, total: totalPages }) }}
       </span>
       <button
+        type="button"
         @click="goToPage(page + 1)"
         :disabled="page === totalPages"
         class="relative ml-3 inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600"
@@ -74,6 +76,7 @@
       >
         <!-- Previous button -->
         <button
+          type="button"
           @click="goToPage(page - 1)"
           :disabled="page === 1"
           class="relative inline-flex items-center rounded-l-md border border-gray-300 bg-white px-2 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-400 dark:hover:bg-dark-600"
@@ -86,6 +89,7 @@
         <button
           v-for="(pageNum, index) in visiblePages"
           :key="`${pageNum}-${index}`"
+          type="button"
           @click="typeof pageNum === 'number' && goToPage(pageNum)"
           :disabled="typeof pageNum !== 'number'"
           :class="[
@@ -105,6 +109,7 @@
 
         <!-- Next button -->
         <button
+          type="button"
           @click="goToPage(page + 1)"
           :disabled="page === totalPages"
           class="relative inline-flex items-center rounded-r-md border border-gray-300 bg-white px-2 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-400 dark:hover:bg-dark-600"

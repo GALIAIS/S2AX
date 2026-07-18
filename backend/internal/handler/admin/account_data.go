@@ -693,8 +693,10 @@ func validateDataAccount(item DataAccount) error {
 	default:
 		return fmt.Errorf("account type is invalid: %s", item.Type)
 	}
-	if item.RateMultiplier != nil && *item.RateMultiplier < 0 {
-		return errors.New("rate_multiplier must be >= 0")
+	if item.RateMultiplier != nil {
+		if err := service.ValidateRateMultiplier(*item.RateMultiplier, true); err != nil {
+			return err
+		}
 	}
 	if item.Concurrency < 0 {
 		return errors.New("concurrency must be >= 0")

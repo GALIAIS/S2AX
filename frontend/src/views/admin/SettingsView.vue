@@ -2,7 +2,7 @@
   <AppLayout>
     <div class="mx-auto max-w-6xl space-y-6">
       <!-- Loading State -->
-      <div v-if="loading" class="flex items-center justify-center py-12">
+      <div v-if="isInitialLoading" class="flex items-center justify-center py-12">
         <div
           class="h-8 w-8 animate-spin rounded-full border-b-2 border-primary-600"
         ></div>
@@ -10,6 +10,12 @@
 
       <!-- Settings Form -->
       <form v-else @submit.prevent="saveSettings" class="space-y-6" novalidate>
+        <div v-if="loadFailed" class="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300" role="alert">
+          <Icon name="xCircle" size="sm" />
+          <span>{{ loadErrorMessage }}</span>
+          <button type="button" class="btn btn-secondary btn-sm" @click="loadSettings">{{ t('misc.retry') }}</button>
+        </div>
+
         <!-- Tab Navigation -->
         <div class="settings-tabs-shell">
           <nav
@@ -6183,7 +6189,10 @@
                   </button>
                 </div>
 
-                <div class="overflow-hidden rounded-lg border border-gray-200 dark:border-dark-700">
+                <div class="relative overflow-hidden rounded-lg border border-gray-200 dark:border-dark-700" :aria-busy="affiliateState.loading">
+                  <div v-if="affiliateState.loading && affiliateState.entries.length > 0" class="absolute right-3 top-3 z-10 rounded-md bg-white/95 px-2.5 py-1 text-xs text-gray-500 shadow-sm ring-1 ring-gray-200 backdrop-blur dark:bg-dark-800/95 dark:text-gray-300 dark:ring-dark-600" role="status">
+                    {{ t('common.refreshing') }}
+                  </div>
                   <table class="min-w-full divide-y divide-gray-200 dark:divide-dark-700">
                     <thead class="bg-gray-50 dark:bg-dark-800">
                       <tr>
@@ -6202,12 +6211,12 @@
                       </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-200 bg-white dark:divide-dark-700 dark:bg-dark-900">
-                      <tr v-if="affiliateState.loading">
+                      <tr v-if="affiliateState.loading && affiliateState.entries.length === 0">
                         <td colspan="6" class="px-3 py-6 text-center text-sm text-gray-500">
                           {{ t('common.loading') }}
                         </td>
                       </tr>
-                      <tr v-else-if="affiliateState.entries.length === 0">
+                      <tr v-else-if="!affiliateState.loading && affiliateState.entries.length === 0">
                         <td colspan="6" class="px-3 py-6 text-center text-sm text-gray-500">
                           {{ t('admin.settings.features.affiliate.customUsers.empty') }}
                         </td>
@@ -6613,8 +6622,8 @@
                           ) || 1
                       "
                       type="number"
-                      step="0.01"
-                      min="0.01"
+                      :step="RATE_MULTIPLIER_STEP"
+                      :min="MIN_RATE_MULTIPLIER"
                       class="input"
                     />
                     <p class="mt-0.5 text-xs text-gray-400">
@@ -7471,7 +7480,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from "vue";
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { adminAPI } from "@/api";
 import {
@@ -7523,7 +7532,10 @@ import { affiliatesAPI, type AffiliateAdminEntry, type SimpleUser as AffiliateSi
 import { extractApiErrorMessage, extractI18nErrorMessage } from "@/utils/apiError";
 import { useAppStore } from "@/stores";
 import { useAdminSettingsStore } from "@/stores/adminSettings";
+import { MIN_RATE_MULTIPLIER, RATE_MULTIPLIER_STEP } from "@/utils/formatters";
 import { normalizeVisibleMethod } from "@/components/payment/paymentFlow";
+import { PROJECT_URL } from "@/config/project";
+import { useInitialLoading } from "@/composables/useInitialLoading";
 import {
   isRegistrationEmailSuffixDomainValid,
   normalizeRegistrationEmailSuffixDomain,
@@ -7548,14 +7560,14 @@ function localText(zh: string, en: string): string {
 
 const paymentGuideHref = computed(() =>
   locale.value.startsWith("zh")
-    ? "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT_CN.md"
-    : "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT.md",
+    ? `${PROJECT_URL}/blob/main/docs/PAYMENT_CN.md`
+    : `${PROJECT_URL}/blob/main/docs/PAYMENT.md`,
 );
 
 const paymentMethodsHref = computed(() =>
   locale.value.startsWith("zh")
-    ? "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT_CN.md#支持的支付方式"
-    : "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT.md#supported-payment-methods",
+    ? `${PROJECT_URL}/blob/main/docs/PAYMENT_CN.md#支持的支付方式`
+    : `${PROJECT_URL}/blob/main/docs/PAYMENT.md#supported-payment-methods`,
 );
 
 type SettingsTab =
@@ -7634,7 +7646,9 @@ function handleSettingsTabKeydown(event: KeyboardEvent, tab: SettingsTab): void 
 const { copyToClipboard } = useClipboard();
 
 const loading = ref(true);
+const { isInitialLoading } = useInitialLoading(loading);
 const loadFailed = ref(false);
+const loadErrorMessage = ref("");
 const saving = ref(false);
 const testingSmtp = ref(false);
 const sendingTestEmail = ref(false);
@@ -9073,7 +9087,7 @@ function findDuplicateLoginAgreementDocumentId(
 }
 
 function formatTablePageSizeOptions(options: number[]): string {
-  return options.join(", ");
+  return (Array.isArray(options) ? options : []).join(", ");
 }
 
 function parseTablePageSizeOptionsInput(raw: string): number[] | null {
@@ -9182,8 +9196,9 @@ function removeCodexWhitelistRow(i: number): void {
 async function loadSettings() {
   loading.value = true;
   loadFailed.value = false;
+  loadErrorMessage.value = "";
   try {
-    const settings = await adminAPI.settings.getSettings();
+    const settings = (await adminAPI.settings.getSettings()) || {};
     settings.payment_load_balance_strategy =
       settings.payment_load_balance_strategy || "round-robin";
     // Only assign non-null values from backend (null means unconfigured, keep defaults)
@@ -9325,9 +9340,8 @@ async function loadSettings() {
     await loadWebSearchConfig();
   } catch (error: unknown) {
     loadFailed.value = true;
-    appStore.showError(
-      extractApiErrorMessage(error, t("admin.settings.failedToLoad")),
-    );
+    loadErrorMessage.value = extractApiErrorMessage(error, t("admin.settings.failedToLoad"));
+    appStore.showError(loadErrorMessage.value);
   } finally {
     loading.value = false;
   }
@@ -10788,6 +10802,9 @@ const affiliateState = reactive<AffiliateState>({
   searchTimer: null,
 });
 
+let affiliateAbortController: AbortController | null = null;
+let affiliateRequestSequence = 0;
+
 // `rate` is typed as string|number because <input type="number"> makes Vue's
 // v-model auto-cast the bound value to a Number on every keystroke. We keep
 // both shapes and normalize at read time.
@@ -10904,22 +10921,37 @@ function parseRebateRate(raw: unknown): number | null | undefined {
 }
 
 async function loadAffiliateUsers() {
+  affiliateAbortController?.abort();
+  const requestController = new AbortController();
+  affiliateAbortController = requestController;
+  const requestSequence = ++affiliateRequestSequence;
   affiliateState.loading = true;
   try {
     const res = await affiliatesAPI.listUsers({
       page: affiliateState.page,
       page_size: affiliateState.pageSize,
       search: affiliateState.search,
-    });
+    }, { signal: requestController.signal });
+    if (requestController.signal.aborted || requestSequence !== affiliateRequestSequence) return;
     affiliateState.entries = res.items ?? [];
     affiliateState.total = res.total ?? 0;
     // Drop selections that are no longer visible.
     const visibleIds = new Set(affiliateState.entries.map((e) => e.user_id));
     affiliateState.selected = affiliateState.selected.filter((id) => visibleIds.has(id));
   } catch (err) {
+    const errorInfo = err as { name?: string; code?: string };
+    if (
+      requestController.signal.aborted ||
+      requestSequence !== affiliateRequestSequence ||
+      errorInfo?.name === "AbortError" ||
+      errorInfo?.code === "ERR_CANCELED"
+    ) return;
     appStore.showError(extractApiErrorMessage(err, t("common.error")));
   } finally {
-    affiliateState.loading = false;
+    if (affiliateAbortController === requestController) {
+      affiliateState.loading = false;
+      affiliateAbortController = null;
+    }
   }
 }
 
@@ -10935,6 +10967,11 @@ function changeAffiliatePage(page: number) {
   affiliateState.page = page;
   loadAffiliateUsers();
 }
+
+onUnmounted(() => {
+  affiliateAbortController?.abort();
+  affiliateAbortController = null;
+});
 
 function toggleAffiliateSelectAll(e: Event) {
   const checked = (e.target as HTMLInputElement).checked;
@@ -11142,11 +11179,11 @@ watch(
 
 /* ============ 系统设置 Tab 导航 ============ */
 .settings-tabs-shell {
-  @apply sticky z-20 -mx-1 rounded-2xl border border-white/80 bg-white/90 p-1.5 backdrop-blur-xl;
+  @apply sticky z-20 -mx-1 p-1.5;
   top: 4.75rem;
-  box-shadow:
-    0 12px 28px rgb(15 23 42 / 0.07),
-    0 1px 0 rgb(255 255 255 / 0.9) inset;
+  border: 1px solid var(--ui-separator);
+  background: var(--ui-surface-solid);
+  box-shadow: var(--ui-shadow);
 }
 
 .settings-tabs-scroll {
@@ -11184,7 +11221,7 @@ watch(
 .settings-tab::before {
   @apply absolute inset-0 -z-10 rounded-xl opacity-0 transition-opacity duration-200;
   content: "";
-  background: linear-gradient(135deg, rgb(248 250 252 / 0.95), rgb(241 245 249 / 0.8));
+  background: var(--ui-control);
 }
 
 .settings-tab:hover::before,
@@ -11197,10 +11234,10 @@ watch(
 }
 
 .settings-tab-active {
-  @apply border-primary-200/80 bg-white text-primary-700 shadow-sm dark:border-primary-400/30 dark:bg-dark-700/95 dark:text-primary-200;
-  box-shadow:
-    0 8px 18px rgb(15 23 42 / 0.08),
-    0 1px 0 rgb(255 255 255 / 0.92) inset;
+  @apply text-primary-700 dark:text-primary-200;
+  border-color: color-mix(in srgb, var(--ui-accent) 38%, var(--ui-separator));
+  background: var(--ui-surface-solid);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
 }
 
 .settings-tab-active::before {
@@ -11213,9 +11250,8 @@ watch(
   bottom: 0.25rem;
   left: 0.75rem;
   height: 2px;
-  border-radius: 9999px;
   content: "";
-  background: linear-gradient(90deg, #14b8a6, #0ea5e9);
+  background: var(--ui-accent);
 }
 
 .settings-tab-icon {
@@ -11233,28 +11269,5 @@ watch(
 
 .settings-tab-label {
   @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap leading-none;
-}
-</style>
-
-<style>
-/* Dark-mode overrides for the settings tabs shell. Kept in an UNSCOPED block
-   because Vue's scoped-CSS compiler was dropping the `:global(.dark) ...`
-   rules in the production build, leaving inactive tabs unreadable on dark. */
-.dark .settings-tabs-shell {
-  border-color: rgb(51 65 85 / 0.65);
-  background: rgb(15 23 42 / 0.86);
-  box-shadow:
-    0 16px 36px rgb(0 0 0 / 0.28),
-    0 1px 0 rgb(255 255 255 / 0.06) inset;
-}
-
-.dark .settings-tab::before {
-  background: linear-gradient(135deg, rgb(30 41 59 / 0.9), rgb(51 65 85 / 0.62));
-}
-
-.dark .settings-tab-active {
-  box-shadow:
-    0 12px 26px rgb(0 0 0 / 0.22),
-    0 1px 0 rgb(255 255 255 / 0.08) inset;
 }
 </style>

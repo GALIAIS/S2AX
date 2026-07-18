@@ -8,16 +8,62 @@
   >
     <form id="import-data-form" class="space-y-4" @submit.prevent="handleImport">
       <div class="text-sm text-gray-600 dark:text-dark-300">
-        {{ t('admin.accounts.dataImportHint') }}
+        {{ mode === 'bundle' ? t('admin.accounts.dataImportHint') : t('admin.accounts.codexImportHint') }}
       </div>
+
+      <div class="grid grid-cols-2 gap-2 rounded-lg bg-gray-100 p-1 dark:bg-dark-800" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          class="rounded-md px-3 py-2 text-sm font-medium transition-colors"
+          :class="mode === 'bundle' ? 'bg-white text-gray-900 shadow-sm dark:bg-dark-700 dark:text-white' : 'text-gray-500 hover:text-gray-900 dark:text-dark-300 dark:hover:text-white'"
+          :aria-selected="mode === 'bundle'"
+          @click="setMode('bundle')"
+        >
+          {{ t('admin.accounts.dataImportBundleTab') }}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="rounded-md px-3 py-2 text-sm font-medium transition-colors"
+          :class="mode === 'codex' ? 'bg-white text-gray-900 shadow-sm dark:bg-dark-700 dark:text-white' : 'text-gray-500 hover:text-gray-900 dark:text-dark-300 dark:hover:text-white'"
+          :aria-selected="mode === 'codex'"
+          @click="setMode('codex')"
+        >
+          {{ t('admin.accounts.codexImportTab') }}
+        </button>
+      </div>
+
       <div
+        v-if="mode === 'bundle'"
         class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-600 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-400"
       >
         {{ t('admin.accounts.dataImportWarning') }}
       </div>
 
+      <div
+        v-else
+        class="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-300"
+      >
+        {{ t('admin.accounts.codexImportFormats') }}
+      </div>
+
+      <div v-if="mode === 'codex'">
+        <label class="input-label" for="codex-import-content">{{ t('admin.accounts.codexImportPaste') }}</label>
+        <textarea
+          id="codex-import-content"
+          v-model="codexContent"
+          class="input min-h-36 resize-y font-mono text-xs leading-5"
+          :placeholder="t('admin.accounts.codexImportPlaceholder')"
+          spellcheck="false"
+        ></textarea>
+        <p class="input-hint">{{ t('admin.accounts.codexImportPasteHint') }}</p>
+      </div>
+
       <div>
-        <label class="input-label">{{ t('admin.accounts.dataImportFile') }}</label>
+        <label class="input-label">
+          {{ mode === 'bundle' ? t('admin.accounts.dataImportFile') : t('admin.accounts.codexImportFile') }}
+        </label>
         <div
           class="flex items-center justify-between gap-3 rounded-lg border border-dashed px-4 py-3 transition-colors"
           :class="dragActive
@@ -30,7 +76,7 @@
         >
           <div class="min-w-0">
             <div class="truncate text-sm text-gray-700 dark:text-dark-200" :title="fileListTitle">
-              {{ selectedFilesLabel || t('admin.accounts.dataImportSelectFile') }}
+              {{ selectedFilesLabel || (mode === 'bundle' ? t('admin.accounts.dataImportSelectFile') : t('admin.accounts.codexImportSelectFile')) }}
             </div>
             <div class="text-xs text-gray-500 dark:text-dark-400">
               JSON (.json)
@@ -52,14 +98,17 @@
       </div>
 
       <div
-        v-if="result"
+        v-if="result || codexResult"
         class="space-y-2 rounded-xl border border-gray-200 p-4 dark:border-dark-700"
       >
         <div class="text-sm font-medium text-gray-900 dark:text-white">
           {{ t('admin.accounts.dataImportResult') }}
         </div>
-        <div class="text-sm text-gray-700 dark:text-dark-300">
+        <div v-if="result" class="text-sm text-gray-700 dark:text-dark-300">
           {{ t('admin.accounts.dataImportResultSummary', result) }}
+        </div>
+        <div v-else-if="codexResult" class="text-sm text-gray-700 dark:text-dark-300">
+          {{ t('admin.accounts.codexImportResultSummary', codexResult) }}
         </div>
 
         <div v-if="errorItems.length" class="mt-2">
@@ -71,6 +120,17 @@
           >
             <div v-for="(item, idx) in errorItems" :key="idx" class="whitespace-pre-wrap">
               {{ item.kind }} {{ item.name || item.proxy_key || '-' }} — {{ item.message }}
+            </div>
+          </div>
+        </div>
+
+        <div v-if="codexMessages.length" class="mt-2">
+          <div class="text-sm font-medium text-amber-700 dark:text-amber-300">
+            {{ t('admin.accounts.codexImportDetails') }}
+          </div>
+          <div class="mt-2 max-h-48 overflow-auto rounded-lg bg-gray-50 p-3 font-mono text-xs dark:bg-dark-800">
+            <div v-for="(item, idx) in codexMessages" :key="idx" class="whitespace-pre-wrap">
+              #{{ item.index }} {{ item.name || '-' }} — {{ item.message }}
             </div>
           </div>
         </div>
@@ -101,7 +161,7 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
-import type { AdminDataImportResult, AdminDataPayload } from '@/types'
+import type { AdminDataImportResult, AdminDataPayload, CodexSessionImportMessage, CodexSessionImportResult } from '@/types'
 
 interface Props {
   show: boolean
@@ -119,11 +179,14 @@ const { t } = useI18n()
 const appStore = useAppStore()
 
 const importing = ref(false)
+const mode = ref<'bundle' | 'codex'>('bundle')
 const files = ref<File[]>([])
+const codexContent = ref('')
 const dragDepth = ref(0)
 const dragActive = computed(() => dragDepth.value > 0)
 const hasCreatedData = ref(false)
 const result = ref<AdminDataImportResult | null>(null)
+const codexResult = ref<CodexSessionImportResult | null>(null)
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const selectedFilesLabel = computed(() => {
@@ -134,15 +197,31 @@ const selectedFilesLabel = computed(() => {
 const fileListTitle = computed(() => files.value.map((item) => item.name).join(', '))
 
 const errorItems = computed(() => result.value?.errors || [])
+const codexMessages = computed<CodexSessionImportMessage[]>(() => [
+  ...(codexResult.value?.errors || []),
+  ...(codexResult.value?.warnings || [])
+])
+
+const setMode = (value: 'bundle' | 'codex') => {
+  if (importing.value || mode.value === value) return
+  mode.value = value
+  files.value = []
+  result.value = null
+  codexResult.value = null
+  if (fileInput.value) fileInput.value.value = ''
+}
 
 watch(
   () => props.show,
   (open) => {
     if (open) {
       files.value = []
+      mode.value = 'bundle'
+      codexContent.value = ''
       dragDepth.value = 0
       hasCreatedData.value = false
       result.value = null
+      codexResult.value = null
       if (fileInput.value) {
         fileInput.value.value = ''
       }
@@ -189,6 +268,7 @@ const setSelectedFiles = (sourceFiles: FileList | File[] | null | undefined) => 
   }
   files.value = picked
   result.value = null
+  codexResult.value = null
 }
 
 const handleDragEnter = () => {
@@ -267,6 +347,11 @@ const mergeDataPayloads = (payloads: AdminDataPayload[]): AdminDataPayload => {
 }
 
 const handleImport = async () => {
+  if (mode.value === 'codex') {
+    await handleCodexImport()
+    return
+  }
+
   if (files.value.length === 0) {
     appStore.showError(t('admin.accounts.dataImportSelectFile'))
     return
@@ -319,6 +404,57 @@ const handleImport = async () => {
     }
   } catch (error: any) {
     appStore.showError(error?.message || t('admin.accounts.dataImportFailed'))
+  } finally {
+    importing.value = false
+  }
+}
+
+const handleCodexImport = async () => {
+  const contents: string[] = []
+  const pasted = codexContent.value.trim()
+  if (pasted) contents.push(pasted)
+
+  try {
+    for (const sourceFile of files.value) {
+      const content = (await readFileAsText(sourceFile)).trim()
+      if (content) contents.push(content)
+    }
+  } catch {
+    appStore.showError(t('admin.accounts.dataImportParseFailed'))
+    return
+  }
+
+  if (contents.length === 0) {
+    appStore.showError(t('admin.accounts.codexImportEmpty'))
+    return
+  }
+
+  importing.value = true
+  try {
+    const imported = await adminAPI.accounts.importCodexSession({
+      contents,
+      update_existing: true,
+      skip_default_group_bind: false
+    })
+    codexResult.value = imported
+    result.value = null
+
+    const changed = imported.created + imported.updated
+    if (changed > 0) hasCreatedData.value = true
+
+    const params = {
+      created: imported.created,
+      updated: imported.updated,
+      skipped: imported.skipped,
+      failed: imported.failed
+    }
+    if (imported.failed > 0) {
+      appStore.showWarning(t('admin.accounts.codexImportPartial', params))
+    } else {
+      appStore.showSuccess(t('admin.accounts.codexImportSuccess', params))
+    }
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.accounts.codexImportFailed'))
   } finally {
     importing.value = false
   }

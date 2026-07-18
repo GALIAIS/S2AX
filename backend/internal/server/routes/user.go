@@ -1,11 +1,15 @@
 package routes
 
 import (
+	"time"
+
 	"github.com/Wei-Shaw/sub2api/internal/handler"
+	rateLimitMiddleware "github.com/Wei-Shaw/sub2api/internal/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 )
 
 // RegisterUserRoutes 注册用户相关路由（需要认证）
@@ -15,7 +19,14 @@ func RegisterUserRoutes(
 	jwtAuth middleware.JWTAuthMiddleware,
 	auditLog middleware.AuditLogMiddleware,
 	settingService *service.SettingService,
+	redisClient *redis.Client,
 ) {
+	// 游戏、任务和其他服务使用独立的 HMAC 凭据，不经过用户 JWT 中间件。
+	rateLimiter := rateLimitMiddleware.NewRateLimiter(redisClient)
+	v1.POST("/integrations/virtual-currency/mutations", rateLimiter.LimitWithOptions("virtual-currency-integration", 120, time.Minute, rateLimitMiddleware.RateLimitOptions{
+		FailureMode: rateLimitMiddleware.RateLimitFailClose,
+	}), h.VirtualCurrencyIntegration.Execute)
+
 	authenticated := v1.Group("")
 	authenticated.Use(gin.HandlerFunc(jwtAuth))
 	authenticated.Use(middleware.BackendModeUserGuard(settingService))
@@ -77,6 +88,80 @@ func RegisterUserRoutes(
 			groups.GET("/rates", h.APIKey.GetUserGroupRates)
 		}
 
+		// 用户虚拟货币资产
+		currencies := authenticated.Group("/user/currencies")
+		{
+			currencies.GET("", h.VirtualCurrency.ListWallets)
+			currencies.GET("/holds", h.VirtualCurrency.ListHolds)
+			currencies.POST("/:code/holds", h.VirtualCurrency.Reserve)
+			currencies.POST("/holds/:id/commit", h.VirtualCurrency.CommitHold)
+			currencies.POST("/holds/:id/release", h.VirtualCurrency.ReleaseHold)
+			currencies.GET("/:code/ledger", h.VirtualCurrency.ListLedger)
+			currencies.POST("/:code/spend", h.VirtualCurrency.Spend)
+		}
+
+		// 城市模拟基础域
+		citySpatial := authenticated.Group("/city/spatial")
+		{
+			citySpatial.GET("/rule-sets", h.CityEconomy.ListSpatialRuleSets)
+			citySpatial.GET("/rule-sets/:rule_set_id", h.CityEconomy.GetSpatialRuleSet)
+		}
+
+		cityWorlds := authenticated.Group("/city/worlds")
+		cityWorlds.Use(middleware.RequestBodyLimit(16 << 10))
+		{
+			cityWorlds.GET("", h.CityEconomy.ListWorlds)
+			cityWorlds.POST("", h.CityEconomy.CreateWorld)
+			cityWorlds.GET("/:world_id", h.CityEconomy.GetWorld)
+			cityWorlds.GET("/:world_id/state", h.CityEconomy.GetPhysicalState)
+			cityWorlds.GET("/:world_id/calendar", h.CityEconomy.GetCalendarState)
+			cityWorlds.GET("/:world_id/population", h.CityEconomy.GetPopulationState)
+			cityWorlds.GET("/:world_id/markets", h.CityEconomy.GetMarketOverview)
+			cityWorlds.GET("/:world_id/spatial/ruleset", h.CityEconomy.GetWorldSpatialRuleSet)
+			cityWorlds.GET("/:world_id/spatial/overmap", h.CityEconomy.GetOvermap)
+			cityWorlds.GET("/:world_id/land", h.CityEconomy.GetLandState)
+			cityWorlds.GET("/:world_id/development", h.CityEconomy.GetDevelopmentState)
+			cityWorlds.GET("/:world_id/enterprise-locations", h.CityEconomy.GetEnterpriseLocationState)
+			cityWorlds.GET("/:world_id/runtime/catalog", h.CityEconomy.GetWorldRuntimeCatalog)
+			cityWorlds.GET("/:world_id/runtime/actors", h.CityEconomy.ListWorldActors)
+			cityWorlds.GET("/:world_id/runtime/actors/:actor_code", h.CityEconomy.GetWorldActorState)
+			cityWorlds.GET("/:world_id/runtime/actors/:actor_code/roles", h.CityEconomy.GetWorldActorRoleOptions)
+			cityWorlds.GET("/:world_id/runtime/rules", h.CityEconomy.ListWorldRules)
+			cityWorlds.GET("/:world_id/runtime/cases", h.CityEconomy.ListWorldRuleCases)
+			cityWorlds.GET("/:world_id/spatial/chunks", h.CityEconomy.ListMapChunks)
+			cityWorlds.GET("/:world_id/spatial/chunks/:chunk_x/:chunk_y/:z", h.CityEconomy.GetMapChunk)
+			cityWorlds.GET("/:world_id/spatial/changes", h.CityEconomy.ListSpatialMutations)
+			cityWorlds.POST("/:world_id/commands", h.CityEconomy.SubmitCommand)
+			cityWorlds.GET("/:world_id/commands/:command_id", h.CityEconomy.GetCommand)
+			cityWorlds.POST("/:world_id/step", h.CityEconomy.StepWorld)
+			cityWorlds.GET("/:world_id/events", h.CityEconomy.ListEvents)
+			cityWorlds.GET("/:world_id/journals", h.CityEconomy.ListJournals)
+			cityWorlds.GET("/:world_id/journals/:tick/:sequence", h.CityEconomy.GetJournal)
+			cityWorlds.GET("/:world_id/trial-balance", h.CityEconomy.GetTrialBalance)
+			cityWorlds.GET("/:world_id/resource-operations", h.CityEconomy.ListResourceOperations)
+			cityWorlds.GET("/:world_id/resource-operations/:tick/:sequence", h.CityEconomy.GetResourceOperation)
+			cityWorlds.GET("/:world_id/market-settlements", h.CityEconomy.ListMarketSettlements)
+			cityWorlds.GET("/:world_id/market-settlements/:tick/:sequence", h.CityEconomy.GetMarketSettlement)
+			cityWorlds.GET("/:world_id/population-movements", h.CityEconomy.ListPopulationMovements)
+			cityWorlds.GET("/:world_id/population-movements/:tick/:sequence", h.CityEconomy.GetPopulationMovement)
+			cityWorlds.GET("/:world_id/population-migrations", h.CityEconomy.ListPopulationMigrations)
+			cityWorlds.GET("/:world_id/population-migrations/:tick/:sequence", h.CityEconomy.GetPopulationMigration)
+			cityWorlds.GET("/:world_id/household-movements", h.CityEconomy.ListHouseholdMovements)
+			cityWorlds.GET("/:world_id/household-movements/:tick/:sequence", h.CityEconomy.GetHouseholdMovement)
+			cityWorlds.GET("/:world_id/snapshots", h.CityEconomy.ListSnapshots)
+			cityWorlds.GET("/:world_id/snapshots/:tick", h.CityEconomy.GetSnapshot)
+			cityWorlds.GET("/:world_id/engine", h.CityEconomy.GetEngineInfo)
+			cityWorlds.GET("/:world_id/upgrade-runs", h.CityEconomy.ListUpgrades)
+			cityWorlds.POST("/:world_id/upgrade-runs", h.CityEconomy.StartUpgrade)
+			cityWorlds.GET("/:world_id/upgrade-runs/:run_id", h.CityEconomy.GetUpgrade)
+			cityWorlds.GET("/:world_id/replay-runs", h.CityEconomy.ListReplays)
+			cityWorlds.POST("/:world_id/replay-runs", h.CityEconomy.StartReplay)
+			cityWorlds.GET("/:world_id/replay-runs/:run_id", h.CityEconomy.GetReplay)
+			cityWorlds.GET("/:world_id/recovery-runs", h.CityEconomy.ListRecoveries)
+			cityWorlds.POST("/:world_id/recovery-runs", h.CityEconomy.StartRecovery)
+			cityWorlds.GET("/:world_id/recovery-runs/:run_id", h.CityEconomy.GetRecovery)
+		}
+
 		// 用户可用渠道（非管理员接口）
 		channels := authenticated.Group("/channels")
 		{
@@ -103,6 +188,7 @@ func RegisterUserRoutes(
 		announcements := authenticated.Group("/announcements")
 		{
 			announcements.GET("", h.Announcement.List)
+			announcements.POST("/read-all", h.Announcement.MarkAllRead)
 			announcements.POST("/:id/read", h.Announcement.MarkRead)
 		}
 

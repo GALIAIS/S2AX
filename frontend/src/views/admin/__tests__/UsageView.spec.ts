@@ -355,7 +355,7 @@ describe('admin UsageView errors tab filter forwarding', () => {
       model: 'gpt-5.3-codex',
       account_id: 7,
       group_id: 3,
-    }))
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }))
   })
 })
 

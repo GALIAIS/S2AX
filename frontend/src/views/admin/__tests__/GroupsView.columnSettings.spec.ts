@@ -256,6 +256,7 @@ describe('admin GroupsView column settings', () => {
     const wrapper = await mountView()
 
     expect(columnKeys(wrapper)).toEqual([
+      'select',
       'name',
       'platform',
       'billing_type',
@@ -281,6 +282,7 @@ describe('admin GroupsView column settings', () => {
     const wrapper = await mountView()
 
     expect(columnKeys(wrapper)).toEqual([
+      'select',
       'name',
       'id',
       'platform',
@@ -300,6 +302,7 @@ describe('admin GroupsView column settings', () => {
     const wrapper = await mountView()
 
     expect(columnKeys(wrapper)).toEqual([
+      'select',
       'name',
       'platform',
       'billing_type',
@@ -323,6 +326,7 @@ describe('admin GroupsView column settings', () => {
     await clickColumnToggle(wrapper, 'Usage')
 
     expect(columnKeys(wrapper)).toEqual([
+      'select',
       'name',
       'platform',
       'billing_type',
@@ -345,6 +349,7 @@ describe('admin GroupsView column settings', () => {
     await clickColumnToggle(wrapper, 'ID')
 
     expect(columnKeys(wrapper)).toEqual([
+      'select',
       'name',
       'id',
       'platform',

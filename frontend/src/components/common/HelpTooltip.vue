@@ -14,6 +14,10 @@ const show = ref(false)
 const triggerRef = useTemplateRef<HTMLElement>('trigger')
 const tooltipRef = useTemplateRef<HTMLElement>('tooltip')
 const tooltipStyle = ref({ top: '0px', left: '0px' })
+const placement = ref<'top' | 'bottom'>('top')
+
+const TOOLTIP_GAP = 8
+const VIEWPORT_MARGIN = 12
 
 function openTooltip() {
   show.value = true
@@ -66,11 +70,26 @@ function onViewportChange() {
 
 function updatePosition() {
   const el = triggerRef.value
-  if (!el) return
+  const tooltip = tooltipRef.value
+  if (!el || !tooltip) return
+
   const rect = el.getBoundingClientRect()
+  const tooltipRect = tooltip.getBoundingClientRect()
+  const tooltipWidth = tooltipRect.width || tooltip.offsetWidth || 256
+  const tooltipHeight = tooltipRect.height || tooltip.offsetHeight || 48
+  const viewportWidth = document.documentElement.clientWidth || window.innerWidth
+  const viewportHeight = document.documentElement.clientHeight || window.innerHeight
+  const spaceAbove = rect.top - VIEWPORT_MARGIN
+  const spaceBelow = viewportHeight - rect.bottom - VIEWPORT_MARGIN
+  const placeAbove = spaceAbove >= tooltipHeight + TOOLTIP_GAP || spaceAbove >= spaceBelow
+  const centeredLeft = rect.left + rect.width / 2
+  const minLeft = VIEWPORT_MARGIN + tooltipWidth / 2
+  const maxLeft = Math.max(minLeft, viewportWidth - VIEWPORT_MARGIN - tooltipWidth / 2)
+
+  placement.value = placeAbove ? 'top' : 'bottom'
   tooltipStyle.value = {
-    top: `${rect.top + window.scrollY}px`,
-    left: `${rect.left + rect.width / 2 + window.scrollX}px`,
+    top: `${placeAbove ? rect.top - TOOLTIP_GAP : rect.bottom + TOOLTIP_GAP}px`,
+    left: `${Math.min(Math.max(centeredLeft, minLeft), maxLeft)}px`,
   }
 }
 
@@ -92,7 +111,7 @@ onBeforeUnmount(() => {
 <template>
   <div
     ref="trigger"
-    class="group relative ml-1 inline-flex items-center align-middle"
+    class="group relative ml-1 inline-flex h-5 w-5 shrink-0 items-center justify-center align-middle leading-none"
     @mouseenter="onEnter"
     @mouseleave="onLeave"
     @click="onClick"
@@ -100,7 +119,7 @@ onBeforeUnmount(() => {
     <!-- Trigger Icon -->
     <slot name="trigger">
       <svg
-        class="h-4 w-4 cursor-help text-gray-400 transition-colors hover:text-primary-600 dark:text-gray-500 dark:hover:text-primary-400"
+        class="block h-4 w-4 cursor-help text-gray-400 transition-colors hover:text-primary-600 dark:text-gray-500 dark:hover:text-primary-400"
         fill="none"
         viewBox="0 0 24 24"
         stroke="currentColor"
@@ -120,11 +139,13 @@ onBeforeUnmount(() => {
         ref="tooltip"
         v-show="show"
         role="tooltip"
+        :data-placement="placement"
         :class="[
-          'fixed z-[99999] -translate-x-1/2 -translate-y-full rounded-lg bg-gray-900 p-3 text-xs leading-relaxed text-white shadow-xl ring-1 ring-white/10 dark:bg-gray-800',
+          'fixed z-[99999] -translate-x-1/2 bg-gray-900 p-3 text-xs leading-relaxed text-white shadow-xl ring-1 ring-white/10 dark:bg-gray-800',
+          placement === 'top' && '-translate-y-full',
           props.widthClass,
         ]"
-        :style="{ top: `calc(${tooltipStyle.top} - 8px)`, left: tooltipStyle.left }"
+        :style="tooltipStyle"
       >
         <button
           v-if="props.trigger === 'click'"
@@ -138,7 +159,12 @@ onBeforeUnmount(() => {
           </svg>
         </button>
         <slot>{{ content }}</slot>
-        <div class="absolute -bottom-1 left-1/2 h-2 w-2 -translate-x-1/2 rotate-45 bg-gray-900 dark:bg-gray-800"></div>
+        <div
+          :class="[
+            'absolute left-1/2 h-2 w-2 -translate-x-1/2 rotate-45 bg-gray-900 dark:bg-gray-800',
+            placement === 'top' ? '-bottom-1' : '-top-1',
+          ]"
+        ></div>
       </div>
     </Teleport>
   </div>

@@ -18,6 +18,7 @@ import (
 
 const (
 	securitySecretKeyJWT        = "jwt_secret"
+	securitySecretKeyTOTP       = "totp_encryption_key"
 	securitySecretReadRetryMax  = 5
 	securitySecretReadRetryWait = 10 * time.Millisecond
 )
@@ -32,6 +33,16 @@ func ensureBootstrapSecrets(ctx context.Context, client *ent.Client, cfg *config
 		return fmt.Errorf("nil config")
 	}
 
+	if err := ensureJWTBootstrapSecret(ctx, client, cfg); err != nil {
+		return err
+	}
+	if err := ensureTOTPBootstrapSecret(ctx, client, cfg); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ensureJWTBootstrapSecret(ctx context.Context, client *ent.Client, cfg *config.Config) error {
 	cfg.JWT.Secret = strings.TrimSpace(cfg.JWT.Secret)
 	if cfg.JWT.Secret != "" {
 		storedSecret, err := createSecuritySecretIfAbsent(ctx, client, securitySecretKeyJWT, cfg.JWT.Secret)
@@ -53,6 +64,57 @@ func ensureBootstrapSecrets(ctx context.Context, client *ent.Client, cfg *config
 
 	if created {
 		log.Println("Warning: JWT secret auto-generated and persisted to database. Consider rotating to a managed secret for production.")
+	}
+	return nil
+}
+
+func ensureTOTPBootstrapSecret(ctx context.Context, client *ent.Client, cfg *config.Config) error {
+	candidate := strings.TrimSpace(cfg.Totp.EncryptionKey)
+	wasConfigured := cfg.Totp.EncryptionKeyConfigured
+
+	if candidate == "" {
+		secret, created, err := getOrCreateGeneratedSecuritySecret(ctx, client, securitySecretKeyTOTP, 32)
+		if err != nil {
+			return fmt.Errorf("ensure totp encryption key: %w", err)
+		}
+		if err := validateAES256HexSecret(secret); err != nil {
+			return fmt.Errorf("invalid persisted totp encryption key: %w", err)
+		}
+		cfg.Totp.EncryptionKey = secret
+		cfg.Totp.EncryptionKeyConfigured = false
+		if created {
+			log.Println("Warning: TOTP encryption key auto-generated and persisted to database. Configure a managed key before enabling TOTP in production.")
+		}
+		return nil
+	}
+
+	if err := validateAES256HexSecret(candidate); err != nil {
+		return fmt.Errorf("invalid configured totp encryption key: %w", err)
+	}
+	storedSecret, err := createSecuritySecretIfAbsent(ctx, client, securitySecretKeyTOTP, candidate)
+	if err != nil {
+		return fmt.Errorf("persist totp encryption key: %w", err)
+	}
+	if err := validateAES256HexSecret(storedSecret); err != nil {
+		return fmt.Errorf("invalid persisted totp encryption key: %w", err)
+	}
+	if storedSecret != candidate {
+		log.Println("Warning: configured TOTP encryption key mismatches persisted value; using persisted key for cross-instance consistency.")
+	}
+	cfg.Totp.EncryptionKey = storedSecret
+	// Keep the existing safety rule: TOTP may only be enabled when the active
+	// persisted key exactly matches a key supplied by configuration.
+	cfg.Totp.EncryptionKeyConfigured = wasConfigured && storedSecret == candidate
+	return nil
+}
+
+func validateAES256HexSecret(value string) error {
+	decoded, err := hex.DecodeString(strings.TrimSpace(value))
+	if err != nil {
+		return err
+	}
+	if len(decoded) != 32 {
+		return fmt.Errorf("must decode to 32 bytes, got %d", len(decoded))
 	}
 	return nil
 }

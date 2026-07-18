@@ -1,6 +1,11 @@
 <template>
   <AppLayout>
     <div class="mx-auto max-w-2xl space-y-6">
+      <div v-if="historyError" class="data-table-error" role="alert">
+        <Icon name="xCircle" size="sm" />
+        <span>{{ historyError }}</span>
+        <button type="button" class="btn btn-ghost btn-sm" @click="fetchHistory">{{ t('misc.retry') }}</button>
+      </div>
       <!-- Current Balance Card -->
       <div class="card overflow-hidden">
         <div class="bg-gradient-to-br from-primary-500 to-primary-600 px-6 py-8 text-center">
@@ -205,9 +210,9 @@
             {{ t('redeem.recentActivity') }}
           </h2>
         </div>
-        <div class="p-6">
+        <div class="relative p-6" :aria-busy="loadingHistory">
           <!-- Loading State -->
-          <div v-if="loadingHistory" class="flex items-center justify-center py-8">
+          <div v-if="loadingHistory && history.length === 0" class="flex items-center justify-center py-8">
             <svg class="h-6 w-6 animate-spin text-primary-500" fill="none" viewBox="0 0 24 24">
               <circle
                 class="opacity-25"
@@ -335,6 +340,17 @@
               {{ t('redeem.historyWillAppear') }}
             </p>
           </div>
+
+          <div
+            v-if="loadingHistory && history.length > 0"
+            class="pointer-events-none absolute inset-0 flex items-start justify-center bg-white/45 pt-4 dark:bg-dark-900/45"
+            aria-hidden="true"
+          >
+            <svg class="h-6 w-6 animate-spin text-primary-500" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          </div>
         </div>
       </div>
     </div>
@@ -351,6 +367,7 @@ import { redeemAPI, authAPI, type RedeemHistoryItem } from '@/api'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { formatDateTime } from '@/utils/format'
+import { extractApiErrorMessage } from '@/utils/apiError'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -375,6 +392,7 @@ const errorMessage = ref('')
 // History data
 const history = ref<RedeemHistoryItem[]>([])
 const loadingHistory = ref(false)
+const historyError = ref('')
 const contactInfo = ref('')
 
 // Helper functions for history display
@@ -422,10 +440,13 @@ const formatHistoryValue = (item: RedeemHistoryItem) => {
 
 const fetchHistory = async () => {
   loadingHistory.value = true
+  historyError.value = ''
   try {
     history.value = await redeemAPI.getHistory()
   } catch (error) {
     console.error('Failed to fetch history:', error)
+    historyError.value = extractApiErrorMessage(error, t('common.error'))
+    appStore.showError(historyError.value)
   } finally {
     loadingHistory.value = false
   }

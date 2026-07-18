@@ -1512,7 +1512,8 @@ func Load() (*Config, error) {
 
 // LoadForBootstrap 读取启动阶段配置。
 //
-// 启动阶段允许 jwt.secret 先留空，后续由数据库初始化流程补齐并再次完整校验。
+// 启动阶段允许 jwt.secret 与 totp.encryption_key 先留空，后续由数据库
+// 初始化流程加载持久化密钥并再次完整校验。
 func LoadForBootstrap() (*Config, error) {
 	return load(true)
 }
@@ -1641,16 +1642,21 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 		cfg.Gateway.UserMessageQueue.Mode = ""
 	}
 
-	// Auto-generate TOTP encryption key if not set (32 bytes = 64 hex chars for AES-256)
+	// Standalone config loads retain the legacy auto-generation behavior. During
+	// server bootstrap, keep the value empty so the repository can load the
+	// stable database-backed key instead of generating a different candidate on
+	// every process start.
 	cfg.Totp.EncryptionKey = strings.TrimSpace(cfg.Totp.EncryptionKey)
 	if cfg.Totp.EncryptionKey == "" {
-		key, err := generateJWTSecret(32) // Reuse the same random generation function
-		if err != nil {
-			return nil, fmt.Errorf("generate totp encryption key error: %w", err)
-		}
-		cfg.Totp.EncryptionKey = key
 		cfg.Totp.EncryptionKeyConfigured = false
-		slog.Warn("TOTP encryption key auto-generated. Consider setting a fixed key for production.")
+		if !allowMissingJWTSecret {
+			key, err := generateJWTSecret(32) // Reuse the same random generation function
+			if err != nil {
+				return nil, fmt.Errorf("generate totp encryption key error: %w", err)
+			}
+			cfg.Totp.EncryptionKey = key
+			slog.Warn("TOTP encryption key auto-generated. Consider setting a fixed key for production.")
+		}
 	} else {
 		cfg.Totp.EncryptionKeyConfigured = true
 	}
@@ -2128,7 +2134,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.image_stream_data_interval_timeout", 900)
 	viper.SetDefault("gateway.image_stream_keepalive_interval", 10)
 	viper.SetDefault("gateway.image_nonstream_keepalive_interval", 0)
-	viper.SetDefault("gateway.max_line_size", 500*1024*1024)
+	viper.SetDefault("gateway.max_line_size", 40*1024*1024)
 	viper.SetDefault("gateway.scheduling.sticky_session_max_waiting", 3)
 	viper.SetDefault("gateway.scheduling.sticky_session_wait_timeout", 120*time.Second)
 	viper.SetDefault("gateway.scheduling.fallback_wait_timeout", 30*time.Second)

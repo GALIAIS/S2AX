@@ -17,10 +17,15 @@ export async function markRead(id: number): Promise<{ message: string }> {
   return data
 }
 
+export async function markAllRead(): Promise<{ message: string; count: number }> {
+  const { data } = await apiClient.post<{ message: string; count: number }>('/announcements/read-all')
+  return data
+}
+
 const announcementsAPI = {
   list,
-  markRead
+  markRead,
+  markAllRead
 }
 
 export default announcementsAPI
-

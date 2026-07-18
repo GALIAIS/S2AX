@@ -125,10 +125,17 @@
 
           <!-- Right: Actions and Settings -->
           <div class="flex flex-wrap items-center justify-end gap-2">
+            <SavedViewsControl
+              storage-key="admin-users"
+              :state="savedViewState"
+              :disabled="loading"
+              @apply="applySavedView"
+            />
             <!-- Mobile: Secondary buttons (icon only) -->
             <div class="flex items-center gap-2 md:contents">
               <!-- Refresh Button -->
               <button
+                type="button"
                 @click="loadUsers"
                 :disabled="loading"
                 class="btn btn-secondary px-2 md:px-3"
@@ -139,6 +146,7 @@
               <!-- Filter Settings Dropdown -->
               <div class="relative" ref="filterDropdownRef">
                 <button
+                  type="button"
                   @click="showFilterDropdown = !showFilterDropdown"
                   class="btn btn-secondary px-2 md:px-3"
                   :title="t('admin.users.filterSettings')"
@@ -155,6 +163,7 @@
                   <button
                     v-for="filter in builtInFilters"
                     :key="filter.key"
+                    type="button"
                     @click="toggleBuiltInFilter(filter.key)"
                     class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
                   >
@@ -176,6 +185,7 @@
                   <button
                     v-for="attr in filterableAttributes"
                     :key="attr.id"
+                    type="button"
                     @click="toggleAttributeFilter(attr)"
                     class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
                   >
@@ -193,6 +203,7 @@
               <!-- Column Settings Dropdown -->
               <div class="relative" ref="columnDropdownRef">
                 <button
+                  type="button"
                   @click="showColumnDropdown = !showColumnDropdown"
                   class="btn btn-secondary px-2 md:px-3"
                   :title="t('admin.users.columnSettings')"
@@ -210,6 +221,7 @@
                   <button
                     v-for="col in toggleableColumns"
                     :key="col.key"
+                    type="button"
                     :disabled="isForcedVisibleColumn(col.key)"
                     @click="toggleColumn(col.key)"
                     :class="[
@@ -233,6 +245,7 @@
               </div>
               <!-- Attributes Config Button -->
               <button
+                type="button"
                 @click="showAttributesModal = true"
                 class="btn btn-secondary px-2 md:px-3"
                 :title="t('admin.users.attributes.configButton')"
@@ -253,9 +266,32 @@
             </button>
 
             <!-- Create User Button (full width on mobile, auto width on desktop) -->
-            <button @click="showCreateModal = true" class="btn btn-primary flex-1 md:flex-initial">
+            <button type="button" @click="showCreateModal = true" class="btn btn-primary flex-1 md:flex-initial">
               <Icon name="plus" size="md" class="mr-2" />
               {{ t('admin.users.createUser') }}
+            </button>
+          </div>
+        </div>
+      </template>
+
+      <template #default>
+        <div v-if="selectedCount > 0" class="mb-4 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="mr-auto text-sm font-medium text-primary-900 dark:text-primary-100">{{ t('admin.users.bulkSelected', { count: selectedCount }) }}</span>
+            <button type="button" class="btn btn-secondary btn-sm" :disabled="bulkActionLoading" @click="requestBulkAction('enable')">
+              <Icon name="checkCircle" size="sm" />
+              {{ t('admin.users.bulkEnable') }}
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" :disabled="bulkActionLoading" @click="requestBulkAction('disable')">
+              <Icon name="ban" size="sm" />
+              {{ t('admin.users.bulkDisable') }}
+            </button>
+            <button type="button" class="btn btn-danger btn-sm" :disabled="bulkActionLoading" @click="requestBulkAction('delete')">
+              <Icon name="trash" size="sm" />
+              {{ t('admin.users.bulkDelete') }}
+            </button>
+            <button type="button" class="btn btn-ghost btn-sm" :disabled="bulkActionLoading" @click="clearSelectedUsers">
+              {{ t('common.clear') }}
             </button>
           </div>
         </div>
@@ -270,7 +306,9 @@
           row-key="id"
           selectable
           :selected-keys="selectedIds"
+          :row-selectable="(user) => user.role !== 'admin'"
           :selection-label="getUserSelectionLabel"
+          :error="usersError"
           :actions-count="7"
           :server-side-sort="true"
           default-sort-key="created_at"
@@ -278,6 +316,7 @@
           :sort-storage-key="USER_SORT_STORAGE_KEY"
           @sort="handleSort"
           @update:selected-keys="handleSelectedKeysUpdate"
+          @retry="loadUsers"
         >
           <template #cell-email="{ value }">
             <div class="flex items-center gap-2">
@@ -425,6 +464,7 @@
             <div class="flex items-center gap-2">
               <div class="group relative">
                 <button
+                  type="button"
                   class="font-medium text-gray-900 underline decoration-dashed decoration-gray-300 underline-offset-4 transition-colors hover:text-primary-600 dark:text-white dark:decoration-dark-500 dark:hover:text-primary-400"
                   @click="handleBalanceHistory(row)"
                 >
@@ -437,6 +477,7 @@
                 </div>
               </div>
               <button
+                type="button"
                 @click.stop="handleDeposit(row)"
                 class="rounded px-2 py-0.5 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
                 :title="t('admin.users.deposit')"
@@ -603,6 +644,7 @@
             <div class="flex items-center gap-1">
               <!-- Edit Button -->
               <button
+                type="button"
                 @click="handleEdit(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
@@ -612,6 +654,7 @@
 
               <!-- Toggle Status Button (not for admin) -->
               <button
+                type="button"
                 v-if="row.role !== 'admin'"
                 @click="handleToggleStatus(row)"
                 :class="[
@@ -628,6 +671,7 @@
 
               <!-- More Actions Menu Trigger -->
               <button
+                type="button"
                 @click="openActionMenu(row, $event)"
                 class="action-menu-trigger flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-dark-700 dark:hover:text-white"
                 :class="{ 'bg-gray-100 text-gray-900 dark:bg-dark-700 dark:text-white': activeMenuId === row.id }"
@@ -674,6 +718,7 @@
             <template v-if="user.id === activeMenuId">
               <!-- View API Keys -->
               <button
+                type="button"
                 @click="handleViewApiKeys(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
               >
@@ -683,6 +728,7 @@
 
               <!-- Allowed Groups -->
               <button
+                type="button"
                 @click="handleAllowedGroups(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
               >
@@ -694,6 +740,7 @@
 
               <!-- Deposit -->
               <button
+                type="button"
                 @click="handleDeposit(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
               >
@@ -703,6 +750,7 @@
 
               <!-- Withdraw -->
               <button
+                type="button"
                 @click="handleWithdraw(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
               >
@@ -714,6 +762,7 @@
 
               <!-- Platform Quotas -->
               <button
+                type="button"
                 @click="handlePlatformQuota(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
               >
@@ -723,6 +772,7 @@
 
               <!-- Balance History -->
               <button
+                type="button"
                 @click="handleBalanceHistory(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
               >
@@ -734,6 +784,7 @@
 
               <!-- Delete (not for admin) -->
               <button
+                type="button"
                 v-if="user.role !== 'admin'"
                 @click="handleDelete(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
@@ -748,6 +799,15 @@
     </Teleport>
 
     <ConfirmDialog :show="showDeleteDialog" :title="t('admin.users.deleteUser')" :message="t('admin.users.deleteConfirm', { email: deletingUser?.email })" :danger="true" @confirm="confirmDelete" @cancel="showDeleteDialog = false" />
+    <ConfirmDialog
+      :show="bulkAction !== null"
+      :title="t('admin.users.bulkActionTitle')"
+      :message="t('admin.users.bulkActionConfirm', { action: bulkAction ? t('admin.users.bulk.' + bulkAction) : '', count: selectedCount })"
+      :confirm-text="bulkAction === 'delete' ? t('common.delete') : t('common.confirm')"
+      :danger="bulkAction === 'delete'"
+      @confirm="confirmBulkAction"
+      @cancel="bulkAction = null"
+    />
     <UserCreateModal :show="showCreateModal" @close="showCreateModal = false" @success="loadUsers" />
     <UserEditModal :show="showEditModal" :user="editingUser" @close="closeEditModal" @success="loadUsers" />
     <BulkEditUserModal
@@ -791,6 +851,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
+import SavedViewsControl from '@/components/common/SavedViewsControl.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
@@ -887,7 +948,7 @@ const allColumns = computed<Column[]>(() => [
 
 // Columns that can be toggled (exclude email and actions which are always visible)
 const toggleableColumns = computed(() =>
-  allColumns.value.filter(col => col.key !== 'email' && col.key !== 'actions')
+  allColumns.value.filter(col => !['select', 'email', 'actions'].includes(col.key))
 )
 
 // Hidden columns (stored in Set - columns NOT in this set are visible)
@@ -1015,12 +1076,21 @@ const hasVisibleAttributeColumns = computed(() =>
 // Filtered columns based on visibility
 const columns = computed<Column[]>(() =>
   allColumns.value.filter(col =>
-    col.key === 'email' || col.key === 'actions' || !hiddenColumns.has(col.key)
+    ['select', 'email', 'actions'].includes(col.key) || !hiddenColumns.has(col.key)
   )
 )
 
 const users = ref<AdminUser[]>([])
-const loading = ref(false)
+const loading = ref(true)
+const usersError = ref<string | null>(null)
+
+type BulkUserAction = 'enable' | 'disable' | 'delete'
+const bulkAction = ref<BulkUserAction | null>(null)
+const bulkActionLoading = ref(false)
+const requestBulkAction = (action: BulkUserAction) => {
+  if (selectedCount.value === 0 || bulkActionLoading.value) return
+  bulkAction.value = action
+}
 const searchQuery = ref('')
 const USER_SORT_STORAGE_KEY = 'admin-users-table-sort'
 const loadInitialSortState = (): { sort_by: string; sort_order: 'asc' | 'desc' } => {
@@ -1117,6 +1187,45 @@ const activeAttributeFilters = reactive<Record<number, string>>({})
 // Visible filters tracking (which filters are shown in the UI)
 // Keys: 'role', 'status', 'attr_${id}'
 const visibleFilters = reactive<Set<string>>(new Set())
+
+const savedViewState = computed<Record<string, unknown>>(() => ({
+  search: searchQuery.value,
+  role: filters.role,
+  status: filters.status,
+  group: filters.group,
+  apiKeyGroup: filters.apiKeyGroup,
+  attributes: { ...activeAttributeFilters },
+  visibleFilters: Array.from(visibleFilters),
+  page: pagination.page,
+  page_size: pagination.page_size,
+  sort_by: sortState.sort_by,
+  sort_order: sortState.sort_order
+}))
+
+const applySavedView = (state: Record<string, unknown>) => {
+  searchQuery.value = typeof state.search === 'string' ? state.search : ''
+  filters.role = typeof state.role === 'string' ? state.role : ''
+  filters.status = typeof state.status === 'string' ? state.status : ''
+  filters.group = typeof state.group === 'string' ? state.group : ''
+  filters.apiKeyGroup = Number.isFinite(Number(state.apiKeyGroup)) ? Number(state.apiKeyGroup) : null
+  for (const key of Object.keys(activeAttributeFilters)) delete activeAttributeFilters[Number(key)]
+  if (state.attributes && typeof state.attributes === 'object') {
+    for (const [key, value] of Object.entries(state.attributes as Record<string, unknown>)) {
+      if (typeof value === 'string' && value) activeAttributeFilters[Number(key)] = value
+    }
+  }
+  visibleFilters.clear()
+  if (Array.isArray(state.visibleFilters)) {
+    for (const value of state.visibleFilters) {
+      if (typeof value === 'string') visibleFilters.add(value)
+    }
+  }
+  pagination.page = Number.isFinite(Number(state.page)) ? Math.max(1, Number(state.page)) : 1
+  pagination.page_size = Number.isFinite(Number(state.page_size)) ? Math.max(1, Number(state.page_size)) : pagination.page_size
+  sortState.sort_by = typeof state.sort_by === 'string' ? state.sort_by : 'created_at'
+  sortState.sort_order = state.sort_order === 'asc' ? 'asc' : 'desc'
+  void loadUsers()
+}
 
 // Dropdown states
 const showFilterDropdown = ref(false)
@@ -1300,6 +1409,8 @@ const {
   rows: sortedUsers,
   getId: (user) => user.id
 })
+
+const clearSelectedUsers = clearSelection
 
 const handleSelectedKeysUpdate = (keys: Array<string | number>) => {
   setSelectedIds(keys.filter((key): key is number => typeof key === 'number'))
@@ -1565,6 +1676,7 @@ const loadUsers = async () => {
   abortController = currentAbortController
   const { signal } = currentAbortController
   loading.value = true
+  usersError.value = null
   try {
     // Build attribute filters from active filters
     const attrFilters: Record<number, string> = {}
@@ -1595,6 +1707,9 @@ const loadUsers = async () => {
       return
     }
     users.value = response.items
+    // Selection is intentionally page-independent. The bulk action bar must
+    // keep IDs selected on previous pages while the current page is replaced.
+    // DataTable still blocks selecting admin rows on the page being viewed.
     pagination.total = response.total
     pagination.pages = response.pages
     usageStats.value = {}
@@ -1616,6 +1731,7 @@ const loadUsers = async () => {
       return
     }
     const message = error.response?.data?.detail || error.message || t('admin.users.failedToLoad')
+    usersError.value = message
     appStore.showError(message)
     console.error('Error loading users:', error)
   } finally {
@@ -1782,6 +1898,32 @@ const confirmDelete = async () => {
   } catch (error: any) {
     appStore.showError(error.response?.data?.detail || t('admin.users.failedToDelete'))
     console.error('Error deleting user:', error)
+  }
+}
+
+const confirmBulkAction = async () => {
+  const action = bulkAction.value
+  const ids = [...selectedIds.value]
+  if (!action || ids.length === 0 || bulkActionLoading.value) return
+
+  bulkActionLoading.value = true
+  try {
+    const results = await Promise.allSettled(ids.map((id) => {
+      if (action === 'delete') return adminAPI.users.delete(id)
+      return adminAPI.users.toggleStatus(id, action === 'enable' ? 'active' : 'disabled')
+    }))
+    const success = results.filter((result) => result.status === 'fulfilled').length
+    const failed = results.length - success
+    if (failed > 0) {
+      appStore.showError(t('admin.users.bulkPartial', { success, failed }))
+    } else {
+      appStore.showSuccess(t('admin.users.bulkSuccess', { count: success, action: t('admin.users.bulk.' + action) }))
+    }
+    clearSelectedUsers()
+    bulkAction.value = null
+    await loadUsers()
+  } finally {
+    bulkActionLoading.value = false
   }
 }
 

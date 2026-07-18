@@ -3,6 +3,8 @@
     <button
       type="button"
       @click="toggle"
+      :aria-expanded="isOpen"
+      aria-haspopup="dialog"
       :class="['date-picker-trigger', isOpen && 'date-picker-trigger-open']"
     >
       <span class="date-picker-icon">
@@ -20,8 +22,17 @@
       </span>
     </button>
 
-    <Transition name="date-picker-dropdown">
-      <div v-if="isOpen" class="date-picker-dropdown">
+    <Teleport to="body">
+      <Transition name="date-picker-dropdown">
+        <div
+          v-if="isOpen"
+          ref="dropdownRef"
+          class="date-picker-dropdown"
+          :style="dropdownStyle"
+          role="dialog"
+          :aria-label="t('dates.selectDateRange')"
+          @click.stop
+        >
         <!-- Quick presets -->
         <div class="date-picker-presets">
           <button
@@ -70,13 +81,14 @@
             {{ t('dates.apply') }}
           </button>
         </div>
-      </div>
-    </Transition>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 
@@ -104,9 +116,31 @@ const { t, locale } = useI18n()
 
 const isOpen = ref(false)
 const containerRef = ref<HTMLElement | null>(null)
+const dropdownRef = ref<HTMLElement | null>(null)
+const triggerRect = ref<DOMRect | null>(null)
+const dropdownAbove = ref(false)
 const localStartDate = ref(props.startDate)
 const localEndDate = ref(props.endDate)
 const activePreset = ref<string | null>('last24Hours')
+
+const dropdownStyle = computed<Record<string, string>>(() => {
+  const rect = triggerRect.value
+  if (!rect) return { visibility: 'hidden' }
+
+  const style: Record<string, string> = {
+    position: 'fixed',
+    left: `${Math.max(12, Math.min(rect.left, window.innerWidth - 332))}px`,
+    zIndex: '100000020'
+  }
+
+  if (dropdownAbove.value) {
+    style.bottom = `${window.innerHeight - rect.top + 8}px`
+  } else {
+    style.top = `${rect.bottom + 8}px`
+  }
+
+  return style
+})
 
 const today = computed(() => {
   // Use local timezone to avoid UTC timezone issues
@@ -267,6 +301,19 @@ const toggle = () => {
   isOpen.value = !isOpen.value
 }
 
+const updateDropdownPosition = () => {
+  if (!containerRef.value) return
+  triggerRect.value = containerRef.value.getBoundingClientRect()
+
+  nextTick(() => {
+    const rect = triggerRect.value
+    if (!rect || !dropdownRef.value) return
+    const spaceBelow = window.innerHeight - rect.bottom
+    const spaceAbove = rect.top
+    dropdownAbove.value = spaceBelow < dropdownRef.value.offsetHeight + 12 && spaceAbove > spaceBelow
+  })
+}
+
 const apply = () => {
   emit('update:startDate', localStartDate.value)
   emit('update:endDate', localEndDate.value)
@@ -279,7 +326,8 @@ const apply = () => {
 }
 
 const handleClickOutside = (event: MouseEvent) => {
-  if (containerRef.value && !containerRef.value.contains(event.target as Node)) {
+  const target = event.target as Node
+  if (!containerRef.value?.contains(target) && !dropdownRef.value?.contains(target)) {
     isOpen.value = false
   }
 }
@@ -307,6 +355,19 @@ watch(
   }
 )
 
+watch(isOpen, (open) => {
+  if (open) {
+    dropdownAbove.value = false
+    updateDropdownPosition()
+    window.addEventListener('resize', updateDropdownPosition)
+    window.addEventListener('scroll', updateDropdownPosition, true)
+    return
+  }
+
+  window.removeEventListener('resize', updateDropdownPosition)
+  window.removeEventListener('scroll', updateDropdownPosition, true)
+})
+
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
   document.addEventListener('keydown', handleEscape)
@@ -317,20 +378,28 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
   document.removeEventListener('keydown', handleEscape)
+  window.removeEventListener('resize', updateDropdownPosition)
+  window.removeEventListener('scroll', updateDropdownPosition, true)
 })
 </script>
 
 <style scoped>
 .date-picker-trigger {
   @apply flex items-center gap-2;
-  @apply rounded-lg px-3 py-2 text-sm;
-  @apply bg-white dark:bg-dark-800;
-  @apply border border-gray-200 dark:border-dark-600;
+  @apply px-3 py-2 text-sm;
   @apply text-gray-700 dark:text-gray-300;
-  @apply transition-all duration-200;
+  @apply transition-[background-color,border-color,box-shadow] duration-150;
   @apply focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30;
-  @apply hover:border-gray-300 dark:hover:border-dark-500;
   @apply cursor-pointer;
+  min-height: 2.5rem;
+  background: var(--ui-surface-solid);
+  border: 1px solid var(--ui-separator);
+  box-shadow: none;
+}
+
+.date-picker-trigger:hover {
+  background: var(--ui-control);
+  border-color: color-mix(in srgb, var(--ui-separator) 55%, var(--ui-label));
 }
 
 .date-picker-trigger-open {
@@ -350,13 +419,11 @@ onUnmounted(() => {
 }
 
 .date-picker-dropdown {
-  @apply absolute left-0 z-[100] mt-2;
-  @apply bg-white dark:bg-dark-800;
-  @apply rounded-xl;
-  @apply border border-gray-200 dark:border-dark-700;
-  @apply shadow-lg shadow-black/10 dark:shadow-black/30;
   @apply overflow-hidden;
-  @apply min-w-[320px];
+  width: min(320px, calc(100vw - 24px));
+  background: var(--ui-surface-solid);
+  border: 1px solid var(--ui-separator);
+  box-shadow: var(--ui-shadow);
 }
 
 .date-picker-presets {
@@ -364,15 +431,18 @@ onUnmounted(() => {
 }
 
 .date-picker-preset {
-  @apply rounded-md px-3 py-1.5 text-xs font-medium;
+  @apply px-3 py-1.5 text-xs font-medium;
   @apply text-gray-600 dark:text-gray-400;
-  @apply hover:bg-gray-100 dark:hover:bg-dark-700;
-  @apply transition-colors duration-150;
+  @apply transition-[background-color,color] duration-150;
+}
+
+.date-picker-preset:hover {
+  background: var(--ui-control);
 }
 
 .date-picker-preset-active {
-  @apply bg-primary-100 dark:bg-primary-900/30;
   @apply text-primary-700 dark:text-primary-300;
+  background: color-mix(in srgb, var(--ui-accent) 14%, transparent);
 }
 
 .date-picker-divider {
@@ -392,11 +462,11 @@ onUnmounted(() => {
 }
 
 .date-picker-input {
-  @apply w-full rounded-md px-2 py-1.5 text-sm;
-  @apply bg-gray-50 dark:bg-dark-700;
-  @apply border border-gray-200 dark:border-dark-600;
+  @apply w-full px-2 py-1.5 text-sm;
   @apply text-gray-900 dark:text-gray-100;
   @apply focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30;
+  background: var(--ui-control);
+  border: 1px solid var(--ui-separator);
 }
 
 .date-picker-input::-webkit-calendar-picker-indicator {
@@ -417,16 +487,21 @@ onUnmounted(() => {
 }
 
 .date-picker-apply {
-  @apply rounded-lg px-4 py-1.5 text-sm font-medium;
+  @apply px-4 py-1.5 text-sm font-medium;
   @apply bg-primary-600 text-white;
   @apply hover:bg-primary-700;
-  @apply transition-colors duration-150;
+  @apply transition-[background-color,box-shadow,transform] duration-150;
+  box-shadow: 0 1px 0 rgb(255 255 255 / 20%) inset;
+}
+
+.date-picker-apply:active {
+  transform: translateY(1px);
 }
 
 /* Dropdown animation */
 .date-picker-dropdown-enter-active,
 .date-picker-dropdown-leave-active {
-  transition: all 0.2s ease;
+  transition: opacity 150ms ease, transform 150ms ease;
 }
 
 .date-picker-dropdown-enter-from,

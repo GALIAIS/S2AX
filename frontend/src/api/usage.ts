@@ -15,7 +15,8 @@ import type {
   UsageRequestType,
   UserErrorRequest,
   UserErrorRequestDetail,
-  UserErrorListParams
+  UserErrorListParams,
+  FetchOptions
 } from '@/types'
 
 // ==================== Dashboard Types ====================
@@ -221,7 +222,8 @@ export async function getStatsByDateRange(
 export async function getByDateRange(
   startDate: string,
   endDate: string,
-  apiKeyId?: number
+  apiKeyId?: number,
+  options: FetchOptions = {}
 ): Promise<PaginatedResponse<UsageLog>> {
   const params: UsageQueryParams = {
     start_date: startDate,
@@ -235,7 +237,8 @@ export async function getByDateRange(
   }
 
   const { data } = await apiClient.get<PaginatedResponse<UsageLog>>('/usage', {
-    params
+    params,
+    signal: options.signal,
   })
   return data
 }
@@ -256,8 +259,10 @@ export async function getById(id: number): Promise<UsageLog> {
  * Get user dashboard statistics
  * @returns Dashboard statistics for current user
  */
-export async function getDashboardStats(): Promise<UserDashboardStats> {
-  const { data } = await apiClient.get<UserDashboardStats>('/usage/dashboard/stats')
+export async function getDashboardStats(options: FetchOptions = {}): Promise<UserDashboardStats> {
+  const { data } = await apiClient.get<UserDashboardStats>('/usage/dashboard/stats', {
+    signal: options.signal,
+  })
   return data
 }
 
@@ -266,8 +271,11 @@ export async function getDashboardStats(): Promise<UserDashboardStats> {
  * @param params - Query parameters for filtering
  * @returns Usage trend data for current user
  */
-export async function getDashboardTrend(params?: TrendParams): Promise<TrendResponse> {
-  const { data } = await apiClient.get<TrendResponse>('/usage/dashboard/trend', { params })
+export async function getDashboardTrend(params?: TrendParams, options: FetchOptions = {}): Promise<TrendResponse> {
+  const { data } = await apiClient.get<TrendResponse>('/usage/dashboard/trend', {
+    params,
+    signal: options.signal,
+  })
   return data
 }
 
@@ -288,8 +296,11 @@ export async function getDashboardModels(params?: {
   billing_type?: number | null
   billing_mode?: string | null
   timezone?: string
-}): Promise<ModelStatsResponse> {
-  const { data } = await apiClient.get<ModelStatsResponse>('/usage/dashboard/models', { params })
+}, options: FetchOptions = {}): Promise<ModelStatsResponse> {
+  const { data } = await apiClient.get<ModelStatsResponse>('/usage/dashboard/models', {
+    params,
+    signal: options.signal,
+  })
   return data
 }
 
@@ -355,10 +366,12 @@ export async function getDashboardApiKeysUsage(
 }
 
 export async function listMyErrorRequests(
-  params: UserErrorListParams
+  params: UserErrorListParams,
+  options: FetchOptions = {}
 ): Promise<PaginatedResponse<UserErrorRequest>> {
   const { data } = await apiClient.get<PaginatedResponse<UserErrorRequest>>('/usage/errors', {
-    params
+    params,
+    signal: options.signal
   })
   return data
 }

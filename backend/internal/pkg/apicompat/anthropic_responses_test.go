@@ -345,6 +345,24 @@ func TestResponsesToAnthropic_ReadToolDropsEmptyPages(t *testing.T) {
 	assert.JSONEq(t, `{"file_path":"/tmp/demo.py","limit":2000,"offset":0}`, string(anth.Content[0].Input))
 }
 
+func TestResponsesToAnthropic_ReadToolNormalizesMalformedOffset(t *testing.T) {
+	resp := &ResponsesResponse{
+		ID:     "resp_read_offset",
+		Status: "completed",
+		Output: []ResponsesOutput{{
+			Type:      "function_call",
+			CallID:    "call_read_offset",
+			Name:      "Read",
+			Arguments: `{"file_path":"/tmp/demo.py","limit":60,"offset":5180581636390513,"pages":""}`,
+		}},
+	}
+
+	anth := ResponsesToAnthropic(resp, "claude-opus-4-6")
+
+	require.Len(t, anth.Content, 1)
+	assert.JSONEq(t, `{"file_path":"/tmp/demo.py","limit":60,"offset":0}`, string(anth.Content[0].Input))
+}
+
 func TestResponsesToAnthropic_PreservesEmptyStringsForOtherTools(t *testing.T) {
 	resp := &ResponsesResponse{
 		ID:     "resp_other",

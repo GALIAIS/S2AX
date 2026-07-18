@@ -1,8 +1,17 @@
 import { apiClient } from '../client'
+import type { FetchOptions } from '@/types'
 
 export type ModerationMode = 'off' | 'observe' | 'pre_block'
 export type KeywordBlockingMode = 'keyword_only' | 'keyword_and_api' | 'api_only'
 export type ContentModerationModelFilterType = 'all' | 'include' | 'exclude'
+
+export interface ContentModerationRegexRule {
+  name: string
+  pattern: string
+  weight: number
+  category: string
+  strict: boolean
+}
 
 export interface ContentModerationModelFilter {
   type: ContentModerationModelFilterType
@@ -25,6 +34,7 @@ export interface ContentModerationConfig {
   group_ids: number[]
   record_non_hits: boolean
   thresholds: Record<string, number>
+  default_thresholds?: Record<string, number>
   worker_count: number
   queue_size: number
   block_status: number
@@ -40,6 +50,13 @@ export interface ContentModerationConfig {
   blocked_keywords: string[]
   keyword_blocking_mode: KeywordBlockingMode
   model_filter: ContentModerationModelFilter
+  builtin_regex_enabled?: boolean
+  builtin_regex_threshold?: number
+  builtin_regex_strict_threshold?: number
+  builtin_regex_rules?: ContentModerationRegexRule[]
+  builtin_regex_default_rules?: ContentModerationRegexRule[]
+  disabled_builtin_regex_rules?: string[]
+  builtin_regex_rule_names?: string[]
   cyber_policy_exclude_from_ban_count: boolean
 }
 
@@ -116,6 +133,11 @@ export interface UpdateContentModerationConfig {
   blocked_keywords?: string[]
   keyword_blocking_mode?: KeywordBlockingMode
   model_filter?: ContentModerationModelFilter
+  builtin_regex_enabled?: boolean
+  builtin_regex_threshold?: number
+  builtin_regex_strict_threshold?: number
+  builtin_regex_rules?: ContentModerationRegexRule[]
+  disabled_builtin_regex_rules?: string[]
   cyber_policy_exclude_from_ban_count?: boolean
 }
 
@@ -254,10 +276,12 @@ export async function testAPIKeys(
 }
 
 export async function listLogs(
-  params: ListContentModerationLogsParams = {}
+  params: ListContentModerationLogsParams = {},
+  options: FetchOptions = {}
 ): Promise<ContentModerationLogsResponse> {
   const { data } = await apiClient.get<ContentModerationLogsResponse>('/admin/risk-control/logs', {
     params,
+    signal: options.signal,
   })
   return data
 }

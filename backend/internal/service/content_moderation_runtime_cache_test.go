@@ -272,6 +272,15 @@ func TestContentModerationRuntimeSnapshotRefreshFailureKeepsStaleConfig(t *testi
 	require.NoError(t, err)
 	require.True(t, decision.Blocked)
 
+	// Windows monotonic clock resolution can make two immediate time.Now calls
+	// equal even with a nanosecond TTL. Expire the snapshot explicitly so this
+	// test verifies refresh failure behavior instead of timer granularity.
+	current := svc.runtimeSnapshot.Load()
+	require.NotNil(t, current)
+	expired := *current
+	expired.loadedAt = time.Now().Add(-time.Second)
+	svc.runtimeSnapshot.Store(&expired)
+
 	repo.failMultiple(errors.New("database unavailable"))
 	decision, err = svc.Check(context.Background(), input)
 	require.NoError(t, err)

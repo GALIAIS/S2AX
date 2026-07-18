@@ -77,7 +77,9 @@ export const useAnnouncementStore = defineStore('announcements', () => {
     currentPopup.value = null
 
     // Mark as read (fire-and-forget, UI already updated)
-    markAsRead(id)
+    void markAsRead(id).catch((err) => {
+      console.error('Failed to mark dismissed announcement as read:', err)
+    })
 
     // Show next popup after a short delay
     if (popupQueue.value.length > 0) {
@@ -86,14 +88,16 @@ export const useAnnouncementStore = defineStore('announcements', () => {
   }
 
   async function markAsRead(id: number) {
+    const ann = announcements.value.find((a) => a.id === id)
+    if (ann?.read_at) return
+    const previousReadAt = ann?.read_at
+    if (ann) ann.read_at = new Date().toISOString()
     try {
       await announcementsAPI.markRead(id)
-      const ann = announcements.value.find((a) => a.id === id)
-      if (ann) {
-        ann.read_at = new Date().toISOString()
-      }
     } catch (err: any) {
+      if (ann) ann.read_at = previousReadAt
       console.error('Failed to mark announcement as read:', err)
+      throw err
     }
   }
 
@@ -101,15 +105,13 @@ export const useAnnouncementStore = defineStore('announcements', () => {
     const unread = announcements.value.filter((a) => !a.read_at)
     if (unread.length === 0) return
 
+    const readAt = new Date().toISOString()
+    unread.forEach((a) => { a.read_at = readAt })
     try {
       loading.value = true
-      await Promise.all(unread.map((a) => announcementsAPI.markRead(a.id)))
-      announcements.value.forEach((a) => {
-        if (!a.read_at) {
-          a.read_at = new Date().toISOString()
-        }
-      })
+      await announcementsAPI.markAllRead()
     } catch (err: any) {
+      unread.forEach((a) => { a.read_at = undefined })
       console.error('Failed to mark all as read:', err)
       throw err
     } finally {

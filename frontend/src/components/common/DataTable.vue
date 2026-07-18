@@ -1,6 +1,18 @@
 <template>
   <div v-if="!isDesktopViewport" class="space-y-3">
-    <template v-if="loading">
+    <div v-if="loading && data && data.length > 0" class="flex items-center justify-end text-xs text-gray-500 dark:text-dark-400" role="status">
+      {{ t('common.refreshing') }}
+    </div>
+
+    <div v-if="error" class="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300" role="alert">
+      <Icon name="xCircle" size="sm" />
+      <span>{{ error }}</span>
+      <button type="button" class="btn btn-ghost btn-sm" @click="emit('retry')">
+        {{ t('misc.retry') }}
+      </button>
+    </div>
+
+    <template v-if="isInitialLoading && (!data || data.length === 0)">
       <div v-for="i in 5" :key="i" class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900">
         <div class="space-y-3">
           <div v-for="column in dataColumns" :key="column.key" class="flex justify-between">
@@ -11,6 +23,16 @@
             <div class="h-8 w-full animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
           </div>
         </div>
+      </div>
+    </template>
+
+    <template v-else-if="error && (!data || data.length === 0)">
+      <div class="flex flex-col items-center gap-3 rounded-lg border border-red-200 bg-red-50 p-8 text-center text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300" role="alert">
+        <Icon name="xCircle" size="xl" />
+        <p class="text-sm font-semibold">{{ error }}</p>
+        <button type="button" class="btn btn-secondary btn-sm" @click="emit('retry')">
+          {{ t('misc.retry') }}
+        </button>
       </div>
     </template>
 
@@ -61,6 +83,7 @@
               type="checkbox"
               class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800"
               :checked="isRowSelected(row, index)"
+              :disabled="!isRowSelectable(row)"
               :aria-label="getRowSelectionLabel(row, index)"
               data-test="select-row"
               @click.stop
@@ -93,12 +116,30 @@
     v-else
     ref="tableWrapperRef"
     class="table-wrapper"
+    :style="{ '--select-col-width': selectColumnWidth }"
     :class="{
       'actions-expanded': actionsExpanded,
-      'is-scrollable': isScrollable
+      'is-scrollable': isScrollable,
+      'is-refreshing': loading && data && data.length > 0
     }"
+    :aria-busy="loading"
   >
-    <table class="w-full min-w-max divide-y divide-gray-200 dark:divide-dark-700">
+    <div v-if="loading && data && data.length > 0" class="sticky left-0 top-0 z-[230] flex justify-end bg-white/90 px-3 py-1 text-xs text-gray-500 backdrop-blur dark:bg-dark-900/90 dark:text-dark-400" role="status">
+      {{ t('common.refreshing') }}
+    </div>
+
+    <div v-if="error" class="sticky left-0 z-[230] flex items-center gap-3 border-b border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300" role="alert">
+      <Icon name="xCircle" size="sm" />
+      <span>{{ error }}</span>
+      <button type="button" class="btn btn-ghost btn-sm" @click="emit('retry')">
+        {{ t('misc.retry') }}
+      </button>
+    </div>
+
+    <table
+      class="w-full min-w-max divide-y divide-gray-200 dark:divide-dark-700"
+      :aria-label="ariaLabel || undefined"
+    >
       <thead class="table-header bg-gray-50 dark:bg-dark-800">
         <tr>
           <th
@@ -166,8 +207,8 @@
         </tr>
       </thead>
       <tbody class="table-body divide-y divide-gray-200 bg-white dark:divide-dark-700 dark:bg-dark-900">
-        <!-- Loading skeleton -->
-        <tr v-if="loading" v-for="i in 5" :key="i">
+        <!-- Loading skeleton: only the first load gets a skeleton; refresh keeps existing rows stable. -->
+        <tr v-if="isInitialLoading && (!data || data.length === 0)" v-for="i in 5" :key="i">
           <td v-if="selectable" class="w-11 min-w-11 px-3 py-4">
             <div class="mx-auto h-4 w-4 animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
           </td>
@@ -179,6 +220,18 @@
         </tr>
 
         <!-- Empty state -->
+        <tr v-else-if="error && (!data || data.length === 0)">
+          <td :colspan="tableColumnCount" :class="['py-12 text-center', getAdaptivePaddingClass()]">
+            <div class="flex flex-col items-center gap-3 text-red-600 dark:text-red-400">
+              <Icon name="xCircle" size="xl" />
+              <p class="text-sm font-semibold">{{ error }}</p>
+              <button type="button" class="btn btn-secondary btn-sm" @click="emit('retry')">
+                {{ t('misc.retry') }}
+              </button>
+            </div>
+          </td>
+        </tr>
+
         <tr v-else-if="!data || data.length === 0">
           <td
             :colspan="tableColumnCount"
@@ -224,6 +277,7 @@
                 type="checkbox"
                 class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800"
                 :checked="isRowSelected(item.row, item.index)"
+                :disabled="!isRowSelectable(item.row)"
                 :aria-label="getRowSelectionLabel(item.row, item.index)"
                 data-test="select-row"
                 @click.stop
@@ -262,11 +316,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch, nextTick, toRef } from 'vue'
 import { useVirtualizer, observeElementRect as observeElementRectDefault } from '@tanstack/vue-virtual'
 import { useI18n } from 'vue-i18n'
 import type { Column } from './types'
 import Icon from '@/components/icons/Icon.vue'
+import { useInitialLoading } from '@/composables/useInitialLoading'
 
 const { t } = useI18n()
 
@@ -280,6 +335,7 @@ const emit = defineEmits<{
   rowClick: [row: any]
   'update:selectedKeys': [keys: Array<string | number>]
   selectionChange: [keys: Array<string | number>]
+  retry: []
 }>()
 
 // 表格容器引用
@@ -470,6 +526,10 @@ interface Props {
   selectedKeys?: Array<string | number>
   /** Accessible label for a row selection checkbox. */
   selectionLabel?: string | ((row: any) => string)
+  /** Optional predicate for rows that may participate in bulk selection. */
+  rowSelectable?: (row: any) => boolean
+  ariaLabel?: string
+  error?: string | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -480,8 +540,14 @@ const props = withDefaults(defineProps<Props>(), {
   defaultSortOrder: 'asc',
   serverSideSort: false,
   selectable: false,
-  selectedKeys: () => []
+  selectedKeys: () => [],
+  ariaLabel: '',
+  error: null,
+  rowSelectable: () => true
 })
+
+// An empty table must not flash skeleton -> empty -> skeleton on refresh.
+const { isInitialLoading } = useInitialLoading(toRef(props, 'loading'))
 
 const sortKey = ref<string>('')
 const sortOrder = ref<'asc' | 'desc'>('asc')
@@ -705,8 +771,12 @@ const sortedData = computed(() => {
 
 const tableColumnCount = computed(() => props.columns.length + (props.selectable ? 1 : 0))
 const selectedKeySet = computed(() => new Set(props.selectedKeys))
+const isRowSelectable = (row: any) => props.rowSelectable?.(row) !== false
 const visibleRowKeys = computed(() =>
-  (sortedData.value ?? []).map((row, index) => resolveRowKey(row, index))
+  (sortedData.value ?? [])
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => isRowSelectable(row))
+    .map(({ row, index }) => resolveRowKey(row, index))
 )
 const allVisibleSelected = computed(() =>
   visibleRowKeys.value.length > 0
@@ -733,6 +803,7 @@ const getRowSelectionLabel = (row: any, index: number) => {
 }
 
 const toggleRowSelection = (row: any, index: number, checked: boolean) => {
+  if (!isRowSelectable(row)) return
   const next = new Set(props.selectedKeys)
   const key = resolveRowKey(row, index)
   if (checked) next.add(key)
@@ -851,6 +922,20 @@ const hasSelectColumn = computed(() => {
   return props.columns.length > 0 && props.columns[0].key === 'select'
 })
 
+const selectColumnWidth = computed(() => {
+  if (!hasSelectColumn.value) return '0px'
+
+  const horizontalPadding = props.columns.length >= 10
+    ? 8
+    : props.columns.length >= 7
+      ? 12
+      : props.columns.length >= 5
+        ? 16
+        : 24
+
+  return `${16 + horizontalPadding * 2}px`
+})
+
 // 生成固定列的 CSS 类
 const getStickyColumnClass = (column: Column, index: number) => {
   const classes: string[] = []
@@ -952,7 +1037,7 @@ defineExpose({
 <style scoped>
 /* 表格横向滚动 */
 .table-wrapper {
-  --select-col-width: 52px; /* 勾选列宽度：px-6 (24px*2) + checkbox (16px) */
+  --select-col-width: 52px;
   position: relative;
   overflow-x: auto;
   overflow-y: auto;
@@ -966,11 +1051,7 @@ defineExpose({
   position: sticky;
   top: 0;
   z-index: 200;
-  background-color: rgb(249 250 251);
-}
-
-.dark .table-wrapper .table-header {
-  background-color: rgb(31 41 55);
+  background-color: var(--ui-control);
 }
 
 /* 表体保持在表头下方 */
@@ -984,11 +1065,7 @@ defineExpose({
   position: sticky;
   top: 0;
   z-index: 210; /* 必须高于所有表体内容 */
-  background-color: rgb(249 250 251);
-}
-
-.dark .sticky-header-cell {
-  background-color: rgb(31 41 55);
+  background-color: var(--ui-control);
 }
 
 /* Sticky 列基础样式 */
@@ -1024,20 +1101,12 @@ defineExpose({
 
 /* 表体 sticky 列背景 */
 tbody .sticky-col {
-  background-color: white;
-}
-
-.dark tbody .sticky-col {
-  background-color: rgb(17 24 39);
+  background-color: var(--ui-surface-solid);
 }
 
 /* hover 状态保持 */
 tbody tr:hover .sticky-col {
-  background-color: rgb(249 250 251);
-}
-
-.dark tbody tr:hover .sticky-col {
-  background-color: rgb(31 41 55);
+  background-color: var(--ui-control);
 }
 
 /* 阴影只在可滚动时显示 */
@@ -1112,7 +1181,7 @@ tbody tr:hover .sticky-col {
 
 .table-wrapper::-webkit-scrollbar-track {
   background-color: rgba(0, 0, 0, 0.03) !important;
-  border-radius: 6px !important;
+  border-radius: 0 !important;
   margin: 0 4px !important;
 }
 .dark .table-wrapper::-webkit-scrollbar-track {
@@ -1121,8 +1190,8 @@ tbody tr:hover .sticky-col {
 
 /* 常驻、不透明的滑块，无视鼠标是否 hover 都在那！ */
 .table-wrapper::-webkit-scrollbar-thumb {
-  background-color: rgba(107, 114, 128, 0.75) !important; 
-  border-radius: 6px !important;
+  background-color: rgba(107, 114, 128, 0.75) !important;
+  border-radius: 0 !important;
   border: 2px solid transparent !important;
   background-clip: padding-box !important;
   -webkit-appearance: none !important;

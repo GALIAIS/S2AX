@@ -309,7 +309,6 @@ async function loadRealtimeTrafficSummary() {
     realtimeTrafficSummary.value = res?.summary ?? null
   } catch (err) {
     console.error('[OpsDashboardHeader] Failed to load realtime traffic summary', err)
-    realtimeTrafficSummary.value = null
   } finally {
     realtimeTrafficLoading.value = false
   }

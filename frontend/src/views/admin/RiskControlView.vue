@@ -1,7 +1,7 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
-      <div v-if="loading" class="flex items-center justify-center py-16">
+      <div v-if="isInitialLoading" class="flex items-center justify-center py-16">
         <div class="h-8 w-8 animate-spin rounded-full border-b-2 border-primary-600"></div>
       </div>
 
@@ -21,6 +21,12 @@
               {{ t('admin.riskControl.openSettings') }}
             </button>
           </div>
+        </div>
+
+        <div v-if="loadError" class="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300" role="alert">
+          <Icon name="xCircle" size="sm" />
+          <span>{{ loadError }}</span>
+          <button type="button" class="btn btn-secondary btn-sm" @click="loadAll">{{ t('misc.retry') }}</button>
         </div>
 
         <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -271,9 +277,18 @@
               <input v-model="filters.from" type="datetime-local" class="input" :title="t('admin.riskControl.filters.from')" @change="reloadLogsFromFirstPage" />
               <input v-model="filters.to" type="datetime-local" class="input" :title="t('admin.riskControl.filters.to')" @change="reloadLogsFromFirstPage" />
             </div>
+
+            <div v-if="logsError" class="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300" role="alert">
+              <Icon name="xCircle" size="sm" />
+              <span>{{ logsError }}</span>
+              <button type="button" class="btn btn-secondary btn-sm" @click="loadLogs">{{ t('misc.retry') }}</button>
+            </div>
           </div>
 
-          <div class="overflow-x-auto">
+          <div class="relative overflow-x-auto" :aria-busy="logsLoading">
+            <div v-if="logsLoading && logs.length > 0" class="absolute right-3 top-3 z-10 rounded-md bg-white/95 px-2.5 py-1 text-xs text-gray-500 shadow-sm ring-1 ring-gray-200 backdrop-blur dark:bg-dark-800/95 dark:text-gray-300 dark:ring-dark-600" role="status">
+              {{ t('common.refreshing') }}
+            </div>
             <table class="min-w-full divide-y divide-gray-200 dark:divide-dark-700">
               <thead class="bg-gray-50 dark:bg-dark-800">
                 <tr>
@@ -290,10 +305,13 @@
                 </tr>
               </thead>
               <tbody class="divide-y divide-gray-100 bg-white dark:divide-dark-800 dark:bg-dark-800">
-                <tr v-if="logsLoading">
+                <tr v-if="logsLoading && logs.length === 0">
                   <td colspan="10" class="px-5 py-12 text-center text-sm text-gray-500 dark:text-gray-400">{{ t('common.loading') }}</td>
                 </tr>
-                <tr v-else-if="logs.length === 0">
+                <tr v-else-if="logsError && logs.length === 0">
+                  <td colspan="10" class="px-5 py-12 text-center text-sm text-red-600 dark:text-red-300">{{ logsError }}</td>
+                </tr>
+                <tr v-else-if="!logsLoading && logs.length === 0">
                   <td colspan="10" class="px-5 py-12 text-center text-sm text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.emptyLogs') }}</td>
                 </tr>
                 <template v-else>
@@ -379,6 +397,9 @@
               v-for="tab in settingsTabs"
               :key="tab.id"
               type="button"
+              role="tab"
+              :aria-selected="activeSettingsTab === tab.id"
+              :aria-controls="`risk-settings-panel-${tab.id}`"
               class="inline-flex whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors"
               :class="activeSettingsTab === tab.id ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-dark-700 dark:hover:text-white'"
               @click="activeSettingsTab = tab.id"
@@ -387,7 +408,7 @@
             </button>
           </div>
 
-          <div v-if="activeSettingsTab === 'basic'" class="space-y-5">
+          <div v-if="activeSettingsTab === 'basic'" id="risk-settings-panel-basic" role="tabpanel" class="space-y-5">
             <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
               <div class="flex items-center justify-between rounded-lg border border-gray-100 p-4 dark:border-dark-700">
                 <div>
@@ -695,7 +716,7 @@
             </div>
           </div>
 
-          <div v-else-if="activeSettingsTab === 'scope'" class="space-y-5">
+          <div v-else-if="activeSettingsTab === 'scope'" id="risk-settings-panel-scope" role="tabpanel" class="space-y-5">
             <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h3 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.groupScope') }}</h3>
@@ -797,7 +818,7 @@
             </div>
           </div>
 
-          <div v-else-if="activeSettingsTab === 'runtime'" class="grid grid-cols-1 gap-5 lg:grid-cols-2">
+          <div v-else-if="activeSettingsTab === 'runtime'" id="risk-settings-panel-runtime" role="tabpanel" class="grid grid-cols-1 gap-5 lg:grid-cols-2">
             <div>
               <label class="input-label">{{ t('admin.riskControl.workerCount') }}</label>
               <input v-model.number="configForm.worker_count" type="number" min="1" max="32" class="input" />
@@ -860,7 +881,7 @@
             </div>
           </div>
 
-          <div v-else-if="activeSettingsTab === 'response'" class="space-y-5">
+          <div v-else-if="activeSettingsTab === 'response'" id="risk-settings-panel-response" role="tabpanel" class="space-y-5">
             <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
               <div>
                 <label class="input-label">{{ t('admin.riskControl.blockStatus') }}</label>
@@ -902,7 +923,7 @@
             </div>
           </div>
 
-          <div v-else-if="activeSettingsTab === 'riskThresholds'" class="space-y-5">
+          <div v-else-if="activeSettingsTab === 'riskThresholds'" id="risk-settings-panel-riskThresholds" role="tabpanel" class="space-y-5">
             <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h3 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.riskThresholds') }}</h3>
@@ -959,7 +980,91 @@
             </div>
           </div>
 
-          <div v-else-if="activeSettingsTab === 'keywords'" class="space-y-5">
+          <div v-else-if="activeSettingsTab === 'builtinRegex'" id="risk-settings-panel-builtinRegex" role="tabpanel" class="space-y-5">
+            <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+              <div class="flex items-center justify-between rounded-lg border border-gray-100 p-4 dark:border-dark-700">
+                <div>
+                  <p class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.riskControl.builtinRegexEnabled') }}</p>
+                  <p class="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.builtinRegexEnabledHint') }}</p>
+                </div>
+                <Toggle v-model="configForm.builtin_regex_enabled" />
+              </div>
+              <div>
+                <label class="input-label" for="builtin-regex-threshold">{{ t('admin.riskControl.builtinRegexThreshold') }}</label>
+                <input id="builtin-regex-threshold" v-model.number="configForm.builtin_regex_threshold" type="number" min="1" max="500" class="input font-mono" />
+                <p class="input-hint">{{ t('admin.riskControl.builtinRegexThresholdHint') }}</p>
+              </div>
+              <div>
+                <label class="input-label" for="builtin-regex-strict-threshold">{{ t('admin.riskControl.builtinRegexStrictThreshold') }}</label>
+                <input id="builtin-regex-strict-threshold" v-model.number="configForm.builtin_regex_strict_threshold" type="number" min="1" max="1000" class="input font-mono" />
+                <p class="input-hint">{{ t('admin.riskControl.builtinRegexStrictThresholdHint') }}</p>
+              </div>
+            </div>
+
+            <div class="flex flex-col gap-3 border-b border-gray-100 pb-3 dark:border-dark-700 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.builtinRegexRules') }}</h3>
+                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.builtinRegexRulesHint', { count: configForm.builtin_regex_rules.length }) }}</p>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <button type="button" class="btn btn-secondary inline-flex items-center gap-2" @click="restoreBuiltinRegexDefaults">
+                  <Icon name="refresh" size="sm" />
+                  {{ t('admin.riskControl.builtinRegexRestoreDefaults') }}
+                </button>
+                <button type="button" class="btn btn-primary inline-flex items-center gap-2" @click="addBuiltinRegexRule">
+                  <Icon name="plus" size="sm" />
+                  {{ t('admin.riskControl.builtinRegexAddRule') }}
+                </button>
+              </div>
+            </div>
+
+            <div v-if="configForm.builtin_regex_rules.length === 0" class="empty-state border border-dashed border-gray-200 dark:border-dark-700">
+              <Icon name="shield" size="lg" class="text-gray-400" />
+              <p class="mt-2 text-sm font-medium text-gray-700 dark:text-gray-200">{{ t('admin.riskControl.builtinRegexEmpty') }}</p>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.builtinRegexEmptyHint') }}</p>
+            </div>
+
+            <div v-else class="space-y-3">
+              <article
+                v-for="(rule, index) in configForm.builtin_regex_rules"
+                :key="`${rule.name || 'rule'}-${index}`"
+                class="border border-gray-100 bg-gray-50/70 p-4 dark:border-dark-700 dark:bg-dark-900/30"
+              >
+                <div class="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_110px_110px_auto]">
+                  <div>
+                    <label class="input-label" :for="`builtin-regex-name-${index}`">{{ t('admin.riskControl.builtinRegexName') }}</label>
+                    <input :id="`builtin-regex-name-${index}`" v-model.trim="rule.name" type="text" class="input font-mono text-sm" :placeholder="t('admin.riskControl.builtinRegexNamePlaceholder')" />
+                  </div>
+                  <div>
+                    <label class="input-label" :for="`builtin-regex-category-${index}`">{{ t('admin.riskControl.builtinRegexCategory') }}</label>
+                    <input :id="`builtin-regex-category-${index}`" v-model.trim="rule.category" type="text" class="input text-sm" :placeholder="t('admin.riskControl.builtinRegexCategoryPlaceholder')" />
+                  </div>
+                  <div>
+                    <label class="input-label" :for="`builtin-regex-weight-${index}`">{{ t('admin.riskControl.builtinRegexWeight') }}</label>
+                    <input :id="`builtin-regex-weight-${index}`" v-model.number="rule.weight" type="number" min="1" max="1000" class="input font-mono text-sm" />
+                  </div>
+                  <div class="flex items-end pb-1">
+                    <label class="flex min-h-10 w-full items-center justify-between gap-2 border border-gray-200 px-3 text-sm text-gray-700 dark:border-dark-600 dark:text-gray-200">
+                      <span>{{ t('admin.riskControl.builtinRegexStrict') }}</span>
+                      <input v-model="rule.strict" type="checkbox" class="h-4 w-4" />
+                    </label>
+                  </div>
+                  <div class="flex items-end justify-end pb-1">
+                    <button type="button" class="btn btn-ghost btn-sm text-red-600 hover:text-red-700 dark:text-red-300" :title="t('admin.riskControl.builtinRegexDeleteRule')" @click="removeBuiltinRegexRule(index)">
+                      <Icon name="trash" size="sm" />
+                      <span class="sr-only">{{ t('admin.riskControl.builtinRegexDeleteRule') }}</span>
+                    </button>
+                  </div>
+                </div>
+                <div class="mt-3">
+                  <label class="input-label" :for="`builtin-regex-pattern-${index}`">{{ t('admin.riskControl.builtinRegexPattern') }}</label>
+                  <textarea :id="`builtin-regex-pattern-${index}`" v-model="rule.pattern" class="input min-h-20 resize-y font-mono text-xs leading-5" :placeholder="t('admin.riskControl.builtinRegexPatternPlaceholder')" spellcheck="false"></textarea>
+                </div>
+              </article>
+            </div>
+          </div>
+
+          <div v-else-if="activeSettingsTab === 'keywords'" id="risk-settings-panel-keywords" role="tabpanel" class="space-y-5">
             <div
               class="flex items-start gap-3 rounded-lg border p-4"
               :class="keywordNotice.toneClass"
@@ -1023,7 +1128,7 @@
             </div>
           </div>
 
-          <div v-else class="grid grid-cols-1 gap-5 lg:grid-cols-2">
+          <div v-else id="risk-settings-panel-retention" role="tabpanel" class="grid grid-cols-1 gap-5 lg:grid-cols-2">
             <div>
               <label class="input-label">{{ t('admin.riskControl.hitRetentionDays') }}</label>
               <input v-model.number="configForm.hit_retention_days" type="number" min="1" max="3650" class="input" />
@@ -1131,6 +1236,7 @@ import type {
   ContentModerationLog,
   ContentModerationModelFilter,
   ContentModerationModelFilterType,
+  ContentModerationRegexRule,
   ContentModerationRuntimeStatus,
   ContentModerationTestAuditResult,
   KeywordBlockingMode,
@@ -1141,8 +1247,11 @@ import type { AdminGroup, SelectOption } from '@/types'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime as formatDateTimeValue } from '@/utils/format'
+import { useUrlQueryBindings, parseNumberQuery, parseStringQuery } from '@/composables/useUrlQueryBindings'
+import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
+import { useInitialLoading } from '@/composables/useInitialLoading'
 
-type SettingsTab = 'basic' | 'scope' | 'runtime' | 'response' | 'riskThresholds' | 'retention' | 'keywords'
+type SettingsTab = 'basic' | 'scope' | 'runtime' | 'response' | 'riskThresholds' | 'builtinRegex' | 'retention' | 'keywords'
 type WorkerSlotState = 'active' | 'idle' | 'disabled'
 type APIKeysWriteMode = 'append' | 'replace'
 type OverviewIcon = 'shield' | 'key' | 'users' | 'document'
@@ -1172,30 +1281,19 @@ const maxModerationTestImages = 1
 const maxModerationTestImageSize = 8 * 1024 * 1024
 const maxVisibleApiKeyRows: number = 3
 const blockedKeywordMax = 10000
-const riskThresholdDefaults: Record<string, number> = {
-  harassment: 98,
-  'harassment/threatening': 90,
-  hate: 65,
-  'hate/threatening': 65,
-  illicit: 95,
-  'illicit/violent': 95,
-  'self-harm': 65,
-  'self-harm/intent': 85,
-  'self-harm/instructions': 65,
-  sexual: 65,
-  'sexual/minors': 65,
-  violence: 95,
-  'violence/graphic': 95,
-}
-const riskThresholdCategories = Object.keys(riskThresholdDefaults)
+const riskThresholdDefaults = reactive<Record<string, number>>({})
+const riskThresholdCategories = computed(() => Object.keys(riskThresholdDefaults))
 
 const { t } = useI18n()
 const appStore = useAppStore()
 const defaultBlockMessage = () => t('admin.riskControl.defaultBlockMessage')
 
 const loading = ref(true)
+const { isInitialLoading } = useInitialLoading(loading)
+const loadError = ref<string | null>(null)
 const saving = ref(false)
 const logsLoading = ref(false)
+const logsError = ref<string | null>(null)
 const statusLoading = ref(false)
 const apiKeyTesting = ref(false)
 const hashActionLoading = ref(false)
@@ -1215,6 +1313,8 @@ const moderationTestImages = ref<string[]>([])
 const moderationTestResult = ref<ContentModerationTestAuditResult | null>(null)
 const inputDetailRow = ref<ContentModerationLog | null>(null)
 let statusTimer: number | null = null
+let logsAbortController: AbortController | null = null
+let logsRequestSequence = 0
 
 const configForm = reactive({
   enabled: false,
@@ -1248,6 +1348,11 @@ const configForm = reactive({
   non_hit_retention_days: 3,
   pre_hash_check_enabled: false,
   thresholds: { ...riskThresholdDefaults } as Record<string, number>,
+  builtin_regex_enabled: true,
+  builtin_regex_threshold: 50,
+  builtin_regex_strict_threshold: 90,
+  builtin_regex_rules: [] as ContentModerationRegexRule[],
+  builtin_regex_default_rules: [] as ContentModerationRegexRule[],
   blocked_keywords_text: '',
   keyword_blocking_mode: 'keyword_and_api' as KeywordBlockingMode,
   model_filter_type: 'all' as ContentModerationModelFilterType,
@@ -1256,7 +1361,7 @@ const configForm = reactive({
 
 const pagination = reactive({
   page: 1,
-  page_size: 20,
+  page_size: getPersistedPageSize(),
   total: 0,
   pages: 1,
 })
@@ -1270,12 +1375,24 @@ const filters = reactive({
   to: '',
 })
 
+useUrlQueryBindings([
+  { key: 'result', get: () => filters.result, set: (value: string) => { filters.result = value }, parse: parseStringQuery, omit: (value: string) => !value },
+  { key: 'group_id', get: () => filters.group_id, set: (value: number) => { filters.group_id = Math.max(0, Math.floor(value)) }, parse: parseNumberQuery, omit: (value: number) => value <= 0 },
+  { key: 'endpoint', get: () => filters.endpoint, set: (value: string) => { filters.endpoint = value }, parse: parseStringQuery, omit: (value: string) => !value },
+  { key: 'search', get: () => filters.search, set: (value: string) => { filters.search = value }, parse: parseStringQuery, omit: (value: string) => !value },
+  { key: 'from', get: () => filters.from, set: (value: string) => { filters.from = value }, parse: parseStringQuery, omit: (value: string) => !value },
+  { key: 'to', get: () => filters.to, set: (value: string) => { filters.to = value }, parse: parseStringQuery, omit: (value: string) => !value },
+  { key: 'page', get: () => pagination.page, set: (value: number) => { pagination.page = Math.max(1, Math.floor(value)) }, parse: parseNumberQuery, omit: (value: number) => value <= 1 },
+  { key: 'page_size', get: () => pagination.page_size, set: (value: number) => { pagination.page_size = Math.max(1, Math.floor(value)) }, parse: parseNumberQuery, omit: (value: number) => value === getPersistedPageSize() },
+])
+
 const settingsTabs = computed<Array<{ id: SettingsTab; label: string }>>(() => [
   { id: 'basic', label: t('admin.riskControl.tabs.basic') },
   { id: 'scope', label: t('admin.riskControl.tabs.scope') },
   { id: 'runtime', label: t('admin.riskControl.tabs.runtime') },
   { id: 'response', label: t('admin.riskControl.tabs.response') },
   { id: 'riskThresholds', label: t('admin.riskControl.tabs.riskThresholds') },
+  { id: 'builtinRegex', label: t('admin.riskControl.tabs.builtinRegex') },
   { id: 'keywords', label: t('admin.riskControl.tabs.keywords') },
   { id: 'retention', label: t('admin.riskControl.tabs.retention') },
 ])
@@ -1569,7 +1686,7 @@ const moderationScoreRows = computed<ModerationScoreRow[]>(() => {
 })
 
 const riskThresholdRows = computed<RiskThresholdRow[]>(() => (
-  riskThresholdCategories.map((category) => ({
+  riskThresholdCategories.value.map((category) => ({
     category,
     value: configForm.thresholds[category] ?? riskThresholdDefaults[category],
     defaultValue: riskThresholdDefaults[category],
@@ -1724,7 +1841,21 @@ function applyConfig(config: ContentModerationConfig) {
   configForm.hit_retention_days = config.hit_retention_days || 180
   configForm.non_hit_retention_days = Math.min(Math.max(config.non_hit_retention_days || 3, 1), 3)
   configForm.pre_hash_check_enabled = config.pre_hash_check_enabled ?? false
+  const defaultThresholds = config.default_thresholds || config.thresholds || {}
+  for (const key of Object.keys(riskThresholdDefaults)) {
+    delete riskThresholdDefaults[key]
+  }
+  for (const [category, value] of Object.entries(defaultThresholds)) {
+    if (Number.isFinite(value)) {
+      riskThresholdDefaults[category] = clampPercent(Number(value) * 100)
+    }
+  }
   configForm.thresholds = riskThresholdsFromConfig(config.thresholds)
+  configForm.builtin_regex_enabled = config.builtin_regex_enabled ?? true
+  configForm.builtin_regex_threshold = config.builtin_regex_threshold ?? 50
+  configForm.builtin_regex_strict_threshold = config.builtin_regex_strict_threshold ?? 90
+  configForm.builtin_regex_rules = cloneBuiltinRegexRules(config.builtin_regex_rules)
+  configForm.builtin_regex_default_rules = cloneBuiltinRegexRules(config.builtin_regex_default_rules)
   configForm.blocked_keywords_text = Array.isArray(config.blocked_keywords) ? config.blocked_keywords.join('\n') : ''
   configForm.keyword_blocking_mode = normalizeKeywordBlockingMode(config.keyword_blocking_mode)
   const modelFilter = normalizeModelFilter(config.model_filter)
@@ -1734,6 +1865,7 @@ function applyConfig(config: ContentModerationConfig) {
 
 async function loadAll() {
   loading.value = true
+  loadError.value = null
   try {
     const [config, groupItems, runtimeStatus] = await Promise.all([
       adminAPI.riskControl.getConfig(),
@@ -1749,7 +1881,8 @@ async function loadAll() {
     }
     await loadLogs()
   } catch (err: unknown) {
-    appStore.showError(extractApiErrorMessage(err, t('admin.riskControl.loadFailed')))
+    loadError.value = extractApiErrorMessage(err, t('admin.riskControl.loadFailed'))
+    appStore.showError(loadError.value)
   } finally {
     loading.value = false
   }
@@ -1781,6 +1914,7 @@ async function saveConfig() {
       appStore.showError(t('admin.riskControl.modelFilterModelsRequired'))
       return
     }
+    if (!validateBuiltinRegexRules()) return
     const payload: UpdateContentModerationConfig = {
       enabled: configForm.enabled,
       mode: configForm.mode,
@@ -1806,6 +1940,10 @@ async function saveConfig() {
       non_hit_retention_days: Math.min(Math.max(Number(configForm.non_hit_retention_days) || 3, 1), 3),
       pre_hash_check_enabled: configForm.pre_hash_check_enabled,
       thresholds: buildRiskThresholdPayload(),
+      builtin_regex_enabled: configForm.builtin_regex_enabled,
+      builtin_regex_threshold: Math.min(Math.max(Number(configForm.builtin_regex_threshold) || 50, 1), 500),
+      builtin_regex_strict_threshold: Math.min(Math.max(Number(configForm.builtin_regex_strict_threshold) || 90, 1), 1000),
+      builtin_regex_rules: cloneBuiltinRegexRules(configForm.builtin_regex_rules),
       blocked_keywords: blockedKeywordList.value,
       keyword_blocking_mode: configForm.keyword_blocking_mode,
       model_filter: modelFilterPayload,
@@ -1837,7 +1975,12 @@ async function saveConfig() {
 }
 
 async function loadLogs() {
+  logsAbortController?.abort()
+  const requestController = new AbortController()
+  logsAbortController = requestController
+  const requestSequence = ++logsRequestSequence
   logsLoading.value = true
+  logsError.value = null
   try {
     const params = {
       page: pagination.page,
@@ -1849,16 +1992,30 @@ async function loadLogs() {
       from: normalizeDateTimeLocal(filters.from),
       to: normalizeDateTimeLocal(filters.to),
     }
-    const result = await adminAPI.riskControl.listLogs(params)
+    const result = await adminAPI.riskControl.listLogs(params, { signal: requestController.signal })
+    if (requestController.signal.aborted || requestSequence !== logsRequestSequence) return
     logs.value = result.items
     pagination.total = result.total
     pagination.page = result.page
     pagination.page_size = result.page_size
     pagination.pages = result.pages
   } catch (err: unknown) {
-    appStore.showError(extractApiErrorMessage(err, t('admin.riskControl.logsFailed')))
+    const errorInfo = err as { name?: string; code?: string }
+    if (
+      requestController.signal.aborted ||
+      requestSequence !== logsRequestSequence ||
+      errorInfo?.name === 'AbortError' ||
+      errorInfo?.code === 'ERR_CANCELED'
+    ) {
+      return
+    }
+    logsError.value = extractApiErrorMessage(err, t('admin.riskControl.logsFailed'))
+    appStore.showError(logsError.value)
   } finally {
-    logsLoading.value = false
+    if (logsAbortController === requestController) {
+      logsLoading.value = false
+      logsAbortController = null
+    }
   }
 }
 
@@ -2114,6 +2271,71 @@ function modeDescription(mode: ModerationMode): string {
   return descriptions[mode] ?? ''
 }
 
+function cloneBuiltinRegexRules(rules: ContentModerationRegexRule[] | undefined): ContentModerationRegexRule[] {
+  if (!Array.isArray(rules)) return []
+  return rules.map((rule) => ({
+    name: String(rule.name || ''),
+    pattern: String(rule.pattern || ''),
+    weight: Number(rule.weight) || 1,
+    category: String(rule.category || ''),
+    strict: Boolean(rule.strict),
+  }))
+}
+
+function addBuiltinRegexRule() {
+  configForm.builtin_regex_rules.push({
+    name: `custom_rule_${configForm.builtin_regex_rules.length + 1}`,
+    pattern: '',
+    weight: 10,
+    category: 'custom',
+    strict: false,
+  })
+}
+
+function removeBuiltinRegexRule(index: number) {
+  if (index < 0 || index >= configForm.builtin_regex_rules.length) return
+  configForm.builtin_regex_rules.splice(index, 1)
+}
+
+function restoreBuiltinRegexDefaults() {
+  if (configForm.builtin_regex_default_rules.length === 0) {
+    appStore.showError(t('admin.riskControl.builtinRegexDefaultsUnavailable'))
+    return
+  }
+  configForm.builtin_regex_rules = cloneBuiltinRegexRules(configForm.builtin_regex_default_rules)
+}
+
+function validateBuiltinRegexRules(): boolean {
+  const seen = new Set<string>()
+  for (const [index, rule] of configForm.builtin_regex_rules.entries()) {
+    const position = index + 1
+    const name = rule.name.trim()
+    const category = rule.category.trim()
+    const pattern = rule.pattern.trim()
+    if (!name || !category || !pattern) {
+      appStore.showError(t('admin.riskControl.builtinRegexRuleRequired', { position }))
+      return false
+    }
+    const normalizedName = name.toLowerCase()
+    if (seen.has(normalizedName)) {
+      appStore.showError(t('admin.riskControl.builtinRegexRuleDuplicate', { name }))
+      return false
+    }
+    seen.add(normalizedName)
+    if (!Number.isFinite(Number(rule.weight)) || Number(rule.weight) < 1 || Number(rule.weight) > 1000) {
+      appStore.showError(t('admin.riskControl.builtinRegexRuleWeightInvalid', { name }))
+      return false
+    }
+    try {
+      new RegExp(pattern)
+    } catch {
+      appStore.showError(t('admin.riskControl.builtinRegexRulePatternInvalid', { name }))
+      return false
+    }
+  }
+  return true
+}
+
 function resultLabel(row: ContentModerationLog): string {
   if (row.action === 'cyber_policy') return t('admin.riskControl.action.cyberPolicy')
   if (row.action === 'keyword_block') return t('admin.riskControl.action.keywordBlock')
@@ -2273,7 +2495,7 @@ function buildModelFilterPayload(): ContentModerationModelFilter {
 
 function riskThresholdsFromConfig(thresholds: Record<string, number> | null | undefined): Record<string, number> {
   const out: Record<string, number> = { ...riskThresholdDefaults }
-  for (const category of riskThresholdCategories) {
+  for (const category of riskThresholdCategories.value) {
     const value = thresholds?.[category]
     if (Number.isFinite(value)) {
       out[category] = clampPercent(Number(value) * 100)
@@ -2284,7 +2506,7 @@ function riskThresholdsFromConfig(thresholds: Record<string, number> | null | un
 
 function buildRiskThresholdPayload(): Record<string, number> {
   const payload: Record<string, number> = {}
-  for (const category of riskThresholdCategories) {
+  for (const category of riskThresholdCategories.value) {
     payload[category] = Number((clampPercent(configForm.thresholds[category]) / 100).toFixed(4))
   }
   return payload
@@ -2349,6 +2571,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  logsAbortController?.abort()
+  logsAbortController = null
   if (statusTimer !== null) {
     window.clearInterval(statusTimer)
     statusTimer = null

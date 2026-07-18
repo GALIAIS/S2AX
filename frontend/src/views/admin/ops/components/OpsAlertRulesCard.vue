@@ -10,23 +10,29 @@ import { opsAPI } from '@/api/admin/ops'
 import type { AlertRule, MetricType, Operator } from '../types'
 import type { OpsSeverity } from '@/api/admin/ops'
 import { formatDateTime } from '../utils/opsFormatters'
+import { useInitialLoading } from '@/composables/useInitialLoading'
 
 const { t } = useI18n()
 const appStore = useAppStore()
 
-const loading = ref(false)
+const loading = ref(true)
+const { isInitialLoading } = useInitialLoading(loading)
 const rules = ref<AlertRule[]>([])
+let loadSequence = 0
 
 async function load() {
+  const sequence = ++loadSequence
   loading.value = true
   try {
-    rules.value = await opsAPI.listAlertRules()
+    const nextRules = await opsAPI.listAlertRules()
+    if (sequence !== loadSequence) return
+    rules.value = nextRules
   } catch (err: any) {
+    if (sequence !== loadSequence) return
     console.error('[OpsAlertRulesCard] Failed to load rules', err)
     appStore.showError(err?.response?.data?.detail || t('admin.ops.alertRules.loadFailed'))
-    rules.value = []
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
@@ -387,7 +393,7 @@ function cancelDelete() {
 </script>
 
 <template>
-  <div class="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700">
+  <div class="relative rounded-3xl bg-white p-6 shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700">
     <div class="mb-4 flex items-start justify-between gap-4">
       <div>
         <h3 class="text-sm font-bold text-gray-900 dark:text-white">{{ t('admin.ops.alertRules.title') }}</h3>
@@ -395,10 +401,11 @@ function cancelDelete() {
       </div>
 
       <div class="flex items-center gap-2">
-        <button class="btn btn-sm btn-primary" :disabled="loading" @click="openCreate">
+        <button type="button" class="btn btn-sm btn-primary" :disabled="loading" @click="openCreate">
           {{ t('admin.ops.alertRules.create') }}
         </button>
         <button
+          type="button"
           class="flex items-center gap-1.5 rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600"
           :disabled="loading"
           @click="load"
@@ -411,11 +418,15 @@ function cancelDelete() {
       </div>
     </div>
 
-    <div v-if="loading" class="py-10 text-center text-sm text-gray-500 dark:text-gray-400">
+    <div v-if="loading && sortedRules.length > 0" class="absolute right-4 top-4 rounded-md bg-white/95 px-2.5 py-1 text-xs text-gray-500 shadow-sm ring-1 ring-gray-200 backdrop-blur dark:bg-dark-800/95 dark:text-gray-300 dark:ring-dark-600" role="status">
+      {{ t('common.refreshing') }}
+    </div>
+
+    <div v-if="isInitialLoading && sortedRules.length === 0" class="py-10 text-center text-sm text-gray-500 dark:text-gray-400">
       {{ t('admin.ops.alertRules.loading') }}
     </div>
 
-    <div v-else-if="sortedRules.length === 0" class="rounded-xl border border-dashed border-gray-200 p-8 text-center text-sm text-gray-500 dark:border-dark-700 dark:text-gray-400">
+    <div v-else-if="!loading && sortedRules.length === 0" class="rounded-xl border border-dashed border-gray-200 p-8 text-center text-sm text-gray-500 dark:border-dark-700 dark:text-gray-400">
       {{ t('admin.ops.alertRules.empty') }}
     </div>
 

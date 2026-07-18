@@ -66,6 +66,12 @@
           <p class="font-medium text-gray-800 dark:text-dark-100">{{ t('admin.promptAudit.policy.strategy') }}</p>
           <p class="mt-1">priority · {{ t('admin.promptAudit.policy.strategyHint') }}</p>
         </div>
+        <div class="border-l-2 border-primary-500 bg-primary-50/60 px-4 py-3 text-sm text-primary-950 dark:bg-primary-950/25 dark:text-primary-100">
+          <p class="font-medium">{{ t('admin.promptAudit.policy.deploymentTitle') }}</p>
+          <p class="mt-1 leading-5 text-primary-800 dark:text-primary-200">
+            {{ draft.blocking_enabled ? t('admin.promptAudit.policy.blockingDeploymentHint') : t('admin.promptAudit.policy.asyncDeploymentHint') }}
+          </p>
+        </div>
       </div>
     </div>
   </section>

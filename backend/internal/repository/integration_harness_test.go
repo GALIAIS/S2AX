@@ -75,9 +75,10 @@ func TestMain(m *testing.M) {
 	}
 	defer func() { _ = pgContainer.Terminate(ctx) }()
 
+	redisImage := selectDockerImage(ctx, redisImageTag)
 	redisContainer, err := tcredis.Run(
 		ctx,
-		redisImageTag,
+		redisImage,
 	)
 	if err != nil {
 		log.Printf("failed to start redis container: %v", err)
@@ -141,8 +142,17 @@ func dockerIsAvailable(ctx context.Context) bool {
 }
 
 func selectDockerImage(ctx context.Context, preferred string) string {
-	if dockerImageExists(ctx, preferred) {
-		return preferred
+	candidates := []string{preferred}
+	switch preferred {
+	case postgresImageTag:
+		candidates = append(candidates, "postgres:18-alpine")
+	case redisImageTag:
+		candidates = append(candidates, "redis:8-alpine", "redis:latest")
+	}
+	for _, candidate := range candidates {
+		if dockerImageExists(ctx, candidate) {
+			return candidate
+		}
 	}
 
 	return preferred
@@ -203,6 +213,36 @@ func testTx(t *testing.T) *sql.Tx {
 func testEntClient(t *testing.T) *dbent.Client {
 	t.Helper()
 	return integrationEntClient
+}
+
+// isolateIntegrationData gives integration tests that exercise services with
+// internally managed transactions a clean tenant-data graph without weakening
+// those transaction boundaries. Static migration catalogs and seeded groups are
+// deliberately preserved so every test continues to run against the reference
+// data initialized by TestMain.
+//
+// Tests using testEntTx already get rollback isolation and do not need this
+// helper. Call this before opening any transaction or creating an Ent client.
+func isolateIntegrationData(t *testing.T) {
+	t.Helper()
+	resetIntegrationData(t)
+	t.Cleanup(func() {
+		resetIntegrationData(t)
+	})
+}
+
+func resetIntegrationData(t testing.TB) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// users is the root of every per-user integration fixture. PostgreSQL's
+	// transitive CASCADE clears city worlds, virtual-currency ledgers, usage,
+	// subscriptions, and other dependent tenant rows while leaving independent
+	// reference tables such as groups and city_engine_versions intact.
+	_, err := integrationDB.ExecContext(ctx, "TRUNCATE TABLE public.users RESTART IDENTITY CASCADE")
+	require.NoError(t, err, "reset integration tenant data")
 }
 
 // testEntTx 返回一个 ent 事务，用于需要事务隔离的测试。

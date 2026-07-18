@@ -3,6 +3,8 @@ package apicompat
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -149,16 +151,40 @@ func sanitizeAnthropicToolUseInput(name string, raw string) json.RawMessage {
 		return json.RawMessage(raw)
 	}
 
-	if pages, ok := input["pages"]; !ok || string(pages) != `""` {
+	modified := false
+	if pages, ok := input["pages"]; ok && string(pages) == `""` {
+		delete(input, "pages")
+		modified = true
+	}
+	// Some upstream Responses streams have emitted Read offsets by joining
+	// several numeric argument fragments (for example 5180581636390513).
+	// Passing such a value to Claude Code makes it read zero lines and repeat
+	// the same tool call forever. A line offset above the signed 32-bit range
+	// cannot represent a practical source-file position, so normalize only this
+	// unambiguously malformed numeric case and leave normal offsets untouched.
+	if offset, ok := input["offset"]; ok && isMalformedAnthropicReadOffset(offset) {
+		input["offset"] = json.RawMessage("0")
+		modified = true
+	}
+	if !modified {
 		return json.RawMessage(raw)
 	}
-
-	delete(input, "pages")
 	sanitized, err := json.Marshal(input)
 	if err != nil {
 		return json.RawMessage(raw)
 	}
 	return sanitized
+}
+
+const maxAnthropicReadOffset int64 = 1<<31 - 1
+
+func isMalformedAnthropicReadOffset(raw json.RawMessage) bool {
+	value := strings.TrimSpace(string(raw))
+	if value == "" || value == "null" || strings.HasPrefix(value, `"`) {
+		return false
+	}
+	offset, err := strconv.ParseInt(value, 10, 64)
+	return err != nil || offset < 0 || offset > maxAnthropicReadOffset
 }
 
 // ---------------------------------------------------------------------------

@@ -480,6 +480,16 @@ func ProvideIdempotencyCleanupService(repo IdempotencyRepository, cfg *config.Co
 	return svc
 }
 
+func ProvideVirtualCurrencyHoldCleanupService(virtualCurrency *VirtualCurrencyService) *VirtualCurrencyHoldCleanupService {
+	svc := NewVirtualCurrencyHoldCleanupService(
+		virtualCurrency,
+		defaultVirtualCurrencyHoldCleanupInterval,
+		defaultVirtualCurrencyHoldCleanupBatch,
+	)
+	svc.Start()
+	return svc
+}
+
 // ProvideScheduledTestService creates ScheduledTestService.
 func ProvideScheduledTestService(
 	planRepo ScheduledTestPlanRepository,
@@ -640,6 +650,79 @@ func ProvideAPIKeyService(
 	return svc
 }
 
+// ProvideRedeemService gives Wire an explicit virtual-currency dependency while
+// NewRedeemService keeps its variadic argument for older direct callers.
+func ProvideRedeemService(
+	redeemRepo RedeemCodeRepository,
+	userRepo UserRepository,
+	subscriptionService *SubscriptionService,
+	cache RedeemCache,
+	billingCacheService *BillingCacheService,
+	entClient *dbent.Client,
+	authCacheInvalidator APIKeyAuthCacheInvalidator,
+	affiliateService *AffiliateService,
+	virtualCurrency *VirtualCurrencyService,
+) *RedeemService {
+	return NewRedeemService(
+		redeemRepo,
+		userRepo,
+		subscriptionService,
+		cache,
+		billingCacheService,
+		entClient,
+		authCacheInvalidator,
+		affiliateService,
+		virtualCurrency,
+	)
+}
+
+// ProvideAdminService resolves the optional constructor argument explicitly for Wire.
+func ProvideAdminService(
+	userRepo UserRepository,
+	groupRepo AdminGroupRepository,
+	accountRepo AdminAccountRepository,
+	proxyRepo ProxyRepository,
+	apiKeyRepo APIKeyRepository,
+	redeemCodeRepo RedeemCodeRepository,
+	userGroupRateRepo UserGroupRateRepository,
+	userRPMCache UserRPMCache,
+	billingCacheService *BillingCacheService,
+	proxyProber ProxyExitInfoProber,
+	proxyLatencyCache ProxyLatencyCache,
+	authCacheInvalidator APIKeyAuthCacheInvalidator,
+	entClient *dbent.Client,
+	settingService *SettingService,
+	defaultSubAssigner DefaultSubscriptionAssigner,
+	userSubRepo UserSubscriptionRepository,
+	privacyClientFactory PrivacyClientFactory,
+	runtimeBlocker AccountRuntimeBlocker,
+	affiliateService *AffiliateService,
+	virtualCurrency *VirtualCurrencyService,
+) AdminService {
+	return NewAdminService(
+		userRepo,
+		groupRepo,
+		accountRepo,
+		proxyRepo,
+		apiKeyRepo,
+		redeemCodeRepo,
+		userGroupRateRepo,
+		userRPMCache,
+		billingCacheService,
+		proxyProber,
+		proxyLatencyCache,
+		authCacheInvalidator,
+		entClient,
+		settingService,
+		defaultSubAssigner,
+		userSubRepo,
+		privacyClientFactory,
+		runtimeBlocker,
+		affiliateService,
+		virtualCurrency,
+	)
+}
+
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
 	// Core services
@@ -650,7 +733,7 @@ var ProviderSet = wire.NewSet(
 	NewGroupService,
 	NewAccountService,
 	NewProxyService,
-	NewRedeemService,
+	ProvideRedeemService,
 	NewPromoService,
 	NewUsageService,
 	NewDashboardService,
@@ -658,7 +741,7 @@ var ProviderSet = wire.NewSet(
 	NewBillingService,
 	ProvideBillingCacheService,
 	NewAnnouncementService,
-	NewAdminService,
+	ProvideAdminService,
 	NewGatewayService,
 	NewOpenAIGatewayService,
 	ProvideImageTaskService,
@@ -727,6 +810,9 @@ var ProviderSet = wire.NewSet(
 	NewAntigravityQuotaFetcher,
 	NewGrokQuotaFetcher,
 	NewUserAttributeService,
+	NewCityEconomyService,
+	NewVirtualCurrencyService,
+	NewVirtualCurrencyIntegrationService,
 	NewUsageCache,
 	NewTotpService,
 	NewErrorPassthroughService,
@@ -735,6 +821,7 @@ var ProviderSet = wire.NewSet(
 	ProvideIdempotencyCoordinator,
 	ProvideSystemOperationLockService,
 	ProvideIdempotencyCleanupService,
+	ProvideVirtualCurrencyHoldCleanupService,
 	ProvideScheduledTestService,
 	ProvideScheduledTestRunnerService,
 	NewGroupCapacityService,

@@ -22,6 +22,9 @@ func TestIsFingerprintedEmbeddedAssetPath(t *testing.T) {
 		{name: "fingerprinted_url_safe_hash", path: "assets/app-aB1-2_Cd.css", want: true},
 		{name: "nested_fingerprinted_asset", path: "assets/vendor/chunk-AbCd1234.js", want: true},
 		{name: "leading_slash_fingerprinted_asset", path: "/assets/index-AbCd1234.js", want: true},
+		{name: "next_chunk", path: "_next/static/chunks/0vigja7zss6yn.js", want: true},
+		{name: "next_css", path: "_next/static/css/60788721f89f2961.css", want: true},
+		{name: "next_build_manifest", path: "/_next/static/build-id/_buildManifest.js", want: true},
 		{name: "unhashed_asset", path: "assets/index.js", want: false},
 		{name: "short_suffix", path: "assets/index-abc123.js", want: false},
 		{name: "logo", path: "logo.png", want: false},
@@ -31,6 +34,9 @@ func TestIsFingerprintedEmbeddedAssetPath(t *testing.T) {
 		{name: "spa_route", path: "dashboard", want: false},
 		{name: "assets_prefix_only", path: "assets", want: false},
 		{name: "similar_name", path: "assets-backup/x.js", want: false},
+		{name: "next_image_endpoint", path: "_next/image", want: false},
+		{name: "next_data_route", path: "_next/data/build-id/dashboard.json", want: false},
+		{name: "next_static_prefix_only", path: "_next/static", want: false},
 		{name: "empty", path: "", want: false},
 	}
 
@@ -49,6 +55,13 @@ func TestApplyStaticAssetCacheHeaders(t *testing.T) {
 		t.Parallel()
 		header := make(http.Header)
 		applyStaticAssetCacheHeaders(header, "assets/index-AbCd1234.js")
+		assert.Equal(t, staticAssetsCacheControl, header.Get("Cache-Control"))
+	})
+
+	t.Run("sets_immutable_cache_for_next_static_asset", func(t *testing.T) {
+		t.Parallel()
+		header := make(http.Header)
+		applyStaticAssetCacheHeaders(header, "_next/static/chunks/0vigja7zss6yn.js")
 		assert.Equal(t, staticAssetsCacheControl, header.Get("Cache-Control"))
 	})
 

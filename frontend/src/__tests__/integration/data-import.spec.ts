@@ -17,7 +17,8 @@ vi.mock('@/stores/app', () => ({
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
-      importData: vi.fn()
+      importData: vi.fn(),
+      importCodexSession: vi.fn()
     }
   }
 }))
@@ -60,6 +61,7 @@ describe('ImportDataModal', () => {
     showWarning.mockReset()
     const { adminAPI } = await import('@/api/admin')
     vi.mocked(adminAPI.accounts.importData).mockReset()
+    vi.mocked(adminAPI.accounts.importCodexSession).mockReset()
   })
 
   it('未选择文件时提示错误', async () => {
@@ -210,5 +212,36 @@ describe('ImportDataModal', () => {
 
     expect(wrapper.emitted('imported')).toHaveLength(1)
     expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('可同时粘贴并上传 Codex / CPA JSON 账号', async () => {
+    const { adminAPI } = await import('@/api/admin')
+    vi.mocked(adminAPI.accounts.importCodexSession).mockResolvedValue({
+      total: 2,
+      created: 1,
+      updated: 1,
+      skipped: 0,
+      failed: 0
+    })
+
+    const wrapper = mountModal()
+    await wrapper.findAll('button[role="tab"]')[1]!.trigger('click')
+    await wrapper.get('textarea').setValue('{"type":"codex","access_token":"pasted"}')
+
+    const input = wrapper.find('input[type="file"]')
+    setInputFiles(input.element, [makeJsonFile('cpa.json', '{"type":"codex","access_token":"file"}')])
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(adminAPI.accounts.importCodexSession).toHaveBeenCalledWith({
+      contents: [
+        '{"type":"codex","access_token":"pasted"}',
+        '{"type":"codex","access_token":"file"}'
+      ],
+      update_existing: true,
+      skip_default_group_bind: false
+    })
+    expect(showSuccess).toHaveBeenCalledWith('admin.accounts.codexImportSuccess')
   })
 })

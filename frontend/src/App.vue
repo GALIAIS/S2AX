@@ -8,6 +8,7 @@ import { resolveRouteDocumentTitle } from '@/router/title'
 import AnnouncementPopup from '@/components/common/AnnouncementPopup.vue'
 import { useAppStore, useAuthStore, useSubscriptionStore, useAnnouncementStore, useAdminComplianceStore, useAdminSettingsStore } from '@/stores'
 import { getSetupStatus } from '@/api/setup'
+import { useInterfaceMotion } from '@/composables/useInterfaceMotion'
 
 const router = useRouter()
 const route = useRoute()
@@ -17,6 +18,9 @@ const subscriptionStore = useSubscriptionStore()
 const announcementStore = useAnnouncementStore()
 const adminComplianceStore = useAdminComplianceStore()
 const adminSettingsStore = useAdminSettingsStore()
+useInterfaceMotion()
+let announcementTimer: ReturnType<typeof setTimeout> | null = null
+let visibilityListenerRegistered = false
 
 function updateDocumentTitle() {
   const customMenuItems = [
@@ -79,6 +83,31 @@ function onAdminComplianceRequired(event: Event) {
   adminComplianceStore.requireAcknowledgement(detail)
 }
 
+function onAuthExpired() {
+  authStore.clearAuth({ preservePendingAuthSession: authStore.hasPendingAuthSession })
+  if (route.path !== '/login') {
+    void router.replace({ path: '/login', query: { redirect: route.fullPath } })
+  }
+}
+
+function onOpsMonitoringRouteRequired() {
+  if (route.path.startsWith('/admin/ops')) {
+    void router.replace('/admin/settings')
+  }
+}
+
+function registerVisibilityListener() {
+  if (visibilityListenerRegistered) return
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  visibilityListenerRegistered = true
+}
+
+function unregisterVisibilityListener() {
+  if (!visibilityListenerRegistered) return
+  document.removeEventListener('visibilitychange', onVisibilityChange)
+  visibilityListenerRegistered = false
+}
+
 watch(
   () => authStore.isAuthenticated,
   (isAuthenticated, oldValue) => {
@@ -98,20 +127,28 @@ watch(
       // Announcements: new login vs page refresh restore
       if (oldValue === false) {
         // New login: delay 3s then force fetch
-        setTimeout(() => announcementStore.fetchAnnouncements(true), 3000)
+        if (announcementTimer) clearTimeout(announcementTimer)
+        announcementTimer = setTimeout(() => {
+          announcementTimer = null
+          void announcementStore.fetchAnnouncements(true)
+        }, 3000)
       } else {
         // Page refresh restore (oldValue was undefined)
         announcementStore.fetchAnnouncements()
       }
 
       // Register visibility change listener
-      document.addEventListener('visibilitychange', onVisibilityChange)
+      registerVisibilityListener()
     } else {
       // User logged out: clear data and stop polling
       subscriptionStore.clear()
       announcementStore.reset()
       adminComplianceStore.reset()
-      document.removeEventListener('visibilitychange', onVisibilityChange)
+      if (announcementTimer) {
+        clearTimeout(announcementTimer)
+        announcementTimer = null
+      }
+      unregisterVisibilityListener()
     }
   },
   { immediate: true }
@@ -125,12 +162,18 @@ router.afterEach(() => {
 })
 
 onBeforeUnmount(() => {
-  document.removeEventListener('visibilitychange', onVisibilityChange)
+  if (announcementTimer) clearTimeout(announcementTimer)
+  announcementTimer = null
+  unregisterVisibilityListener()
   window.removeEventListener('admin-compliance-required', onAdminComplianceRequired)
+  window.removeEventListener('auth-expired', onAuthExpired)
+  window.removeEventListener('ops-monitoring-route-required', onOpsMonitoringRouteRequired)
 })
 
 onMounted(async () => {
   window.addEventListener('admin-compliance-required', onAdminComplianceRequired)
+  window.addEventListener('auth-expired', onAuthExpired)
+  window.addEventListener('ops-monitoring-route-required', onOpsMonitoringRouteRequired)
 
   // Check if setup is needed
   try {

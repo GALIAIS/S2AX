@@ -28,7 +28,14 @@
 
           <!-- Right: Action buttons -->
           <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
+            <SavedViewsControl
+              storage-key="admin-redeem"
+              :state="savedViewState"
+              :disabled="loading"
+              @apply="applySavedView"
+            />
             <button
+              type="button"
               @click="loadCodes"
               :disabled="loading"
               class="btn btn-secondary"
@@ -36,7 +43,7 @@
             >
               <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
             </button>
-            <button @click="handleExportCodes" class="btn btn-secondary">
+            <button type="button" @click="handleExportCodes" class="btn btn-secondary">
               {{ t('admin.redeem.exportCsv') }}
             </button>
             <button
@@ -48,7 +55,7 @@
               <Icon name="edit" size="md" class="mr-2" />
               {{ t('admin.redeem.batchUpdate') }}
             </button>
-            <button @click="showGenerateDialog = true" class="btn btn-primary">
+            <button type="button" @click="showGenerateDialog = true" class="btn btn-primary">
               {{ t('admin.redeem.generateCodes') }}
             </button>
           </div>
@@ -60,10 +67,12 @@
           :columns="columns"
           :data="codes"
           :loading="loading"
+          :error="redeemError"
           :server-side-sort="true"
           default-sort-key="id"
           default-sort-order="desc"
           @sort="handleSort"
+          @retry="loadCodes"
         >
           <template #header-select>
             <input
@@ -121,7 +130,9 @@
                   ? 'badge-success'
                   : value === 'subscription'
                     ? 'badge-warning'
-                    : 'badge-primary'
+                    : value === 'virtual_currency'
+                      ? 'badge-info'
+                      : 'badge-primary'
               ]"
             >
               {{ t('admin.redeem.types.' + value) }}
@@ -136,6 +147,12 @@
                 <span v-if="row.group" class="ml-1 text-xs text-gray-500 dark:text-gray-400"
                   >({{ row.group.name }})</span
                 >
+              </template>
+              <template v-else-if="row.type === 'virtual_currency'">
+                <span class="font-mono">{{ row.currency_amount_units ?? 0 }}</span>
+                <span v-if="currencyById[row.currency_id ?? 0]" class="ml-1 text-xs text-gray-500 dark:text-gray-400">
+                  {{ currencyById[row.currency_id ?? 0].symbol }} {{ currencyById[row.currency_id ?? 0].name }}
+                </span>
               </template>
               <template v-else>{{ value }}</template>
             </span>
@@ -288,7 +305,7 @@
               <Select v-model="generateForm.type" :options="typeOptions" />
             </div>
             <!-- 余额/并发类型：显示数值输入 -->
-            <div v-if="generateForm.type !== 'subscription' && generateForm.type !== 'invitation'">
+            <div v-if="generateForm.type !== 'subscription' && generateForm.type !== 'invitation' && generateForm.type !== 'virtual_currency'">
               <label class="input-label">
                 {{
                   generateForm.type === 'balance'
@@ -311,6 +328,36 @@
                 {{ t('admin.redeem.invitationHint') }}
               </p>
             </div>
+            <template v-if="generateForm.type === 'virtual_currency'">
+              <div>
+                <label class="input-label">{{ t('admin.redeem.currency') }}</label>
+                <Select
+                  v-model="generateForm.currency_code"
+                  :options="virtualCurrencyOptions"
+                  :placeholder="t('admin.redeem.selectCurrencyPlaceholder')"
+                />
+              </div>
+              <div>
+                <label class="input-label">{{ t('admin.redeem.currencyAmountUnits') }}</label>
+                <input
+                  v-model.number="generateForm.currency_amount_units"
+                  type="number"
+                  min="1"
+                  step="1"
+                  required
+                  class="input"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.redeem.currencyAmountHint') }}</p>
+              </div>
+              <div>
+                <label class="input-label">{{ t('admin.redeem.currencyGroup') }}</label>
+                <Select
+                  v-model="generateForm.currency_group_id"
+                  :options="virtualCurrencyGroupOptions"
+                  :placeholder="t('admin.redeem.selectCurrencyGroupPlaceholder')"
+                />
+              </div>
+            </template>
             <!-- 订阅类型：显示分组选择和有效天数 -->
             <template v-if="generateForm.type === 'subscription'">
               <div>
@@ -391,7 +438,7 @@
                 v-model.number="generateForm.count"
                 type="number"
                 min="1"
-                max="100"
+                max="1000"
                 required
                 class="input"
               />
@@ -614,6 +661,7 @@ import { useAppStore } from '@/stores/app'
 import { useClipboard } from '@/composables/useClipboard'
 import { useTableSelection } from '@/composables/useTableSelection'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
+import { useUrlQueryBindings, parseNumberQuery, parseStringQuery } from '@/composables/useUrlQueryBindings'
 import { adminAPI } from '@/api/admin'
 import { formatDateTime } from '@/utils/format'
 import type {
@@ -624,11 +672,13 @@ import type {
   SubscriptionType,
   BatchUpdateRedeemCodeFields
 } from '@/types'
+import type { VirtualCurrency, VirtualCurrencyGroupPolicy } from '@/api/admin/virtualCurrencies'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
+import SavedViewsControl from '@/components/common/SavedViewsControl.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
@@ -652,6 +702,8 @@ const showGenerateDialog = ref(false)
 const showResultDialog = ref(false)
 const generatedCodes = ref<RedeemCode[]>([])
 const subscriptionGroups = ref<Group[]>([])
+const virtualCurrencies = ref<VirtualCurrency[]>([])
+const virtualCurrencyPolicies = ref<VirtualCurrencyGroupPolicy[]>([])
 
 // 订阅类型分组选项
 const subscriptionGroupOptions = computed(() => {
@@ -664,6 +716,37 @@ const subscriptionGroupOptions = computed(() => {
       platform: g.platform,
       subscriptionType: g.subscription_type,
       rate: g.rate_multiplier
+    }))
+})
+
+const currencyById = computed<Record<number, VirtualCurrency>>(() => {
+  return Object.fromEntries(virtualCurrencies.value.map((currency) => [currency.id, currency]))
+})
+
+const virtualCurrencyOptions = computed(() =>
+  virtualCurrencies.value
+    .filter((currency) => currency.status === 'active')
+    .map((currency) => ({
+      value: currency.code,
+      label: `${currency.symbol ? `${currency.symbol} ` : ''}${currency.name} (${currency.code})`
+    }))
+)
+
+const virtualCurrencyGroupOptions = computed(() => {
+  const allowedGroupIDs = new Set(
+    virtualCurrencyPolicies.value
+      .filter((policy) => policy.enabled && policy.can_earn)
+      .map((policy) => policy.group_id)
+  )
+  return subscriptionGroups.value
+    .filter((group) => allowedGroupIDs.has(group.id))
+    .map((group) => ({
+      value: group.id,
+      label: group.name,
+      description: group.description,
+      platform: group.platform,
+      subscriptionType: group.subscription_type,
+      rate: group.rate_multiplier
     }))
 })
 
@@ -735,7 +818,8 @@ const typeOptions = computed(() => [
   { value: 'balance', label: t('admin.redeem.balance') },
   { value: 'concurrency', label: t('admin.redeem.concurrency') },
   { value: 'subscription', label: t('admin.redeem.subscription') },
-  { value: 'invitation', label: t('admin.redeem.invitation') }
+  { value: 'invitation', label: t('admin.redeem.invitation') },
+  { value: 'virtual_currency', label: t('admin.redeem.virtualCurrency') }
 ])
 
 const filterTypeOptions = computed(() => [
@@ -743,7 +827,8 @@ const filterTypeOptions = computed(() => [
   { value: 'balance', label: t('admin.redeem.balance') },
   { value: 'concurrency', label: t('admin.redeem.concurrency') },
   { value: 'subscription', label: t('admin.redeem.subscription') },
-  { value: 'invitation', label: t('admin.redeem.invitation') }
+  { value: 'invitation', label: t('admin.redeem.invitation') },
+  { value: 'virtual_currency', label: t('admin.redeem.virtualCurrency') }
 ])
 
 const filterStatusOptions = computed(() => [
@@ -765,7 +850,8 @@ const batchExpiryModeOptions = computed(() => [
 ])
 
 const codes = ref<RedeemCode[]>([])
-const loading = ref(false)
+const loading = ref(true)
+const redeemError = ref<string | null>(null)
 const generating = ref(false)
 const batchUpdating = ref(false)
 const searchQuery = ref('')
@@ -783,6 +869,79 @@ const sortState = reactive({
   sort_by: 'id',
   sort_order: 'desc' as 'asc' | 'desc'
 })
+
+const savedViewState = computed<Record<string, unknown>>(() => ({
+  search: searchQuery.value,
+  type: filters.type,
+  status: filters.status,
+  page: pagination.page,
+  page_size: pagination.page_size,
+  sort_by: sortState.sort_by,
+  sort_order: sortState.sort_order
+}))
+
+const applySavedView = (state: Record<string, unknown>) => {
+  searchQuery.value = typeof state.search === 'string' ? state.search : ''
+  filters.type = typeof state.type === 'string' ? state.type : ''
+  filters.status = typeof state.status === 'string' ? state.status : ''
+  pagination.page = Number.isFinite(Number(state.page)) ? Math.max(1, Number(state.page)) : 1
+  pagination.page_size = Number.isFinite(Number(state.page_size)) ? Math.max(1, Number(state.page_size)) : pagination.page_size
+  sortState.sort_by = typeof state.sort_by === 'string' ? state.sort_by : 'id'
+  sortState.sort_order = state.sort_order === 'asc' ? 'asc' : 'desc'
+  void loadCodes()
+}
+
+useUrlQueryBindings([
+  {
+    key: 'search',
+    get: () => searchQuery.value,
+    set: (value: string) => { searchQuery.value = value },
+    parse: parseStringQuery,
+    omit: (value: string) => !value
+  },
+  {
+    key: 'type',
+    get: () => filters.type,
+    set: (value: string) => { filters.type = value },
+    parse: parseStringQuery,
+    omit: (value: string) => !value
+  },
+  {
+    key: 'status',
+    get: () => filters.status,
+    set: (value: string) => { filters.status = value },
+    parse: parseStringQuery,
+    omit: (value: string) => !value
+  },
+  {
+    key: 'page',
+    get: () => pagination.page,
+    set: (value: number) => { pagination.page = Math.max(1, Math.floor(value)) },
+    parse: parseNumberQuery,
+    omit: (value: number) => value <= 1
+  },
+  {
+    key: 'page_size',
+    get: () => pagination.page_size,
+    set: (value: number) => { pagination.page_size = Math.max(1, Math.floor(value)) },
+    parse: parseNumberQuery,
+    omit: (value: number) => value === getPersistedPageSize()
+  },
+  {
+    key: 'sort_by',
+    get: () => sortState.sort_by,
+    set: (value: string) => { sortState.sort_by = value },
+    parse: parseStringQuery,
+    omit: (value: string) => !value || value === 'id'
+  },
+  {
+    key: 'sort_order',
+    get: () => sortState.sort_order,
+    set: (value: string) => { sortState.sort_order = value === 'asc' ? 'asc' : 'desc' },
+    parse: parseStringQuery,
+    omit: (value: string) => !value || value === 'desc'
+  }
+])
 
 let abortController: AbortController | null = null
 
@@ -833,6 +992,9 @@ const generateForm = reactive({
   count: 1,
   group_id: null as number | null,
   validity_days: 30,
+  currency_code: '',
+  currency_amount_units: 100,
+  currency_group_id: null as number | null,
   expiry_option: 'never' as RedeemCodeExpiryOption,
   custom_expiry_days: 7
 })
@@ -845,6 +1007,26 @@ watch(
       generateForm.value = 0
     } else if (generateForm.value === 0) {
       generateForm.value = 10
+    }
+    if (newType === 'virtual_currency' && !generateForm.currency_code) {
+      generateForm.currency_code = virtualCurrencyOptions.value[0]?.value ?? ''
+    }
+  }
+)
+
+watch(
+  () => generateForm.currency_code,
+  async (currencyCode) => {
+    generateForm.currency_group_id = null
+    virtualCurrencyPolicies.value = []
+    if (!currencyCode) return
+    try {
+      const currency = virtualCurrencies.value.find((item) => item.code === currencyCode)
+      if (currency) {
+        virtualCurrencyPolicies.value = await adminAPI.virtualCurrencies.listGroups(currency.id)
+      }
+    } catch (error) {
+      console.error('Error loading virtual currency group policies:', error)
     }
   }
 )
@@ -864,6 +1046,7 @@ const loadCodes = async () => {
   const currentController = new AbortController()
   abortController = currentController
   loading.value = true
+  redeemError.value = null
   try {
     const response = await adminAPI.redeem.list(
       pagination.page,
@@ -887,7 +1070,8 @@ const loadCodes = async () => {
     ) {
       return
     }
-    appStore.showError(t('admin.redeem.failedToLoad'))
+    redeemError.value = t('admin.redeem.failedToLoad')
+    appStore.showError(redeemError.value)
     console.error('Error loading redeem codes:', error)
   } finally {
     if (abortController === currentController && !currentController.signal.aborted) {
@@ -1023,6 +1207,16 @@ const handleGenerateCodes = async () => {
     appStore.showError(t('admin.redeem.groupRequired'))
     return
   }
+  if (
+    generateForm.type === 'virtual_currency' &&
+    (!generateForm.currency_code ||
+      !generateForm.currency_group_id ||
+      !Number.isInteger(generateForm.currency_amount_units) ||
+      generateForm.currency_amount_units <= 0)
+  ) {
+    appStore.showError(t('admin.redeem.currencyFieldsRequired'))
+    return
+  }
 
   const expiresInDays = getRedeemCodeExpiresInDays()
   if (expiresInDays === null) {
@@ -1038,7 +1232,10 @@ const handleGenerateCodes = async () => {
       generateForm.value,
       generateForm.type === 'subscription' ? generateForm.group_id : undefined,
       generateForm.type === 'subscription' ? generateForm.validity_days : undefined,
-      expiresInDays
+      expiresInDays,
+      generateForm.type === 'virtual_currency' ? generateForm.currency_code : undefined,
+      generateForm.type === 'virtual_currency' ? generateForm.currency_amount_units : undefined,
+      generateForm.type === 'virtual_currency' ? generateForm.currency_group_id : undefined
     )
     showGenerateDialog.value = false
     generatedCodes.value = result
@@ -1046,6 +1243,7 @@ const handleGenerateCodes = async () => {
     // 重置表单
     generateForm.group_id = null
     generateForm.validity_days = 30
+    generateForm.currency_group_id = null
     generateForm.expiry_option = 'never'
     generateForm.custom_expiry_days = 7
     loadCodes()
@@ -1177,9 +1375,22 @@ const loadSubscriptionGroups = async () => {
   }
 }
 
+const loadVirtualCurrencies = async () => {
+  if (!adminAPI.virtualCurrencies?.list) return
+  try {
+    virtualCurrencies.value = await adminAPI.virtualCurrencies.list(false)
+    if (!generateForm.currency_code) {
+      generateForm.currency_code = virtualCurrencyOptions.value[0]?.value ?? ''
+    }
+  } catch (error) {
+    console.error('Error loading virtual currencies:', error)
+  }
+}
+
 onMounted(() => {
   loadCodes()
   loadSubscriptionGroups()
+  loadVirtualCurrencies()
 })
 
 onUnmounted(() => {

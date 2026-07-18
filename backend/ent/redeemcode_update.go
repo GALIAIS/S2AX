@@ -214,6 +214,87 @@ func (_u *RedeemCodeUpdate) AddValidityDays(v int) *RedeemCodeUpdate {
 	return _u
 }
 
+// SetCurrencyID sets the "currency_id" field.
+func (_u *RedeemCodeUpdate) SetCurrencyID(v int64) *RedeemCodeUpdate {
+	_u.mutation.ResetCurrencyID()
+	_u.mutation.SetCurrencyID(v)
+	return _u
+}
+
+// SetNillableCurrencyID sets the "currency_id" field if the given value is not nil.
+func (_u *RedeemCodeUpdate) SetNillableCurrencyID(v *int64) *RedeemCodeUpdate {
+	if v != nil {
+		_u.SetCurrencyID(*v)
+	}
+	return _u
+}
+
+// AddCurrencyID adds value to the "currency_id" field.
+func (_u *RedeemCodeUpdate) AddCurrencyID(v int64) *RedeemCodeUpdate {
+	_u.mutation.AddCurrencyID(v)
+	return _u
+}
+
+// ClearCurrencyID clears the value of the "currency_id" field.
+func (_u *RedeemCodeUpdate) ClearCurrencyID() *RedeemCodeUpdate {
+	_u.mutation.ClearCurrencyID()
+	return _u
+}
+
+// SetCurrencyAmountUnits sets the "currency_amount_units" field.
+func (_u *RedeemCodeUpdate) SetCurrencyAmountUnits(v int64) *RedeemCodeUpdate {
+	_u.mutation.ResetCurrencyAmountUnits()
+	_u.mutation.SetCurrencyAmountUnits(v)
+	return _u
+}
+
+// SetNillableCurrencyAmountUnits sets the "currency_amount_units" field if the given value is not nil.
+func (_u *RedeemCodeUpdate) SetNillableCurrencyAmountUnits(v *int64) *RedeemCodeUpdate {
+	if v != nil {
+		_u.SetCurrencyAmountUnits(*v)
+	}
+	return _u
+}
+
+// AddCurrencyAmountUnits adds value to the "currency_amount_units" field.
+func (_u *RedeemCodeUpdate) AddCurrencyAmountUnits(v int64) *RedeemCodeUpdate {
+	_u.mutation.AddCurrencyAmountUnits(v)
+	return _u
+}
+
+// ClearCurrencyAmountUnits clears the value of the "currency_amount_units" field.
+func (_u *RedeemCodeUpdate) ClearCurrencyAmountUnits() *RedeemCodeUpdate {
+	_u.mutation.ClearCurrencyAmountUnits()
+	return _u
+}
+
+// SetCurrencyGroupID sets the "currency_group_id" field.
+func (_u *RedeemCodeUpdate) SetCurrencyGroupID(v int64) *RedeemCodeUpdate {
+	_u.mutation.ResetCurrencyGroupID()
+	_u.mutation.SetCurrencyGroupID(v)
+	return _u
+}
+
+// SetNillableCurrencyGroupID sets the "currency_group_id" field if the given value is not nil.
+func (_u *RedeemCodeUpdate) SetNillableCurrencyGroupID(v *int64) *RedeemCodeUpdate {
+	if v != nil {
+		_u.SetCurrencyGroupID(*v)
+	}
+	return _u
+}
+
+// AddCurrencyGroupID adds value to the "currency_group_id" field.
+func (_u *RedeemCodeUpdate) AddCurrencyGroupID(v int64) *RedeemCodeUpdate {
+	_u.mutation.AddCurrencyGroupID(v)
+	return _u
+}
+
+// ClearCurrencyGroupID clears the value of the "currency_group_id" field.
+func (_u *RedeemCodeUpdate) ClearCurrencyGroupID() *RedeemCodeUpdate {
+	_u.mutation.ClearCurrencyGroupID()
+	return _u
+}
+
 // SetUserID sets the "user" edge to the User entity by ID.
 func (_u *RedeemCodeUpdate) SetUserID(id int64) *RedeemCodeUpdate {
 	_u.mutation.SetUserID(id)
@@ -352,6 +433,33 @@ func (_u *RedeemCodeUpdate) sqlSave(ctx context.Context) (_node int, err error) 
 	}
 	if value, ok := _u.mutation.AddedValidityDays(); ok {
 		_spec.AddField(redeemcode.FieldValidityDays, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.CurrencyID(); ok {
+		_spec.SetField(redeemcode.FieldCurrencyID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedCurrencyID(); ok {
+		_spec.AddField(redeemcode.FieldCurrencyID, field.TypeInt64, value)
+	}
+	if _u.mutation.CurrencyIDCleared() {
+		_spec.ClearField(redeemcode.FieldCurrencyID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.CurrencyAmountUnits(); ok {
+		_spec.SetField(redeemcode.FieldCurrencyAmountUnits, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedCurrencyAmountUnits(); ok {
+		_spec.AddField(redeemcode.FieldCurrencyAmountUnits, field.TypeInt64, value)
+	}
+	if _u.mutation.CurrencyAmountUnitsCleared() {
+		_spec.ClearField(redeemcode.FieldCurrencyAmountUnits, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.CurrencyGroupID(); ok {
+		_spec.SetField(redeemcode.FieldCurrencyGroupID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedCurrencyGroupID(); ok {
+		_spec.AddField(redeemcode.FieldCurrencyGroupID, field.TypeInt64, value)
+	}
+	if _u.mutation.CurrencyGroupIDCleared() {
+		_spec.ClearField(redeemcode.FieldCurrencyGroupID, field.TypeInt64)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -615,6 +723,87 @@ func (_u *RedeemCodeUpdateOne) AddValidityDays(v int) *RedeemCodeUpdateOne {
 	return _u
 }
 
+// SetCurrencyID sets the "currency_id" field.
+func (_u *RedeemCodeUpdateOne) SetCurrencyID(v int64) *RedeemCodeUpdateOne {
+	_u.mutation.ResetCurrencyID()
+	_u.mutation.SetCurrencyID(v)
+	return _u
+}
+
+// SetNillableCurrencyID sets the "currency_id" field if the given value is not nil.
+func (_u *RedeemCodeUpdateOne) SetNillableCurrencyID(v *int64) *RedeemCodeUpdateOne {
+	if v != nil {
+		_u.SetCurrencyID(*v)
+	}
+	return _u
+}
+
+// AddCurrencyID adds value to the "currency_id" field.
+func (_u *RedeemCodeUpdateOne) AddCurrencyID(v int64) *RedeemCodeUpdateOne {
+	_u.mutation.AddCurrencyID(v)
+	return _u
+}
+
+// ClearCurrencyID clears the value of the "currency_id" field.
+func (_u *RedeemCodeUpdateOne) ClearCurrencyID() *RedeemCodeUpdateOne {
+	_u.mutation.ClearCurrencyID()
+	return _u
+}
+
+// SetCurrencyAmountUnits sets the "currency_amount_units" field.
+func (_u *RedeemCodeUpdateOne) SetCurrencyAmountUnits(v int64) *RedeemCodeUpdateOne {
+	_u.mutation.ResetCurrencyAmountUnits()
+	_u.mutation.SetCurrencyAmountUnits(v)
+	return _u
+}
+
+// SetNillableCurrencyAmountUnits sets the "currency_amount_units" field if the given value is not nil.
+func (_u *RedeemCodeUpdateOne) SetNillableCurrencyAmountUnits(v *int64) *RedeemCodeUpdateOne {
+	if v != nil {
+		_u.SetCurrencyAmountUnits(*v)
+	}
+	return _u
+}
+
+// AddCurrencyAmountUnits adds value to the "currency_amount_units" field.
+func (_u *RedeemCodeUpdateOne) AddCurrencyAmountUnits(v int64) *RedeemCodeUpdateOne {
+	_u.mutation.AddCurrencyAmountUnits(v)
+	return _u
+}
+
+// ClearCurrencyAmountUnits clears the value of the "currency_amount_units" field.
+func (_u *RedeemCodeUpdateOne) ClearCurrencyAmountUnits() *RedeemCodeUpdateOne {
+	_u.mutation.ClearCurrencyAmountUnits()
+	return _u
+}
+
+// SetCurrencyGroupID sets the "currency_group_id" field.
+func (_u *RedeemCodeUpdateOne) SetCurrencyGroupID(v int64) *RedeemCodeUpdateOne {
+	_u.mutation.ResetCurrencyGroupID()
+	_u.mutation.SetCurrencyGroupID(v)
+	return _u
+}
+
+// SetNillableCurrencyGroupID sets the "currency_group_id" field if the given value is not nil.
+func (_u *RedeemCodeUpdateOne) SetNillableCurrencyGroupID(v *int64) *RedeemCodeUpdateOne {
+	if v != nil {
+		_u.SetCurrencyGroupID(*v)
+	}
+	return _u
+}
+
+// AddCurrencyGroupID adds value to the "currency_group_id" field.
+func (_u *RedeemCodeUpdateOne) AddCurrencyGroupID(v int64) *RedeemCodeUpdateOne {
+	_u.mutation.AddCurrencyGroupID(v)
+	return _u
+}
+
+// ClearCurrencyGroupID clears the value of the "currency_group_id" field.
+func (_u *RedeemCodeUpdateOne) ClearCurrencyGroupID() *RedeemCodeUpdateOne {
+	_u.mutation.ClearCurrencyGroupID()
+	return _u
+}
+
 // SetUserID sets the "user" edge to the User entity by ID.
 func (_u *RedeemCodeUpdateOne) SetUserID(id int64) *RedeemCodeUpdateOne {
 	_u.mutation.SetUserID(id)
@@ -783,6 +972,33 @@ func (_u *RedeemCodeUpdateOne) sqlSave(ctx context.Context) (_node *RedeemCode, 
 	}
 	if value, ok := _u.mutation.AddedValidityDays(); ok {
 		_spec.AddField(redeemcode.FieldValidityDays, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.CurrencyID(); ok {
+		_spec.SetField(redeemcode.FieldCurrencyID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedCurrencyID(); ok {
+		_spec.AddField(redeemcode.FieldCurrencyID, field.TypeInt64, value)
+	}
+	if _u.mutation.CurrencyIDCleared() {
+		_spec.ClearField(redeemcode.FieldCurrencyID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.CurrencyAmountUnits(); ok {
+		_spec.SetField(redeemcode.FieldCurrencyAmountUnits, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedCurrencyAmountUnits(); ok {
+		_spec.AddField(redeemcode.FieldCurrencyAmountUnits, field.TypeInt64, value)
+	}
+	if _u.mutation.CurrencyAmountUnitsCleared() {
+		_spec.ClearField(redeemcode.FieldCurrencyAmountUnits, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.CurrencyGroupID(); ok {
+		_spec.SetField(redeemcode.FieldCurrencyGroupID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedCurrencyGroupID(); ok {
+		_spec.AddField(redeemcode.FieldCurrencyGroupID, field.TypeInt64, value)
+	}
+	if _u.mutation.CurrencyGroupIDCleared() {
+		_spec.ClearField(redeemcode.FieldCurrencyGroupID, field.TypeInt64)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{

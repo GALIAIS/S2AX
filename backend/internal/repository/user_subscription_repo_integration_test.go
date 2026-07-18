@@ -22,6 +22,7 @@ type UserSubscriptionRepoSuite struct {
 }
 
 func (s *UserSubscriptionRepoSuite) SetupTest() {
+	isolateIntegrationData(s.T())
 	s.ctx = context.Background()
 	tx := testEntTx(s.T())
 	s.client = tx.Client()

@@ -8,14 +8,17 @@ import (
 	"strings"
 )
 
-// Vite emits content-hashed filenames under assets/, so the backend can apply
-// immutable caching without relying on a reverse proxy to classify paths.
+// Vite and Next.js emit content-addressed static assets, so the backend can
+// apply immutable caching without relying on a reverse proxy to classify paths.
 const staticAssetsCacheControl = "public, max-age=31536000, immutable"
 
 // isFingerprintedEmbeddedAssetPath reports whether a cleaned URL path refers to
-// a Vite asset whose filename contains the default eight-character build hash.
+// an immutable Vite or Next.js build asset.
 func isFingerprintedEmbeddedAssetPath(cleanPath string) bool {
 	cleanPath = strings.TrimPrefix(cleanPath, "/")
+	if strings.HasPrefix(cleanPath, "_next/static/") {
+		return strings.TrimPrefix(cleanPath, "_next/static/") != ""
+	}
 	if !strings.HasPrefix(cleanPath, "assets/") {
 		return false
 	}

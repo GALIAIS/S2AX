@@ -28,11 +28,11 @@
         <!-- Rate pill (platform color) -->
         <span v-if="rateMultiplier !== undefined" :class="['inline-flex items-center whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold', ratePillClass]">
           <template v-if="hasCustomRate">
-            <span class="mr-1 line-through opacity-50">{{ rateMultiplier }}x</span>
-            <span class="font-bold">{{ userRateMultiplier }}x</span>
+            <span class="mr-1 line-through opacity-50">{{ formatMultiplier(rateMultiplier) }}x</span>
+            <span class="font-bold">{{ formatMultiplier(userRateMultiplier) }}x</span>
           </template>
           <template v-else>
-            {{ rateMultiplier }}x {{ t('admin.groups.rateLabel') }}
+            {{ formatMultiplier(rateMultiplier) }}x {{ t('admin.groups.rateLabel') }}
           </template>
         </span>
         <span
@@ -65,6 +65,7 @@ import GroupBadge from './GroupBadge.vue'
 import type { SubscriptionType, GroupPlatform } from '@/types'
 import { useAppStore } from '@/stores/app'
 import { formatPeakRateWindow, serverTimezoneLabel } from '@/utils/peak-rate'
+import { formatMultiplier } from '@/utils/formatters'
 
 const { t } = useI18n()
 

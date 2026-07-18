@@ -34,11 +34,15 @@ const (
 	openAIImagesGenerationsURL = "https://api.openai.com/v1/images/generations"
 	openAIImagesEditsURL       = "https://api.openai.com/v1/images/edits"
 
-	openAIChatGPTStartURL          = "https://chatgpt.com/"
-	openAIChatGPTFilesURL          = "https://chatgpt.com/backend-api/files"
-	openAIImageBackendUserAgent    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-	openAIImageMaxDownloadBytes    = 20 << 20 // 20MB per image download
-	openAIImageMaxUploadPartSize   = 20 << 20 // 20MB per multipart upload part
+	openAIChatGPTStartURL        = "https://chatgpt.com/"
+	openAIChatGPTFilesURL        = "https://chatgpt.com/backend-api/files"
+	openAIImageBackendUserAgent  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+	openAIImageMaxDownloadBytes  = 20 << 20 // 20MB per image download
+	openAIImageMaxUploadPartSize = 20 << 20 // 20MB per multipart upload part
+	// Native image requests and the Codex hosted bridge must use the same
+	// default tool model; otherwise a bridge request silently falls back to the
+	// text model's image capability instead of the configured Image 2 path.
+	openAIImagesDefaultToolModel   = "gpt-image-2"
 	openAIImagesResponsesMainModel = "gpt-5.4-mini"
 )
 
@@ -451,7 +455,7 @@ func applyOpenAIImagesDefaults(req *OpenAIImagesRequest) {
 		req.Model = strings.TrimSpace(req.Model)
 		return
 	}
-	req.Model = "gpt-image-2"
+	req.Model = openAIImagesDefaultToolModel
 }
 
 func isOpenAIImageGenerationModel(model string) bool {

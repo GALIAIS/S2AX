@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { opsAPI, type OpsRuntimeLogConfig, type OpsSystemLog, type OpsSystemLogSinkHealth } from '@/api/admin/ops'
 import Pagination from '@/components/common/Pagination.vue'
 import Select from '@/components/common/Select.vue'
 import { useAppStore } from '@/stores'
+import { useInitialLoading } from '@/composables/useInitialLoading'
 
 const appStore = useAppStore()
 const { t } = useI18n()
@@ -17,11 +18,14 @@ const props = withDefaults(defineProps<{
   refreshToken: 0
 })
 
-const loading = ref(false)
+const loading = ref(true)
+const { isInitialLoading } = useInitialLoading(loading)
 const logs = ref<OpsSystemLog[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
+let logsAbortController: AbortController | null = null
+let logsRequestSequence = 0
 
 const health = ref<OpsSystemLogSinkHealth>({
   queue_depth: 0,
@@ -200,16 +204,30 @@ const buildQuery = () => {
 }
 
 const fetchLogs = async () => {
+  logsAbortController?.abort()
+  const requestController = new AbortController()
+  logsAbortController = requestController
+  const requestSequence = ++logsRequestSequence
   loading.value = true
   try {
-    const res = await opsAPI.listSystemLogs(buildQuery())
+    const res = await opsAPI.listSystemLogs(buildQuery(), { signal: requestController.signal })
+    if (requestController.signal.aborted || requestSequence !== logsRequestSequence) return
     logs.value = res.items || []
     total.value = res.total || 0
   } catch (err: any) {
+    if (
+      requestController.signal.aborted ||
+      requestSequence !== logsRequestSequence ||
+      err?.name === 'AbortError' ||
+      err?.code === 'ERR_CANCELED'
+    ) return
     console.error('[OpsSystemLogTable] Failed to fetch logs', err)
     appStore.showError(err?.response?.data?.detail || t('admin.ops.systemLogs.loadFailed'))
   } finally {
-    loading.value = false
+    if (logsAbortController === requestController) {
+      loading.value = false
+      logsAbortController = null
+    }
   }
 }
 
@@ -368,6 +386,11 @@ onMounted(async () => {
   }
   await Promise.all([fetchLogs(), fetchHealth(), loadRuntimeConfig()])
 })
+
+onUnmounted(() => {
+  logsAbortController?.abort()
+  logsAbortController = null
+})
 </script>
 
 <template>
@@ -503,9 +526,10 @@ onMounted(async () => {
       <button type="button" class="btn btn-secondary btn-sm" @click="fetchHealth">{{ t('admin.ops.systemLogs.refreshHealth') }}</button>
     </div>
 
-    <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-dark-700">
-      <div v-if="loading" class="px-4 py-8 text-center text-sm text-gray-500">{{ t('common.loading') }}</div>
-      <div v-else-if="!hasData" class="px-4 py-8 text-center text-sm text-gray-500">{{ t('admin.ops.systemLogs.empty') }}</div>
+    <div class="relative overflow-hidden rounded-xl border border-gray-200 dark:border-dark-700" :aria-busy="loading">
+      <div v-if="loading && hasData" class="absolute right-3 top-3 z-10 rounded-md bg-white/95 px-2.5 py-1 text-xs text-gray-500 shadow-sm ring-1 ring-gray-200 backdrop-blur dark:bg-dark-800/95 dark:text-gray-300 dark:ring-dark-600" role="status">{{ t('common.refreshing') }}</div>
+      <div v-if="isInitialLoading && !hasData" class="px-4 py-8 text-center text-sm text-gray-500">{{ t('common.loading') }}</div>
+      <div v-else-if="!loading && !hasData" class="px-4 py-8 text-center text-sm text-gray-500">{{ t('admin.ops.systemLogs.empty') }}</div>
       <div v-else class="overflow-auto">
         <table class="min-w-full table-fixed divide-y divide-gray-200 dark:divide-dark-700">
           <thead class="bg-gray-50 dark:bg-dark-900">

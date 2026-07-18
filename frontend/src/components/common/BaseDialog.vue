@@ -1,6 +1,6 @@
 <template>
   <Teleport to="body">
-    <Transition name="modal">
+    <Transition :css="false" @enter="enter" @leave="leave">
       <div
         v-if="show"
         class="modal-overlay"
@@ -45,6 +45,7 @@
 <script setup lang="ts">
 import { computed, watch, onMounted, onUnmounted, ref, nextTick } from 'vue'
 import Icon from '@/components/icons/Icon.vue'
+import { useAnimeDialogTransition } from '@/composables/useInterfaceMotion'
 
 // 生成唯一ID以避免多个对话框时ID冲突
 let dialogIdCounter = 0
@@ -79,6 +80,7 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const emit = defineEmits<Emits>()
+const { enter, leave } = useAnimeDialogTransition()
 
 // Custom z-index style (overrides the default z-50 from CSS)
 const zIndexStyle = computed(() => {

@@ -70,7 +70,7 @@
                     </span>
                     <span class="text-gray-300 dark:text-dark-500">•</span>
                     <span class="text-gray-500 dark:text-gray-400">
-                      {{ t('admin.users.defaultRate') }}: <span class="font-medium text-gray-700 dark:text-gray-300">{{ config.defaultRate }}x</span>
+                      {{ t('admin.users.defaultRate') }}: <span class="font-medium text-gray-700 dark:text-gray-300">{{ formatMultiplier(config.defaultRate) }}x</span>
                     </span>
                   </div>
                 </div>
@@ -80,8 +80,8 @@
                   <label class="text-sm font-medium text-gray-600 dark:text-gray-400">{{ t('admin.users.customRate') }}</label>
                   <input
                     type="number"
-                    step="0.001"
-                    min="0.001"
+                    :step="RATE_MULTIPLIER_STEP"
+                    :min="MIN_RATE_MULTIPLIER"
                     :value="config.customRate ?? ''"
                     @input="updateCustomRate(config.groupId, ($event.target as HTMLInputElement).value)"
                     :placeholder="String(config.defaultRate)"
@@ -128,7 +128,7 @@
                     </span>
                     <span class="text-gray-300 dark:text-dark-500">•</span>
                     <span class="text-gray-500 dark:text-gray-400">
-                      {{ t('admin.users.defaultRate') }}: <span class="font-medium text-gray-700 dark:text-gray-300">{{ config.defaultRate }}x</span>
+                      {{ t('admin.users.defaultRate') }}: <span class="font-medium text-gray-700 dark:text-gray-300">{{ formatMultiplier(config.defaultRate) }}x</span>
                     </span>
                   </div>
                 </div>
@@ -138,8 +138,8 @@
                   <label class="text-sm font-medium text-gray-600 dark:text-gray-400">{{ t('admin.users.customRate') }}</label>
                   <input
                     type="number"
-                    step="0.001"
-                    min="0.001"
+                    :step="RATE_MULTIPLIER_STEP"
+                    :min="MIN_RATE_MULTIPLIER"
                     :value="config.customRate ?? ''"
                     @input="updateCustomRate(config.groupId, ($event.target as HTMLInputElement).value)"
                     :placeholder="String(config.defaultRate)"
@@ -186,6 +186,12 @@ import { adminAPI } from '@/api/admin'
 import type { AdminUser, Group, GroupPlatform } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
+import {
+  MIN_RATE_MULTIPLIER,
+  RATE_MULTIPLIER_STEP,
+  formatMultiplier,
+  parseRateMultiplier
+} from '@/utils/formatters'
 
 interface GroupRateConfig {
   groupId: number
@@ -269,8 +275,7 @@ const updateCustomRate = (groupId: number, value: string) => {
     if (value === '' || value === null || value === undefined) {
       config.customRate = null
     } else {
-      const numValue = parseFloat(value)
-      config.customRate = isNaN(numValue) ? null : numValue
+      config.customRate = parseRateMultiplier(value)
     }
   }
 }

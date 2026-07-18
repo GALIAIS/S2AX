@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 
 import DateRangePicker from '../DateRangePicker.vue'
 
@@ -62,6 +62,7 @@ describe('DateRangePicker', () => {
         startDate: today,
         endDate: today
       },
+      attachTo: document.body,
       global: {
         stubs: {
           Icon: true
@@ -70,13 +71,19 @@ describe('DateRangePicker', () => {
     })
 
     await wrapper.find('.date-picker-trigger').trigger('click')
-    const presetButton = wrapper.findAll('.date-picker-preset').find((node) =>
-      node.text().includes('Last 24 Hours')
+    await nextTick()
+    const dropdown = document.body.querySelector<HTMLElement>('.date-picker-dropdown')
+    expect(dropdown?.style.position).toBe('fixed')
+    const presetButton = Array.from(dropdown?.querySelectorAll<HTMLButtonElement>('.date-picker-preset') ?? []).find((node) =>
+      node.textContent?.includes('Last 24 Hours')
     )
     expect(presetButton).toBeDefined()
 
-    await presetButton!.trigger('click')
-    await wrapper.find('.date-picker-apply').trigger('click')
+    presetButton!.click()
+    await nextTick()
+    expect(document.body.querySelector('.date-picker-dropdown')).not.toBeNull()
+    document.body.querySelector<HTMLButtonElement>('.date-picker-apply')!.click()
+    await nextTick()
 
     const nowAfterClick = new Date()
     const yesterdayAfterClick = new Date(nowAfterClick.getTime() - 24 * 60 * 60 * 1000)
@@ -92,5 +99,6 @@ describe('DateRangePicker', () => {
         preset: 'last24Hours'
       }
     ])
+    wrapper.unmount()
   })
 })

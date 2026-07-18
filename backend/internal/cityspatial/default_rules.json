@@ -1,0 +1,78 @@
+{
+  "id": "sub2api-classic",
+  "version": "1.0.0",
+  "name": "Sub2API Classic Spatial Semantics",
+  "chunk_size": 32,
+  "min_z": -32,
+  "max_z": 127,
+  "palette": [
+    {"id": "surface.void", "name": "Void", "classic_foreground": 238, "classic_background": 232},
+    {"id": "surface.ground", "name": "Ground", "classic_foreground": 244, "classic_background": 234},
+    {"id": "surface.vegetation", "name": "Vegetation", "classic_foreground": 71, "classic_background": 234},
+    {"id": "surface.water", "name": "Water", "classic_foreground": 75, "classic_background": 24},
+    {"id": "surface.road", "name": "Road", "classic_foreground": 250, "classic_background": 238},
+    {"id": "surface.interior", "name": "Interior", "classic_foreground": 252, "classic_background": 236},
+    {"id": "structure.default", "name": "Structure", "classic_foreground": 252, "classic_background": 235},
+    {"id": "portal.default", "name": "Portal", "classic_foreground": 221, "classic_background": 235},
+    {"id": "item.default", "name": "Item", "classic_foreground": 180, "classic_background": 234},
+    {"id": "entity.civilian", "name": "Civilian", "classic_foreground": 117, "classic_background": 234},
+    {"id": "entity.service", "name": "Public Service", "classic_foreground": 159, "classic_background": 234},
+    {"id": "field.default", "name": "Field", "classic_foreground": 246, "classic_background": 234},
+    {"id": "overlay.default", "name": "Overlay", "classic_foreground": 81},
+    {"id": "danger.warning", "name": "Danger", "classic_foreground": 203, "classic_background": 52}
+  ],
+  "definitions": [
+    {"id": "missing.terrain", "kind": "terrain", "name": "Unknown terrain", "glyph": "?", "foreground": "danger.warning", "movement_cost": 0, "flags": [], "metadata": {}},
+    {"id": "missing.furniture", "kind": "furniture", "name": "Unknown furniture", "glyph": "?", "foreground": "danger.warning", "movement_cost": 0, "flags": [], "metadata": {}},
+    {"id": "missing.structure", "kind": "structure", "name": "Unknown structure", "glyph": "?", "foreground": "danger.warning", "movement_cost": 0, "flags": [], "metadata": {}},
+    {"id": "missing.portal", "kind": "portal", "name": "Unknown portal", "glyph": "?", "foreground": "danger.warning", "movement_cost": 0, "flags": [], "metadata": {}},
+    {"id": "missing.item", "kind": "item", "name": "Unknown item", "glyph": "?", "foreground": "danger.warning", "movement_cost": 0, "flags": [], "metadata": {}},
+    {"id": "missing.entity", "kind": "entity", "name": "Unknown entity", "glyph": "?", "foreground": "danger.warning", "movement_cost": 0, "flags": [], "metadata": {}},
+    {"id": "missing.field", "kind": "field", "name": "Unknown field", "glyph": "?", "foreground": "danger.warning", "movement_cost": 0, "flags": [], "metadata": {}},
+    {"id": "missing.overlay", "kind": "overlay", "name": "Unknown overlay", "glyph": "?", "foreground": "danger.warning", "movement_cost": 0, "flags": [], "metadata": {}},
+
+    {"id": "terrain.void", "kind": "terrain", "name": "Void", "glyph": "·", "foreground": "surface.void", "background": "surface.void", "movement_cost": 0, "flags": ["outdoor", "transparent"], "metadata": {}},
+    {"id": "terrain.ground", "kind": "terrain", "name": "Compacted ground", "glyph": ".", "foreground": "surface.ground", "movement_cost": 100, "flags": ["outdoor", "passable", "supports_weight", "transparent"], "metadata": {}},
+    {"id": "terrain.grass", "kind": "terrain", "name": "Grass", "glyph": "\"", "foreground": "surface.vegetation", "looks_like": "terrain.ground", "sprite": "classic/terrain/grass", "movement_cost": 110, "flags": ["flammable", "outdoor", "passable", "supports_weight", "transparent"], "metadata": {}},
+    {"id": "terrain.soil", "kind": "terrain", "name": "Soil", "glyph": ",", "foreground": "surface.ground", "looks_like": "terrain.ground", "movement_cost": 120, "flags": ["outdoor", "passable", "supports_weight", "transparent"], "metadata": {}},
+    {"id": "terrain.shallow_water", "kind": "terrain", "name": "Shallow water", "glyph": "~", "foreground": "surface.water", "background": "surface.water", "movement_cost": 240, "flags": ["liquid", "outdoor", "passable", "transparent"], "metadata": {}},
+    {"id": "terrain.deep_water", "kind": "terrain", "name": "Deep water", "glyph": "≈", "foreground": "surface.water", "background": "surface.water", "looks_like": "terrain.shallow_water", "movement_cost": 400, "flags": ["liquid", "outdoor", "passable", "transparent"], "metadata": {}},
+    {"id": "terrain.road", "kind": "terrain", "name": "Road", "glyph": "=", "foreground": "surface.road", "background": "surface.road", "sprite": "classic/terrain/road", "movement_cost": 80, "flags": ["outdoor", "passable", "supports_weight", "transparent"], "metadata": {}},
+    {"id": "terrain.sidewalk", "kind": "terrain", "name": "Sidewalk", "glyph": ":", "foreground": "surface.road", "looks_like": "terrain.road", "movement_cost": 90, "flags": ["outdoor", "passable", "supports_weight", "transparent"], "metadata": {}},
+    {"id": "terrain.floor", "kind": "terrain", "name": "Interior floor", "glyph": ".", "foreground": "surface.interior", "background": "surface.interior", "movement_cost": 100, "flags": ["indoor", "passable", "supports_roof", "supports_weight", "transparent"], "metadata": {}},
+
+    {"id": "furniture.tree", "kind": "furniture", "name": "Tree", "glyph": "♣", "foreground": "surface.vegetation", "sprite": "classic/furniture/tree", "movement_cost": 0, "flags": ["blocks_items", "flammable", "outdoor", "supports_roof", "supports_weight"], "metadata": {}},
+    {"id": "furniture.table", "kind": "furniture", "name": "Table", "glyph": "π", "foreground": "structure.default", "movement_cost": 0, "flags": ["blocks_items", "flammable", "indoor", "supports_weight"], "metadata": {}},
+    {"id": "furniture.chair", "kind": "furniture", "name": "Chair", "glyph": "h", "foreground": "structure.default", "looks_like": "furniture.table", "movement_cost": 0, "flags": ["flammable", "indoor"], "metadata": {}},
+    {"id": "furniture.bed", "kind": "furniture", "name": "Bed", "glyph": "H", "foreground": "structure.default", "looks_like": "furniture.table", "movement_cost": 0, "flags": ["blocks_items", "flammable", "indoor"], "metadata": {}},
+    {"id": "furniture.streetlight", "kind": "furniture", "name": "Street light", "glyph": "i", "foreground": "portal.default", "movement_cost": 0, "flags": ["outdoor", "supports_weight"], "metadata": {}},
+
+    {"id": "structure.wall", "kind": "structure", "name": "Wall", "glyph": "#", "foreground": "structure.default", "background": "structure.default", "sprite": "classic/structure/wall", "movement_cost": 0, "flags": ["blocks_items", "supports_roof", "supports_weight"], "metadata": {}},
+    {"id": "structure.window", "kind": "structure", "name": "Window", "glyph": "□", "foreground": "structure.default", "looks_like": "structure.wall", "movement_cost": 0, "flags": ["blocks_items", "supports_roof", "transparent"], "metadata": {}},
+    {"id": "structure.railing", "kind": "structure", "name": "Railing", "glyph": "╫", "foreground": "structure.default", "looks_like": "structure.wall", "movement_cost": 0, "flags": ["blocks_items", "outdoor", "transparent"], "metadata": {}},
+
+    {"id": "portal.door_closed", "kind": "portal", "name": "Closed door", "glyph": "+", "foreground": "portal.default", "sprite": "classic/portal/door_closed", "movement_cost": 0, "flags": ["blocks_items", "closable", "openable", "supports_roof"], "metadata": {}},
+    {"id": "portal.door_open", "kind": "portal", "name": "Open door", "glyph": "/", "foreground": "portal.default", "looks_like": "portal.door_closed", "movement_cost": 100, "flags": ["closable", "indoor", "openable", "passable", "supports_roof", "transparent"], "metadata": {}},
+    {"id": "portal.stairs_up", "kind": "portal", "name": "Stairs up", "glyph": "<", "foreground": "portal.default", "movement_cost": 130, "flags": ["indoor", "passable", "portal_up", "transparent"], "metadata": {}},
+    {"id": "portal.stairs_down", "kind": "portal", "name": "Stairs down", "glyph": ">", "foreground": "portal.default", "movement_cost": 130, "flags": ["indoor", "passable", "portal_down", "transparent"], "metadata": {}},
+    {"id": "portal.elevator", "kind": "portal", "name": "Elevator", "glyph": "↕", "foreground": "portal.default", "movement_cost": 100, "flags": ["indoor", "passable", "portal_down", "portal_up", "supports_roof", "transparent"], "metadata": {}},
+
+    {"id": "item.stack", "kind": "item", "name": "Item stack", "glyph": "*", "foreground": "item.default", "sprite": "classic/item/stack", "movement_cost": 0, "flags": [], "metadata": {}},
+    {"id": "item.crate", "kind": "item", "name": "Crate", "glyph": "■", "foreground": "item.default", "looks_like": "item.stack", "movement_cost": 0, "flags": ["flammable"], "metadata": {}},
+    {"id": "item.food", "kind": "item", "name": "Food", "glyph": "%", "foreground": "item.default", "looks_like": "item.stack", "movement_cost": 0, "flags": [], "metadata": {}},
+
+    {"id": "entity.resident", "kind": "entity", "name": "Resident proxy", "glyph": "@", "foreground": "entity.civilian", "sprite": "classic/entity/resident", "movement_cost": 0, "flags": [], "metadata": {}},
+    {"id": "entity.worker", "kind": "entity", "name": "Worker proxy", "glyph": "@", "foreground": "entity.civilian", "looks_like": "entity.resident", "movement_cost": 0, "flags": [], "metadata": {}},
+    {"id": "entity.official", "kind": "entity", "name": "Public official", "glyph": "@", "foreground": "entity.service", "looks_like": "entity.resident", "movement_cost": 0, "flags": [], "metadata": {}},
+    {"id": "entity.vehicle", "kind": "entity", "name": "Vehicle", "glyph": "V", "foreground": "entity.service", "movement_cost": 0, "flags": ["blocks_items", "outdoor"], "metadata": {}},
+
+    {"id": "field.smoke", "kind": "field", "name": "Smoke", "glyph": "§", "foreground": "field.default", "sprite": "classic/field/smoke", "movement_cost": 0, "flags": ["hazard"], "metadata": {}},
+    {"id": "field.fire", "kind": "field", "name": "Fire", "glyph": "^", "foreground": "danger.warning", "movement_cost": 0, "flags": ["hazard"], "metadata": {}},
+    {"id": "field.spray", "kind": "field", "name": "Water spray", "glyph": "'", "foreground": "surface.water", "looks_like": "field.smoke", "movement_cost": 0, "flags": ["transparent"], "metadata": {}},
+
+    {"id": "overlay.selection", "kind": "overlay", "name": "Selection", "glyph": "X", "foreground": "overlay.default", "movement_cost": 0, "flags": ["transparent"], "metadata": {}},
+    {"id": "overlay.path", "kind": "overlay", "name": "Path preview", "glyph": "•", "foreground": "overlay.default", "looks_like": "overlay.selection", "movement_cost": 0, "flags": ["transparent"], "metadata": {}},
+    {"id": "overlay.danger", "kind": "overlay", "name": "Danger area", "glyph": "!", "foreground": "danger.warning", "looks_like": "overlay.selection", "movement_cost": 0, "flags": ["hazard", "transparent"], "metadata": {}},
+    {"id": "overlay.zoning", "kind": "overlay", "name": "Zoning area", "glyph": "Z", "foreground": "overlay.default", "looks_like": "overlay.selection", "movement_cost": 0, "flags": ["transparent"], "metadata": {}}
+  ]
+}

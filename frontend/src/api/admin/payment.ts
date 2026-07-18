@@ -11,7 +11,7 @@ import type {
   SubscriptionPlan,
   ProviderInstance
 } from '@/types/payment'
-import type { BasePaginationResponse } from '@/types'
+import type { BasePaginationResponse, FetchOptions } from '@/types'
 
 /** Admin-facing payment config returned by GET /admin/payment/config */
 export interface AdminPaymentConfig {
@@ -77,9 +77,10 @@ export const adminPaymentAPI = {
   // ==================== Dashboard ====================
 
   /** Get payment dashboard statistics */
-  getDashboard(days?: number) {
+  getDashboard(days?: number, options: FetchOptions = {}) {
     return apiClient.get<DashboardStats>('/admin/payment/dashboard', {
-      params: days ? { days } : undefined
+      params: days ? { days } : undefined,
+      signal: options.signal,
     })
   },
 
@@ -96,8 +97,11 @@ export const adminPaymentAPI = {
     start_date?: string
     end_date?: string
     order_type?: string
-  }) {
-    return apiClient.get<BasePaginationResponse<PaymentOrder>>('/admin/payment/orders', { params })
+  }, options: FetchOptions = {}) {
+    return apiClient.get<BasePaginationResponse<PaymentOrder>>('/admin/payment/orders', {
+      params,
+      signal: options.signal,
+    })
   },
 
   /** Get a specific order by ID */
@@ -150,8 +154,10 @@ export const adminPaymentAPI = {
   // ==================== Subscription Plans ====================
 
   /** Get all subscription plans */
-  getPlans() {
-    return apiClient.get<SubscriptionPlan[]>('/admin/payment/plans')
+  getPlans(options: FetchOptions = {}) {
+    return apiClient.get<SubscriptionPlan[]>('/admin/payment/plans', {
+      signal: options.signal,
+    })
   },
 
   /** Create a subscription plan */

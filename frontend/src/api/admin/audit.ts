@@ -8,7 +8,7 @@
  */
 
 import { apiClient } from '../client'
-import type { PaginatedResponse } from '@/types'
+import type { FetchOptions, PaginatedResponse } from '@/types'
 
 export interface AuditLog {
   id: number
@@ -50,8 +50,8 @@ export type AuditLogListResponse = PaginatedResponse<AuditLog>
 /**
  * List audit logs (paginated, filterable).
  */
-export async function list(params: AuditLogQuery): Promise<AuditLogListResponse> {
-  const { data } = await apiClient.get('/admin/audit-logs', { params })
+export async function list(params: AuditLogQuery, options: FetchOptions = {}): Promise<AuditLogListResponse> {
+  const { data } = await apiClient.get('/admin/audit-logs', { params, signal: options.signal })
   return data
 }
 

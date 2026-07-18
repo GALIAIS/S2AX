@@ -465,12 +465,15 @@ type UpdateProxyInput struct {
 }
 
 type GenerateRedeemCodesInput struct {
-	Count        int
-	Type         string
-	Value        float64
-	GroupID      *int64 // 订阅类型专用：关联的分组ID
-	ValidityDays int    // 订阅类型专用：有效天数
-	ExpiresAt    *time.Time
+	Count               int
+	Type                string
+	Value               float64
+	GroupID             *int64 // 订阅类型专用：关联的分组ID
+	ValidityDays        int    // 订阅类型专用：有效天数
+	ExpiresAt           *time.Time
+	CurrencyCode        string
+	CurrencyAmountUnits int64
+	CurrencyGroupID     *int64
 }
 
 type ProxyBatchDeleteResult struct {
@@ -608,6 +611,7 @@ type adminServiceImpl struct {
 	privacyClientFactory PrivacyClientFactory
 	runtimeBlocker       AccountRuntimeBlocker
 	affiliateService     adminRechargeAffiliateAccruer
+	virtualCurrency      *VirtualCurrencyService
 }
 
 type adminRechargeAffiliateAccruer interface {
@@ -639,7 +643,12 @@ func NewAdminService(
 	privacyClientFactory PrivacyClientFactory,
 	runtimeBlocker AccountRuntimeBlocker,
 	affiliateService *AffiliateService,
+	virtualCurrencyServices ...*VirtualCurrencyService,
 ) AdminService {
+	var virtualCurrency *VirtualCurrencyService
+	if len(virtualCurrencyServices) > 0 {
+		virtualCurrency = virtualCurrencyServices[0]
+	}
 	return &adminServiceImpl{
 		userRepo:             userRepo,
 		groupRepo:            groupRepo,
@@ -662,5 +671,6 @@ func NewAdminService(
 		privacyClientFactory: privacyClientFactory,
 		runtimeBlocker:       runtimeBlocker,
 		affiliateService:     affiliateService,
+		virtualCurrency:      virtualCurrency,
 	}
 }

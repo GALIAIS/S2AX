@@ -487,8 +487,8 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		account.AutoPauseOnExpired = true
 	}
 	if input.RateMultiplier != nil {
-		if *input.RateMultiplier < 0 {
-			return nil, errors.New("rate_multiplier must be >= 0")
+		if err := ValidateRateMultiplier(*input.RateMultiplier, true); err != nil {
+			return nil, fmt.Errorf("rate_multiplier: %w", err)
 		}
 		account.RateMultiplier = input.RateMultiplier
 	}
@@ -733,8 +733,8 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		account.Priority = *input.Priority
 	}
 	if input.RateMultiplier != nil {
-		if *input.RateMultiplier < 0 {
-			return nil, errors.New("rate_multiplier must be >= 0")
+		if err := ValidateRateMultiplier(*input.RateMultiplier, true); err != nil {
+			return nil, fmt.Errorf("rate_multiplier: %w", err)
 		}
 		account.RateMultiplier = input.RateMultiplier
 	}
@@ -940,8 +940,8 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 
 	if input.RateMultiplier != nil {
-		if *input.RateMultiplier < 0 {
-			return nil, errors.New("rate_multiplier must be >= 0")
+		if err := ValidateRateMultiplier(*input.RateMultiplier, true); err != nil {
+			return nil, fmt.Errorf("rate_multiplier: %w", err)
 		}
 	}
 

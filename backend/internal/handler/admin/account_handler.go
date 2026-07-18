@@ -798,9 +798,11 @@ func (h *AccountHandler) Create(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	if req.RateMultiplier != nil && *req.RateMultiplier < 0 {
-		response.BadRequest(c, "rate_multiplier must be >= 0")
-		return
+	if req.RateMultiplier != nil {
+		if err := service.ValidateRateMultiplier(*req.RateMultiplier, true); err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
 	}
 	// base_rpm 输入校验：负值归零，超过 10000 截断
 	sanitizeExtraBaseRPM(req.Extra)
@@ -930,9 +932,11 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
-	if req.RateMultiplier != nil && *req.RateMultiplier < 0 {
-		response.BadRequest(c, "rate_multiplier must be >= 0")
-		return
+	if req.RateMultiplier != nil {
+		if err := service.ValidateRateMultiplier(*req.RateMultiplier, true); err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
 	}
 	// base_rpm 输入校验：负值归零，超过 10000 截断
 	sanitizeExtraBaseRPM(req.Extra)
@@ -1687,14 +1691,16 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 		var openaiPrivacyAccounts []*service.Account
 
 		for _, item := range req.Accounts {
-			if item.RateMultiplier != nil && *item.RateMultiplier < 0 {
-				failed++
-				results = append(results, gin.H{
-					"name":    item.Name,
-					"success": false,
-					"error":   "rate_multiplier must be >= 0",
-				})
-				continue
+			if item.RateMultiplier != nil {
+				if err := service.ValidateRateMultiplier(*item.RateMultiplier, true); err != nil {
+					failed++
+					results = append(results, gin.H{
+						"name":    item.Name,
+						"success": false,
+						"error":   err.Error(),
+					})
+					continue
+				}
 			}
 
 			// base_rpm 输入校验：负值归零，超过 10000 截断
@@ -1883,9 +1889,11 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
-	if req.RateMultiplier != nil && *req.RateMultiplier < 0 {
-		response.BadRequest(c, "rate_multiplier must be >= 0")
-		return
+	if req.RateMultiplier != nil {
+		if err := service.ValidateRateMultiplier(*req.RateMultiplier, true); err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
 	}
 	if len(req.AccountIDs) == 0 && req.Filters == nil {
 		response.BadRequest(c, "account_ids or filters is required")

@@ -60,6 +60,10 @@ func RegisterAdminRoutes(
 		// 卡密管理
 		registerRedeemCodeRoutes(admin, h)
 
+		// 虚拟货币与用户资产
+		registerVirtualCurrencyRoutes(admin, h)
+		registerVirtualCurrencyIntegrationRoutes(admin, h)
+
 		// 优惠码管理
 		registerPromoCodeRoutes(admin, h)
 
@@ -487,6 +491,40 @@ func registerRedeemCodeRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		codes.POST("/batch-delete", h.Admin.Redeem.BatchDelete)
 		codes.POST("/batch-update", h.Admin.Redeem.BatchUpdate)
 		codes.POST("/:id/expire", h.Admin.Redeem.Expire)
+	}
+}
+
+func registerVirtualCurrencyRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	currencies := admin.Group("/currencies")
+	{
+		currencies.GET("", h.Admin.VirtualCurrency.List)
+		currencies.POST("", h.Admin.VirtualCurrency.Create)
+		currencies.GET("/:currency", h.Admin.VirtualCurrency.Get)
+		currencies.PATCH("/:currency", h.Admin.VirtualCurrency.Update)
+		currencies.POST("/:currency/status", h.Admin.VirtualCurrency.SetStatus)
+		currencies.GET("/:currency/groups", h.Admin.VirtualCurrency.ListGroups)
+		currencies.PUT("/:currency/groups/:group_id", h.Admin.VirtualCurrency.UpsertGroup)
+		currencies.DELETE("/:currency/groups/:group_id", h.Admin.VirtualCurrency.DeleteGroup)
+		currencies.POST("/:currency/enable-for-all-users", h.Admin.VirtualCurrency.EnableForAllUsers)
+		currencies.POST("/:currency/holds/expire", h.Admin.VirtualCurrency.ExpireHolds)
+		currencies.GET("/:currency/reconciliation", h.Admin.VirtualCurrency.Reconcile)
+		currencies.POST("/:currency/adjustments", h.Admin.VirtualCurrency.Adjust)
+		currencies.GET("/:currency/users/:user_id/ledger", h.Admin.VirtualCurrency.UserLedger)
+	}
+}
+
+func registerVirtualCurrencyIntegrationRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	integrations := admin.Group("/currency-integrations")
+	{
+		integrations.GET("", h.Admin.VirtualCurrencyIntegration.List)
+		integrations.POST("", h.Admin.VirtualCurrencyIntegration.Create)
+		integrations.GET("/:id", h.Admin.VirtualCurrencyIntegration.Get)
+		integrations.PATCH("/:id", h.Admin.VirtualCurrencyIntegration.Update)
+		integrations.POST("/:id/status", h.Admin.VirtualCurrencyIntegration.SetStatus)
+		integrations.POST("/:id/rotate-secret", h.Admin.VirtualCurrencyIntegration.RotateSecret)
+		integrations.GET("/:id/scopes", h.Admin.VirtualCurrencyIntegration.ListScopes)
+		integrations.PUT("/:id/scopes/:currency_id/:group_id", h.Admin.VirtualCurrencyIntegration.UpsertScope)
+		integrations.DELETE("/:id/scopes/:currency_id/:group_id", h.Admin.VirtualCurrencyIntegration.DeleteScope)
 	}
 }
 

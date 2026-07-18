@@ -77,4 +77,67 @@ describe('HelpTooltip', () => {
 
     wrapper.unmount()
   })
+
+  it('positions a fixed tooltip below a trigger near the viewport top after scrolling', async () => {
+    const wrapper = mount(HelpTooltip, {
+      attachTo: document.body,
+      props: { content: 'position details' },
+    })
+    const trigger = wrapper.get('.group')
+    const tooltip = getTooltipElement()
+    const originalScrollY = Object.getOwnPropertyDescriptor(window, 'scrollY')
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 240 })
+    Object.defineProperty(trigger.element, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 300, right: 316, top: 40, bottom: 56, width: 16, height: 16 }) as DOMRect,
+    })
+    Object.defineProperty(tooltip, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ width: 256, height: 64 }) as DOMRect,
+    })
+
+    await trigger.trigger('mouseenter')
+    await nextTick()
+
+    expect(tooltip.style.top).toBe('64px')
+    expect(tooltip.style.left).toBe('308px')
+    expect(tooltip.dataset.placement).toBe('bottom')
+    expect(tooltip.classList.contains('-translate-y-full')).toBe(false)
+    expect(tooltip.querySelector('.-top-1')).not.toBeNull()
+
+    if (originalScrollY) {
+      Object.defineProperty(window, 'scrollY', originalScrollY)
+    } else {
+      delete (window as Window & { scrollY?: number }).scrollY
+    }
+    wrapper.unmount()
+  })
+
+  it('keeps a tooltip above the trigger when enough space is available', async () => {
+    const wrapper = mount(HelpTooltip, {
+      attachTo: document.body,
+      props: { content: 'position details' },
+    })
+    const trigger = wrapper.get('.group')
+    const tooltip = getTooltipElement()
+    Object.defineProperty(trigger.element, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 300, right: 316, top: 300, bottom: 316, width: 16, height: 16 }) as DOMRect,
+    })
+    Object.defineProperty(tooltip, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ width: 256, height: 64 }) as DOMRect,
+    })
+
+    await trigger.trigger('mouseenter')
+    await nextTick()
+
+    expect(tooltip.style.top).toBe('292px')
+    expect(tooltip.style.left).toBe('308px')
+    expect(tooltip.dataset.placement).toBe('top')
+    expect(tooltip.classList.contains('-translate-y-full')).toBe(true)
+    expect(tooltip.querySelector('.-bottom-1')).not.toBeNull()
+
+    wrapper.unmount()
+  })
 })

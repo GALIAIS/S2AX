@@ -42,6 +42,12 @@
               class="w-44"
               @change="loadGroups"
             />
+            <SavedViewsControl
+              storage-key="admin-groups"
+              :state="savedViewState"
+              :disabled="loading"
+              @apply="applySavedView"
+            />
           </div>
 
           <!-- Right: actions -->
@@ -112,16 +118,66 @@
         </div>
       </template>
 
+      <div v-if="selectedGroupCount > 0" class="mb-4 flex flex-wrap items-center gap-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20" role="toolbar">
+        <span class="mr-auto text-sm font-medium text-primary-900 dark:text-primary-100">
+          {{ t("admin.groups.selectedCount", { count: selectedGroupCount }) }}
+        </span>
+        <button
+          type="button"
+          class="btn btn-danger btn-sm"
+          :disabled="bulkDeleting"
+          @click="showBulkDeleteDialog = true"
+        >
+          <Icon
+            :name="bulkDeleting ? 'refresh' : 'trash'"
+            size="sm"
+            :class="{ 'animate-spin': bulkDeleting }"
+          />
+          {{ t("admin.groups.bulkDelete") }}
+        </button>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm"
+          :disabled="bulkDeleting"
+          @click="clearSelectedGroups"
+        >
+          {{ t("common.clear") }}
+        </button>
+      </div>
+
       <template #table>
         <DataTable
           :columns="columns"
           :data="groups"
           :loading="loading"
+          :error="groupsError"
           :server-side-sort="true"
           default-sort-key="sort_order"
           default-sort-order="asc"
           @sort="handleSort"
+          @retry="loadGroups"
         >
+          <template #header-select>
+            <input
+              type="checkbox"
+              :checked="allGroupsSelected"
+              :indeterminate="someGroupsSelected && !allGroupsSelected"
+              :aria-label="t('common.selectAll')"
+              @click.stop
+              @change="toggleAllGroups"
+            />
+          </template>
+
+          <template #cell-select="{ row }">
+            <input
+              type="checkbox"
+              :checked="selectedGroupIds.has(row.id)"
+              :aria-label="row.name"
+              @click.stop
+              @change="toggleGroupSelection(row.id)"
+            />
+          </template>
+
           <template #cell-name="{ value }">
             <span class="font-medium text-gray-900 dark:text-white">{{
               value
@@ -358,59 +414,20 @@
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
+            <div class="flex items-center gap-2">
               <button
+                type="button"
                 @click="handleEdit(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
                 <Icon name="edit" size="sm" />
                 <span class="text-xs">{{ t("common.edit") }}</span>
               </button>
-              <button
-                data-testid="group-duplicate"
-                :title="
-                  duplicatingGroupIds.has(row.id)
-                    ? t('admin.groups.duplicating')
-                    : t('admin.groups.duplicate')
-                "
-                :disabled="duplicatingGroupIds.has(row.id)"
-                @click="handleDuplicate(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-dark-700 dark:hover:text-primary-400"
-              >
-                <Icon name="copy" size="sm" />
-                <span class="text-xs">
-                  {{
-                    duplicatingGroupIds.has(row.id)
-                      ? t("admin.groups.duplicating")
-                      : t("admin.groups.duplicate")
-                  }}
-                </span>
-              </button>
-              <button
-                @click="handleRateMultipliers(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-purple-600 dark:hover:bg-dark-700 dark:hover:text-purple-400"
-              >
-                <Icon name="dollar" size="sm" />
-                <span class="text-xs">{{
-                  t("admin.groups.rateMultipliers")
-                }}</span>
-              </button>
-              <button
-                @click="handleRPMOverrides(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-orange-600 dark:hover:bg-dark-700 dark:hover:text-orange-400"
-              >
-                <Icon name="bolt" size="sm" />
-                <span class="text-xs">{{
-                  t("admin.groups.rpmOverrides")
-                }}</span>
-              </button>
-              <button
-                @click="handleDelete(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
-              >
-                <Icon name="trash" size="sm" />
-                <span class="text-xs">{{ t("common.delete") }}</span>
-              </button>
+              <RowActionMenu
+                :items="groupActionItems(row)"
+                :aria-label="t('common.more')"
+                @select="(action) => handleGroupAction(row, action)"
+              />
             </div>
           </template>
 
@@ -485,32 +502,11 @@
         </div>
         <!-- 从分组复制账号 -->
         <div v-if="copyAccountsGroupOptions.length > 0">
-          <div class="mb-1.5 flex items-center gap-1">
-            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+          <div class="mb-1.5 flex min-h-5 items-center">
+            <span class="text-sm font-medium leading-5 text-gray-700 dark:text-gray-300">
               {{ t("admin.groups.copyAccounts.title") }}
-            </label>
-            <div class="group relative inline-flex">
-              <Icon
-                name="questionCircle"
-                size="sm"
-                :stroke-width="2"
-                class="cursor-help text-gray-400 transition-colors hover:text-primary-500 dark:text-gray-500 dark:hover:text-primary-400"
-              />
-              <div
-                class="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-72 opacity-0 transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100"
-              >
-                <div
-                  class="rounded-lg bg-gray-900 p-3 text-white shadow-lg dark:bg-gray-800"
-                >
-                  <p class="text-xs leading-relaxed text-gray-300">
-                    {{ t("admin.groups.copyAccounts.tooltip") }}
-                  </p>
-                  <div
-                    class="absolute -bottom-1.5 left-3 h-3 w-3 rotate-45 bg-gray-900 dark:bg-gray-800"
-                  ></div>
-                </div>
-              </div>
-            </div>
+            </span>
+            <HelpTooltip :content="t('admin.groups.copyAccounts.tooltip')" />
           </div>
           <!-- 已选分组标签 -->
           <div
@@ -541,35 +537,13 @@
             </span>
           </div>
           <!-- 分组选择下拉 -->
-          <select
-            class="input"
-            @change="
-              (e) => {
-                const val = Number((e.target as HTMLSelectElement).value);
-                if (
-                  val &&
-                  !createForm.copy_accounts_from_group_ids.includes(val)
-                ) {
-                  createForm.copy_accounts_from_group_ids.push(val);
-                }
-                (e.target as HTMLSelectElement).value = '';
-              }
-            "
-          >
-            <option value="">
-              {{ t("admin.groups.copyAccounts.selectPlaceholder") }}
-            </option>
-            <option
-              v-for="opt in copyAccountsGroupOptions"
-              :key="opt.value"
-              :value="opt.value"
-              :disabled="
-                createForm.copy_accounts_from_group_ids.includes(opt.value)
-              "
-            >
-              {{ opt.label }}
-            </option>
-          </select>
+          <Select
+            :model-value="null"
+            :options="copyAccountsGroupSelectOptions"
+            :placeholder="t('admin.groups.copyAccounts.selectPlaceholder')"
+            :searchable="copyAccountsGroupOptions.length > 5"
+            @change="addCopyAccountsGroup(createForm.copy_accounts_from_group_ids, $event)"
+          />
           <p class="input-hint">{{ t("admin.groups.copyAccounts.hint") }}</p>
         </div>
         <div>
@@ -579,8 +553,8 @@
           <input
             v-model.number="createForm.rate_multiplier"
             type="number"
-            step="0.001"
-            min="0.001"
+                :step="RATE_MULTIPLIER_STEP"
+                :min="MIN_RATE_MULTIPLIER"
             required
             class="input"
             data-tour="group-form-multiplier"
@@ -882,9 +856,9 @@
               t(imagePricingI18nKey(createForm.platform, "imageMultiplier"))
             }}</label>
             <input
-              v-model.number="createForm.image_rate_multiplier"
-              type="number"
-              step="0.0001"
+            v-model.number="createForm.image_rate_multiplier"
+            type="number"
+              :step="RATE_MULTIPLIER_STEP"
               min="0"
               class="input"
               placeholder="1"
@@ -896,7 +870,7 @@
               <input
                 v-model.number="createForm.image_price_1k"
                 type="number"
-                step="0.001"
+                :step="CURRENCY_STEP"
                 min="0"
                 class="input"
                 :placeholder="getImagePricePlaceholder(createForm.platform, 'image_price_1k')"
@@ -907,7 +881,7 @@
               <input
                 v-model.number="createForm.image_price_2k"
                 type="number"
-                step="0.001"
+                :step="CURRENCY_STEP"
                 min="0"
                 class="input"
                 :placeholder="getImagePricePlaceholder(createForm.platform, 'image_price_2k')"
@@ -918,7 +892,7 @@
               <input
                 v-model.number="createForm.image_price_4k"
                 type="number"
-                step="0.001"
+                :step="CURRENCY_STEP"
                 min="0"
                 class="input"
                 :placeholder="getImagePricePlaceholder(createForm.platform, 'image_price_4k')"
@@ -966,7 +940,7 @@
                 <input
                   v-model.number="createForm.batch_image_discount_multiplier"
                   type="number"
-                  step="0.0001"
+                  :step="RATE_MULTIPLIER_STEP"
                   min="0"
                   class="input"
                   placeholder="0.5"
@@ -979,7 +953,7 @@
                 <input
                   v-model.number="createForm.batch_image_hold_multiplier"
                   type="number"
-                  step="0.0001"
+                  :step="RATE_MULTIPLIER_STEP"
                   min="0"
                   class="input"
                   placeholder="0.6"
@@ -1028,7 +1002,7 @@
             <input
               v-model.number="createForm.video_rate_multiplier"
               type="number"
-              step="0.0001"
+              :step="RATE_MULTIPLIER_STEP"
               min="0"
               class="input"
               placeholder="1"
@@ -1040,7 +1014,7 @@
               <input
                 v-model.number="createForm.video_price_480p"
                 type="number"
-                step="0.001"
+                :step="CURRENCY_STEP"
                 min="0"
                 class="input"
                 :placeholder="getVideoPricePlaceholder(createForm.platform, 'video_price_480p')"
@@ -1051,7 +1025,7 @@
               <input
                 v-model.number="createForm.video_price_720p"
                 type="number"
-                step="0.001"
+                :step="CURRENCY_STEP"
                 min="0"
                 class="input"
                 :placeholder="getVideoPricePlaceholder(createForm.platform, 'video_price_720p')"
@@ -1062,7 +1036,7 @@
               <input
                 v-model.number="createForm.video_price_1080p"
                 type="number"
-                step="0.001"
+                :step="CURRENCY_STEP"
                 min="0"
                 class="input"
                 :placeholder="getVideoPricePlaceholder(createForm.platform, 'video_price_1080p')"
@@ -1122,9 +1096,9 @@
             <div>
               <label class="input-label">{{ t("admin.groups.peakRate.peakMultiplier") }}</label>
               <input
-                v-model.number="createForm.peak_rate_multiplier"
-                type="number"
-                step="0.001"
+              v-model.number="createForm.peak_rate_multiplier"
+              type="number"
+              :step="RATE_MULTIPLIER_STEP"
                 min="0"
                 class="input"
                 placeholder="1"
@@ -1356,7 +1330,7 @@
             <input
               v-model.number="createForm.web_search_price_per_call"
               type="number"
-              step="0.001"
+              :step="CURRENCY_STEP"
               min="0"
               placeholder="0.01"
               class="input"
@@ -1996,32 +1970,11 @@
         </div>
         <!-- 从分组复制账号（编辑时） -->
         <div v-if="copyAccountsGroupOptionsForEdit.length > 0">
-          <div class="mb-1.5 flex items-center gap-1">
-            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+          <div class="mb-1.5 flex min-h-5 items-center">
+            <span class="text-sm font-medium leading-5 text-gray-700 dark:text-gray-300">
               {{ t("admin.groups.copyAccounts.title") }}
-            </label>
-            <div class="group relative inline-flex">
-              <Icon
-                name="questionCircle"
-                size="sm"
-                :stroke-width="2"
-                class="cursor-help text-gray-400 transition-colors hover:text-primary-500 dark:text-gray-500 dark:hover:text-primary-400"
-              />
-              <div
-                class="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-72 opacity-0 transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100"
-              >
-                <div
-                  class="rounded-lg bg-gray-900 p-3 text-white shadow-lg dark:bg-gray-800"
-                >
-                  <p class="text-xs leading-relaxed text-gray-300">
-                    {{ t("admin.groups.copyAccounts.tooltipEdit") }}
-                  </p>
-                  <div
-                    class="absolute -bottom-1.5 left-3 h-3 w-3 rotate-45 bg-gray-900 dark:bg-gray-800"
-                  ></div>
-                </div>
-              </div>
-            </div>
+            </span>
+            <HelpTooltip :content="t('admin.groups.copyAccounts.tooltipEdit')" />
           </div>
           <!-- 已选分组标签 -->
           <div
@@ -2052,35 +2005,13 @@
             </span>
           </div>
           <!-- 分组选择下拉 -->
-          <select
-            class="input"
-            @change="
-              (e) => {
-                const val = Number((e.target as HTMLSelectElement).value);
-                if (
-                  val &&
-                  !editForm.copy_accounts_from_group_ids.includes(val)
-                ) {
-                  editForm.copy_accounts_from_group_ids.push(val);
-                }
-                (e.target as HTMLSelectElement).value = '';
-              }
-            "
-          >
-            <option value="">
-              {{ t("admin.groups.copyAccounts.selectPlaceholder") }}
-            </option>
-            <option
-              v-for="opt in copyAccountsGroupOptionsForEdit"
-              :key="opt.value"
-              :value="opt.value"
-              :disabled="
-                editForm.copy_accounts_from_group_ids.includes(opt.value)
-              "
-            >
-              {{ opt.label }}
-            </option>
-          </select>
+          <Select
+            :model-value="null"
+            :options="copyAccountsGroupSelectOptionsForEdit"
+            :placeholder="t('admin.groups.copyAccounts.selectPlaceholder')"
+            :searchable="copyAccountsGroupOptionsForEdit.length > 5"
+            @change="addCopyAccountsGroup(editForm.copy_accounts_from_group_ids, $event)"
+          />
           <p class="input-hint">
             {{ t("admin.groups.copyAccounts.hintEdit") }}
           </p>
@@ -2092,8 +2023,8 @@
           <input
             v-model.number="editForm.rate_multiplier"
             type="number"
-            step="0.001"
-            min="0.001"
+              :step="RATE_MULTIPLIER_STEP"
+              :min="MIN_RATE_MULTIPLIER"
             required
             class="input"
             data-tour="group-form-multiplier"
@@ -2396,9 +2327,9 @@
               t(imagePricingI18nKey(editForm.platform, "imageMultiplier"))
             }}</label>
             <input
-              v-model.number="editForm.image_rate_multiplier"
-              type="number"
-              step="0.0001"
+            v-model.number="editForm.image_rate_multiplier"
+            type="number"
+            :step="RATE_MULTIPLIER_STEP"
               min="0"
               class="input"
               placeholder="1"
@@ -2410,7 +2341,7 @@
               <input
                 v-model.number="editForm.image_price_1k"
                 type="number"
-                step="0.001"
+                :step="CURRENCY_STEP"
                 min="0"
                 class="input"
                 :placeholder="getImagePricePlaceholder(editForm.platform, 'image_price_1k')"
@@ -2421,7 +2352,7 @@
               <input
                 v-model.number="editForm.image_price_2k"
                 type="number"
-                step="0.001"
+                :step="CURRENCY_STEP"
                 min="0"
                 class="input"
                 :placeholder="getImagePricePlaceholder(editForm.platform, 'image_price_2k')"
@@ -2432,7 +2363,7 @@
               <input
                 v-model.number="editForm.image_price_4k"
                 type="number"
-                step="0.001"
+                :step="CURRENCY_STEP"
                 min="0"
                 class="input"
                 :placeholder="getImagePricePlaceholder(editForm.platform, 'image_price_4k')"
@@ -2480,7 +2411,7 @@
                 <input
                   v-model.number="editForm.batch_image_discount_multiplier"
                   type="number"
-                  step="0.0001"
+                  :step="RATE_MULTIPLIER_STEP"
                   min="0"
                   class="input"
                   placeholder="0.5"
@@ -2493,7 +2424,7 @@
                 <input
                   v-model.number="editForm.batch_image_hold_multiplier"
                   type="number"
-                  step="0.0001"
+                  :step="RATE_MULTIPLIER_STEP"
                   min="0"
                   class="input"
                   placeholder="0.6"
@@ -2542,7 +2473,7 @@
             <input
               v-model.number="editForm.video_rate_multiplier"
               type="number"
-              step="0.0001"
+              :step="RATE_MULTIPLIER_STEP"
               min="0"
               class="input"
               placeholder="1"
@@ -2554,7 +2485,7 @@
               <input
                 v-model.number="editForm.video_price_480p"
                 type="number"
-                step="0.001"
+                :step="CURRENCY_STEP"
                 min="0"
                 class="input"
                 :placeholder="getVideoPricePlaceholder(editForm.platform, 'video_price_480p')"
@@ -2565,7 +2496,7 @@
               <input
                 v-model.number="editForm.video_price_720p"
                 type="number"
-                step="0.001"
+                :step="CURRENCY_STEP"
                 min="0"
                 class="input"
                 :placeholder="getVideoPricePlaceholder(editForm.platform, 'video_price_720p')"
@@ -2576,7 +2507,7 @@
               <input
                 v-model.number="editForm.video_price_1080p"
                 type="number"
-                step="0.001"
+                :step="CURRENCY_STEP"
                 min="0"
                 class="input"
                 :placeholder="getVideoPricePlaceholder(editForm.platform, 'video_price_1080p')"
@@ -2636,9 +2567,9 @@
             <div>
               <label class="input-label">{{ t("admin.groups.peakRate.peakMultiplier") }}</label>
               <input
-                v-model.number="editForm.peak_rate_multiplier"
-                type="number"
-                step="0.001"
+              v-model.number="editForm.peak_rate_multiplier"
+              type="number"
+              :step="RATE_MULTIPLIER_STEP"
                 min="0"
                 class="input"
                 placeholder="1"
@@ -2866,7 +2797,7 @@
             <input
               v-model.number="editForm.web_search_price_per_call"
               type="number"
-              step="0.001"
+              :step="CURRENCY_STEP"
               min="0"
               placeholder="0.01"
               class="input"
@@ -3470,6 +3401,17 @@
       @cancel="showDeleteDialog = false"
     />
 
+    <ConfirmDialog
+      :show="showBulkDeleteDialog"
+      :title="t('admin.groups.bulkDelete')"
+      :message="t('admin.groups.bulkDeleteConfirm', { count: selectedGroupCount })"
+      :confirm-text="t('common.delete')"
+      :cancel-text="t('common.cancel')"
+      :danger="true"
+      @confirm="confirmBulkDelete"
+      @cancel="showBulkDeleteDialog = false"
+    />
+
     <!-- Sort Order Modal -->
     <BaseDialog
       :show="showSortModal"
@@ -3590,12 +3532,15 @@ import type { AdminGroup, GroupPlatform, SubscriptionType } from "@/types";
 import type { Column } from "@/components/common/types";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import TablePageLayout from "@/components/layout/TablePageLayout.vue";
+import SavedViewsControl from "@/components/common/SavedViewsControl.vue";
 import DataTable from "@/components/common/DataTable.vue";
 import Pagination from "@/components/common/Pagination.vue";
 import BaseDialog from "@/components/common/BaseDialog.vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
+import RowActionMenu, { type RowActionMenuItem } from "@/components/common/RowActionMenu.vue";
 import Select from "@/components/common/Select.vue";
+import HelpTooltip from "@/components/common/HelpTooltip.vue";
 import PlatformIcon from "@/components/common/PlatformIcon.vue";
 import Icon from "@/components/icons/Icon.vue";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
@@ -3605,7 +3550,14 @@ import { VueDraggable } from "vue-draggable-plus";
 import { createStableObjectKeyResolver } from "@/utils/stableObjectKey";
 import { extractApiErrorMessage } from "@/utils/apiError";
 import { useKeyedDebouncedSearch } from "@/composables/useKeyedDebouncedSearch";
+import { useUrlQueryBindings, parseNumberQuery, parseStringQuery } from "@/composables/useUrlQueryBindings";
 import { getPersistedPageSize } from "@/composables/usePersistedPageSize";
+import { normalizeTablePageSize } from "@/utils/tablePreferences";
+import {
+  CURRENCY_STEP,
+  MIN_RATE_MULTIPLIER,
+  RATE_MULTIPLIER_STEP,
+} from "@/utils/formatters";
 import {
   createDefaultMessagesDispatchFormState,
   messagesDispatchConfigToFormState,
@@ -3638,7 +3590,7 @@ const { t } = useI18n();
 const appStore = useAppStore();
 const onboardingStore = useOnboardingStore();
 
-const ALWAYS_VISIBLE_COLUMNS = new Set(["name", "actions"]);
+const ALWAYS_VISIBLE_COLUMNS = new Set(["select", "name", "actions"]);
 // Default hidden columns (hidden on first load / after schema bumps).
 const DEFAULT_HIDDEN_COLUMNS = ["id"];
 const HIDDEN_COLUMNS_KEY = "group-hidden-columns";
@@ -3650,6 +3602,7 @@ const VERSION_NEW_HIDDEN_COLUMNS: Record<number, string[]> = {
 };
 
 const allColumns = computed<Column[]>(() => [
+  { key: "select", label: "", sortable: false, class: "w-10 text-center" },
   { key: "name", label: t("admin.groups.columns.name"), sortable: true },
   { key: "id", label: t("admin.groups.columns.id"), sortable: true },
   {
@@ -3939,8 +3892,33 @@ const copyAccountsGroupOptionsForEdit = computed(() => {
   }));
 });
 
+const copyAccountsGroupSelectOptions = computed(() =>
+  copyAccountsGroupOptions.value.map((option) => ({
+    ...option,
+    disabled: createForm.copy_accounts_from_group_ids.includes(option.value),
+  })),
+);
+
+const copyAccountsGroupSelectOptionsForEdit = computed(() =>
+  copyAccountsGroupOptionsForEdit.value.map((option) => ({
+    ...option,
+    disabled: editForm.copy_accounts_from_group_ids.includes(option.value),
+  })),
+);
+
+const addCopyAccountsGroup = (
+  selectedGroupIDs: number[],
+  value: string | number | boolean | null,
+) => {
+  if (typeof value === "number" && !selectedGroupIDs.includes(value)) {
+    selectedGroupIDs.push(value);
+  }
+};
+
 const groups = ref<AdminGroup[]>([]);
-const loading = ref(false);
+const loading = ref(true);
+const groupsError = ref<string | null>(null);
+const selectedGroupIds = ref<Set<number>>(new Set());
 type GroupUsageSummary = {
   today_cost: number;
   total_cost: number;
@@ -3978,11 +3956,122 @@ const sortState = reactive({
   sort_order: "asc" as "asc" | "desc",
 });
 
+const selectedGroupCount = computed(() => selectedGroupIds.value.size);
+const allGroupsSelected = computed(() =>
+  groups.value.length > 0 && groups.value.every((group) => selectedGroupIds.value.has(group.id)),
+);
+const someGroupsSelected = computed(() =>
+  groups.value.some((group) => selectedGroupIds.value.has(group.id)),
+);
+
+const toggleGroupSelection = (id: number): void => {
+  const next = new Set(selectedGroupIds.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  selectedGroupIds.value = next;
+};
+
+const toggleAllGroups = (): void => {
+  if (allGroupsSelected.value) {
+    selectedGroupIds.value = new Set();
+    return;
+  }
+  selectedGroupIds.value = new Set(groups.value.map((group) => group.id));
+};
+
+const clearSelectedGroups = (): void => {
+  selectedGroupIds.value = new Set();
+};
+
+const savedViewState = computed<Record<string, unknown>>(() => ({
+  search: searchQuery.value,
+  platform: filters.platform,
+  status: filters.status,
+  is_exclusive: filters.is_exclusive,
+  page: pagination.page,
+  page_size: pagination.page_size,
+  sort_by: sortState.sort_by,
+  sort_order: sortState.sort_order
+}));
+
+const applySavedView = (state: Record<string, unknown>) => {
+  searchQuery.value = typeof state.search === "string" ? state.search : "";
+  filters.platform = typeof state.platform === "string" ? state.platform : "";
+  filters.status = typeof state.status === "string" ? state.status : "";
+  filters.is_exclusive = typeof state.is_exclusive === "string" ? state.is_exclusive : "";
+  pagination.page = Number.isFinite(Number(state.page)) ? Math.max(1, Number(state.page)) : 1;
+  pagination.page_size = Number.isFinite(Number(state.page_size)) ? Math.max(1, Number(state.page_size)) : pagination.page_size;
+  sortState.sort_by = typeof state.sort_by === "string" ? state.sort_by : "sort_order";
+  sortState.sort_order = state.sort_order === "desc" ? "desc" : "asc";
+  void loadGroups();
+};
+
+useUrlQueryBindings([
+  {
+    key: "search",
+    get: () => searchQuery.value,
+    set: (value: string) => { searchQuery.value = value },
+    parse: parseStringQuery,
+    omit: (value: string) => !value,
+  },
+  {
+    key: "platform",
+    get: () => filters.platform,
+    set: (value: string) => { filters.platform = value },
+    parse: parseStringQuery,
+    omit: (value: string) => !value,
+  },
+  {
+    key: "status",
+    get: () => filters.status,
+    set: (value: string) => { filters.status = value },
+    parse: parseStringQuery,
+    omit: (value: string) => !value,
+  },
+  {
+    key: "exclusive",
+    get: () => filters.is_exclusive,
+    set: (value: string) => { filters.is_exclusive = value },
+    parse: parseStringQuery,
+    omit: (value: string) => !value,
+  },
+  {
+    key: "sort_by",
+    get: () => sortState.sort_by,
+    set: (value: string) => { sortState.sort_by = value },
+    parse: parseStringQuery,
+    omit: (value: string) => !value || value === "sort_order",
+  },
+  {
+    key: "sort_order",
+    get: () => sortState.sort_order,
+    set: (value: string) => { sortState.sort_order = value === "desc" ? "desc" : "asc" },
+    parse: parseStringQuery,
+    omit: (value: string) => value !== "desc",
+  },
+  {
+    key: "page",
+    get: () => pagination.page,
+    set: (value: number) => { pagination.page = Math.max(1, Math.floor(value)) },
+    parse: parseNumberQuery,
+    omit: (value: number) => value <= 1,
+  },
+  {
+    key: "page_size",
+    get: () => pagination.page_size,
+    set: (value: number) => { pagination.page_size = normalizeTablePageSize(value) },
+    parse: parseNumberQuery,
+    omit: (value: number) => value === getPersistedPageSize(),
+  },
+]);
+
 let abortController: AbortController | null = null;
 
 const showCreateModal = ref(false);
 const showEditModal = ref(false);
 const showDeleteDialog = ref(false);
+const showBulkDeleteDialog = ref(false);
+const bulkDeleting = ref(false);
 const showSortModal = ref(false);
 const submitting = ref(false);
 const sortSubmitting = ref(false);
@@ -3993,6 +4082,22 @@ const showRateMultipliersModal = ref(false);
 const rateMultipliersGroup = ref<AdminGroup | null>(null);
 const showRPMOverridesModal = ref(false);
 const rpmOverridesGroup = ref<AdminGroup | null>(null);
+const groupActionItems = (group: AdminGroup): RowActionMenuItem[] => [
+  {
+    key: "duplicate",
+    label: duplicatingGroupIds.has(group.id)
+      ? t("admin.groups.duplicating")
+      : t("admin.groups.duplicate"),
+    icon: "copy",
+    disabled: duplicatingGroupIds.has(group.id),
+    title: duplicatingGroupIds.has(group.id)
+      ? t("admin.groups.duplicating")
+      : undefined,
+  },
+  { key: "rate-multipliers", label: t("admin.groups.rateMultipliers"), icon: "dollar" },
+  { key: "rpm-overrides", label: t("admin.groups.rpmOverrides"), icon: "bolt" },
+  { key: "delete", label: t("common.delete"), icon: "trash", tone: "danger" as const },
+];
 const sortableGroups = ref<AdminGroup[]>([]);
 const createMessagesDispatchDefaults = createDefaultMessagesDispatchFormState();
 const editMessagesDispatchDefaults = createDefaultMessagesDispatchFormState();
@@ -4597,6 +4702,7 @@ const loadGroups = async () => {
   abortController = currentController;
   const { signal } = currentController;
   loading.value = true;
+  groupsError.value = null;
   try {
     const response = await adminAPI.groups.list(
       pagination.page,
@@ -4614,7 +4720,11 @@ const loadGroups = async () => {
       { signal },
     );
     if (signal.aborted) return;
+    groupsError.value = null;
     groups.value = response.items;
+    selectedGroupIds.value = new Set(
+      Array.from(selectedGroupIds.value).filter((id) => groups.value.some((group) => group.id === id)),
+    );
     pagination.total = response.total;
     pagination.pages = response.pages;
     if (hasVisibleUsageSummaryConsumer.value) {
@@ -4634,6 +4744,7 @@ const loadGroups = async () => {
       return;
     }
     appStore.showError(t("admin.groups.failedToLoad"));
+    groupsError.value = t("admin.groups.failedToLoad");
     console.error("Error loading groups:", error);
   } finally {
     if (abortController === currentController && !signal.aborted) {
@@ -5138,6 +5249,13 @@ const removeEditMessagesDispatchMapping = (row: MessagesDispatchMappingRow) => {
   }
 };
 
+const handleGroupAction = (group: AdminGroup, action: string) => {
+  if (action === "duplicate") void handleDuplicate(group);
+  else if (action === "rate-multipliers") handleRateMultipliers(group);
+  else if (action === "rpm-overrides") handleRPMOverrides(group);
+  else if (action === "delete") handleDelete(group);
+};
+
 const handleRateMultipliers = (group: AdminGroup) => {
   rateMultipliersGroup.value = group;
   showRateMultipliersModal.value = true;
@@ -5186,6 +5304,28 @@ const confirmDelete = async () => {
       error.response?.data?.detail || t("admin.groups.failedToDelete"),
     );
     console.error("Error deleting group:", error);
+  }
+};
+
+const confirmBulkDelete = async (): Promise<void> => {
+  const ids = Array.from(selectedGroupIds.value);
+  if (ids.length === 0 || bulkDeleting.value) return;
+
+  bulkDeleting.value = true;
+  try {
+    const results = await Promise.allSettled(ids.map((id) => adminAPI.groups.delete(id)));
+    const success = results.filter((result) => result.status === "fulfilled").length;
+    const failed = results.length - success;
+    if (failed === 0) {
+      appStore.showSuccess(t("admin.groups.bulkDeleteSuccess", { count: success }));
+    } else {
+      appStore.showError(t("admin.groups.bulkDeletePartial", { success, failed }));
+    }
+    showBulkDeleteDialog.value = false;
+    clearSelectedGroups();
+    await loadGroups();
+  } finally {
+    bulkDeleting.value = false;
   }
 };
 

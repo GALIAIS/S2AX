@@ -70,7 +70,10 @@ export async function generate(
   value: number,
   groupId?: number | null,
   validityDays?: number,
-  expiresInDays?: number | null
+  expiresInDays?: number | null,
+  currencyCode?: string,
+  currencyAmountUnits?: number,
+  currencyGroupId?: number | null
 ): Promise<RedeemCode[]> {
   const payload: GenerateRedeemCodesRequest = {
     count,
@@ -84,6 +87,11 @@ export async function generate(
     if (validityDays && validityDays > 0) {
       payload.validity_days = validityDays
     }
+  }
+  if (type === 'virtual_currency') {
+    payload.currency_code = currencyCode
+    payload.currency_amount_units = currencyAmountUnits
+    payload.currency_group_id = currencyGroupId
   }
   if (expiresInDays && expiresInDays > 0) {
     payload.expires_in_days = expiresInDays

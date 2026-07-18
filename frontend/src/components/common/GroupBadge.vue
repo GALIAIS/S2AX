@@ -13,8 +13,8 @@
     <span v-if="showLabel" :class="labelClass">
       <template v-if="hasCustomRate">
         <!-- 原倍率删除线 + 专属倍率高亮 -->
-        <span class="line-through opacity-50 mr-0.5">{{ rateMultiplier }}x</span>
-        <span class="font-bold">{{ userRateMultiplier }}x</span>
+        <span class="line-through opacity-50 mr-0.5">{{ formatMultiplier(rateMultiplier) }}x</span>
+        <span class="font-bold">{{ formatMultiplier(userRateMultiplier) }}x</span>
       </template>
       <template v-else>
         {{ labelText }}
@@ -32,6 +32,7 @@ import { useI18n } from 'vue-i18n'
 import type { SubscriptionType, GroupPlatform } from '@/types'
 import { useAppStore } from '@/stores/app'
 import { formatPeakRateWindow, serverTimezoneLabel } from '@/utils/peak-rate'
+import { formatMultiplier } from '@/utils/formatters'
 import PlatformIcon from './PlatformIcon.vue'
 
 interface Props {
@@ -110,7 +111,7 @@ const showLabel = computed(() => {
 
 // Label text
 const labelText = computed(() => {
-  const rateLabel = props.rateMultiplier !== undefined ? `${props.rateMultiplier}x` : ''
+  const rateLabel = props.rateMultiplier !== undefined ? `${formatMultiplier(props.rateMultiplier)}x` : ''
   if (isSubscription.value && !props.alwaysShowRate) {
     // 如果有剩余天数，显示天数
     if (props.daysRemaining !== null && props.daysRemaining !== undefined) {

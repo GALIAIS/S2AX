@@ -113,3 +113,21 @@ func TestResToAnthFuncArgsDelta_NonReadToolStreamsPartialJSONImmediately(t *test
 	assert.Equal(t, `{"file_path":"/tmp/out`, events[0].Delta.PartialJSON)
 	assert.True(t, state.CurrentToolHadDelta)
 }
+
+func TestResToAnthFuncArgsDelta_ReadToolNormalizesMalformedOffset(t *testing.T) {
+	state := NewResponsesEventToAnthropicState()
+	state.MessageStartSent = true
+	state.ContentBlockOpen = true
+	state.CurrentBlockType = "tool_use"
+	state.CurrentToolName = "Read"
+	state.OutputIndexToBlockIdx = map[int]int{0: 0}
+
+	events := ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{
+		Type:        "response.function_call_arguments.delta",
+		OutputIndex: 0,
+		Delta:       `{"file_path":"/tmp/test.go","limit":60,"offset":5180581636390513,"pages":""}`,
+	}, state)
+
+	require.Len(t, events, 1)
+	assert.JSONEq(t, `{"file_path":"/tmp/test.go","limit":60,"offset":0}`, events[0].Delta.PartialJSON)
+}

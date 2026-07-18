@@ -34,6 +34,8 @@ import affiliatesAPI from './affiliates'
 import riskControlAPI from './riskControl'
 import adminComplianceAPI from './compliance'
 import auditAPI from './audit'
+import virtualCurrenciesAPI from './virtualCurrencies'
+import virtualCurrencyIntegrationsAPI from './virtualCurrencyIntegrations'
 
 /**
  * Unified admin API object for convenient access
@@ -69,7 +71,9 @@ export const adminAPI = {
   affiliates: affiliatesAPI,
   riskControl: riskControlAPI,
   compliance: adminComplianceAPI,
-  audit: auditAPI
+  audit: auditAPI,
+  virtualCurrencies: virtualCurrenciesAPI,
+  virtualCurrencyIntegrations: virtualCurrencyIntegrationsAPI
 }
 
 export {
@@ -103,7 +107,9 @@ export {
   affiliatesAPI,
   riskControlAPI,
   adminComplianceAPI,
-  auditAPI
+  auditAPI,
+  virtualCurrenciesAPI,
+  virtualCurrencyIntegrationsAPI
 }
 
 export default adminAPI
@@ -114,4 +120,4 @@ export type { BalanceHistoryItem } from './users'
 export type { ErrorPassthroughRule, CreateRuleRequest, UpdateRuleRequest } from './errorPassthrough'
 export type { BackupAgentHealth, DataManagementConfig } from './dataManagement'
 export type { TLSFingerprintProfile, CreateProfileRequest, UpdateProfileRequest } from './tlsFingerprintProfile'
-export type { ContentModerationConfig, ContentModerationLog, ModerationMode } from './riskControl'
+export type { ContentModerationConfig, ContentModerationLog, ContentModerationRegexRule, ModerationMode } from './riskControl'

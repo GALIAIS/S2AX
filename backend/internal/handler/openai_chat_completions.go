@@ -80,7 +80,11 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", invalidStreamFieldTypeMessage)
 		return
 	}
-	if service.IsGPTImageGenerationModel(reqModel) {
+	// Image-only models are served by /v1/images/generations or /v1/images/edits.
+	// Reject them before moderation, billing, concurrency, account scheduling, and
+	// upstream forwarding so an invalid Chat Completions request cannot cool down
+	// a valid image account/model pair (#4348).
+	if service.IsImageGenerationIntent("/v1/chat/completions", reqModel, nil) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "This model is not supported on the Chat Completions endpoint")
 		return
 	}

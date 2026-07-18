@@ -170,6 +170,48 @@ func (_c *RedeemCodeCreate) SetNillableValidityDays(v *int) *RedeemCodeCreate {
 	return _c
 }
 
+// SetCurrencyID sets the "currency_id" field.
+func (_c *RedeemCodeCreate) SetCurrencyID(v int64) *RedeemCodeCreate {
+	_c.mutation.SetCurrencyID(v)
+	return _c
+}
+
+// SetNillableCurrencyID sets the "currency_id" field if the given value is not nil.
+func (_c *RedeemCodeCreate) SetNillableCurrencyID(v *int64) *RedeemCodeCreate {
+	if v != nil {
+		_c.SetCurrencyID(*v)
+	}
+	return _c
+}
+
+// SetCurrencyAmountUnits sets the "currency_amount_units" field.
+func (_c *RedeemCodeCreate) SetCurrencyAmountUnits(v int64) *RedeemCodeCreate {
+	_c.mutation.SetCurrencyAmountUnits(v)
+	return _c
+}
+
+// SetNillableCurrencyAmountUnits sets the "currency_amount_units" field if the given value is not nil.
+func (_c *RedeemCodeCreate) SetNillableCurrencyAmountUnits(v *int64) *RedeemCodeCreate {
+	if v != nil {
+		_c.SetCurrencyAmountUnits(*v)
+	}
+	return _c
+}
+
+// SetCurrencyGroupID sets the "currency_group_id" field.
+func (_c *RedeemCodeCreate) SetCurrencyGroupID(v int64) *RedeemCodeCreate {
+	_c.mutation.SetCurrencyGroupID(v)
+	return _c
+}
+
+// SetNillableCurrencyGroupID sets the "currency_group_id" field if the given value is not nil.
+func (_c *RedeemCodeCreate) SetNillableCurrencyGroupID(v *int64) *RedeemCodeCreate {
+	if v != nil {
+		_c.SetCurrencyGroupID(*v)
+	}
+	return _c
+}
+
 // SetUserID sets the "user" edge to the User entity by ID.
 func (_c *RedeemCodeCreate) SetUserID(id int64) *RedeemCodeCreate {
 	_c.mutation.SetUserID(id)
@@ -348,6 +390,18 @@ func (_c *RedeemCodeCreate) createSpec() (*RedeemCode, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ValidityDays(); ok {
 		_spec.SetField(redeemcode.FieldValidityDays, field.TypeInt, value)
 		_node.ValidityDays = value
+	}
+	if value, ok := _c.mutation.CurrencyID(); ok {
+		_spec.SetField(redeemcode.FieldCurrencyID, field.TypeInt64, value)
+		_node.CurrencyID = &value
+	}
+	if value, ok := _c.mutation.CurrencyAmountUnits(); ok {
+		_spec.SetField(redeemcode.FieldCurrencyAmountUnits, field.TypeInt64, value)
+		_node.CurrencyAmountUnits = &value
+	}
+	if value, ok := _c.mutation.CurrencyGroupID(); ok {
+		_spec.SetField(redeemcode.FieldCurrencyGroupID, field.TypeInt64, value)
+		_node.CurrencyGroupID = &value
 	}
 	if nodes := _c.mutation.UserIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -597,6 +651,78 @@ func (u *RedeemCodeUpsert) AddValidityDays(v int) *RedeemCodeUpsert {
 	return u
 }
 
+// SetCurrencyID sets the "currency_id" field.
+func (u *RedeemCodeUpsert) SetCurrencyID(v int64) *RedeemCodeUpsert {
+	u.Set(redeemcode.FieldCurrencyID, v)
+	return u
+}
+
+// UpdateCurrencyID sets the "currency_id" field to the value that was provided on create.
+func (u *RedeemCodeUpsert) UpdateCurrencyID() *RedeemCodeUpsert {
+	u.SetExcluded(redeemcode.FieldCurrencyID)
+	return u
+}
+
+// AddCurrencyID adds v to the "currency_id" field.
+func (u *RedeemCodeUpsert) AddCurrencyID(v int64) *RedeemCodeUpsert {
+	u.Add(redeemcode.FieldCurrencyID, v)
+	return u
+}
+
+// ClearCurrencyID clears the value of the "currency_id" field.
+func (u *RedeemCodeUpsert) ClearCurrencyID() *RedeemCodeUpsert {
+	u.SetNull(redeemcode.FieldCurrencyID)
+	return u
+}
+
+// SetCurrencyAmountUnits sets the "currency_amount_units" field.
+func (u *RedeemCodeUpsert) SetCurrencyAmountUnits(v int64) *RedeemCodeUpsert {
+	u.Set(redeemcode.FieldCurrencyAmountUnits, v)
+	return u
+}
+
+// UpdateCurrencyAmountUnits sets the "currency_amount_units" field to the value that was provided on create.
+func (u *RedeemCodeUpsert) UpdateCurrencyAmountUnits() *RedeemCodeUpsert {
+	u.SetExcluded(redeemcode.FieldCurrencyAmountUnits)
+	return u
+}
+
+// AddCurrencyAmountUnits adds v to the "currency_amount_units" field.
+func (u *RedeemCodeUpsert) AddCurrencyAmountUnits(v int64) *RedeemCodeUpsert {
+	u.Add(redeemcode.FieldCurrencyAmountUnits, v)
+	return u
+}
+
+// ClearCurrencyAmountUnits clears the value of the "currency_amount_units" field.
+func (u *RedeemCodeUpsert) ClearCurrencyAmountUnits() *RedeemCodeUpsert {
+	u.SetNull(redeemcode.FieldCurrencyAmountUnits)
+	return u
+}
+
+// SetCurrencyGroupID sets the "currency_group_id" field.
+func (u *RedeemCodeUpsert) SetCurrencyGroupID(v int64) *RedeemCodeUpsert {
+	u.Set(redeemcode.FieldCurrencyGroupID, v)
+	return u
+}
+
+// UpdateCurrencyGroupID sets the "currency_group_id" field to the value that was provided on create.
+func (u *RedeemCodeUpsert) UpdateCurrencyGroupID() *RedeemCodeUpsert {
+	u.SetExcluded(redeemcode.FieldCurrencyGroupID)
+	return u
+}
+
+// AddCurrencyGroupID adds v to the "currency_group_id" field.
+func (u *RedeemCodeUpsert) AddCurrencyGroupID(v int64) *RedeemCodeUpsert {
+	u.Add(redeemcode.FieldCurrencyGroupID, v)
+	return u
+}
+
+// ClearCurrencyGroupID clears the value of the "currency_group_id" field.
+func (u *RedeemCodeUpsert) ClearCurrencyGroupID() *RedeemCodeUpsert {
+	u.SetNull(redeemcode.FieldCurrencyGroupID)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -828,6 +954,90 @@ func (u *RedeemCodeUpsertOne) AddValidityDays(v int) *RedeemCodeUpsertOne {
 func (u *RedeemCodeUpsertOne) UpdateValidityDays() *RedeemCodeUpsertOne {
 	return u.Update(func(s *RedeemCodeUpsert) {
 		s.UpdateValidityDays()
+	})
+}
+
+// SetCurrencyID sets the "currency_id" field.
+func (u *RedeemCodeUpsertOne) SetCurrencyID(v int64) *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.SetCurrencyID(v)
+	})
+}
+
+// AddCurrencyID adds v to the "currency_id" field.
+func (u *RedeemCodeUpsertOne) AddCurrencyID(v int64) *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.AddCurrencyID(v)
+	})
+}
+
+// UpdateCurrencyID sets the "currency_id" field to the value that was provided on create.
+func (u *RedeemCodeUpsertOne) UpdateCurrencyID() *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.UpdateCurrencyID()
+	})
+}
+
+// ClearCurrencyID clears the value of the "currency_id" field.
+func (u *RedeemCodeUpsertOne) ClearCurrencyID() *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.ClearCurrencyID()
+	})
+}
+
+// SetCurrencyAmountUnits sets the "currency_amount_units" field.
+func (u *RedeemCodeUpsertOne) SetCurrencyAmountUnits(v int64) *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.SetCurrencyAmountUnits(v)
+	})
+}
+
+// AddCurrencyAmountUnits adds v to the "currency_amount_units" field.
+func (u *RedeemCodeUpsertOne) AddCurrencyAmountUnits(v int64) *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.AddCurrencyAmountUnits(v)
+	})
+}
+
+// UpdateCurrencyAmountUnits sets the "currency_amount_units" field to the value that was provided on create.
+func (u *RedeemCodeUpsertOne) UpdateCurrencyAmountUnits() *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.UpdateCurrencyAmountUnits()
+	})
+}
+
+// ClearCurrencyAmountUnits clears the value of the "currency_amount_units" field.
+func (u *RedeemCodeUpsertOne) ClearCurrencyAmountUnits() *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.ClearCurrencyAmountUnits()
+	})
+}
+
+// SetCurrencyGroupID sets the "currency_group_id" field.
+func (u *RedeemCodeUpsertOne) SetCurrencyGroupID(v int64) *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.SetCurrencyGroupID(v)
+	})
+}
+
+// AddCurrencyGroupID adds v to the "currency_group_id" field.
+func (u *RedeemCodeUpsertOne) AddCurrencyGroupID(v int64) *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.AddCurrencyGroupID(v)
+	})
+}
+
+// UpdateCurrencyGroupID sets the "currency_group_id" field to the value that was provided on create.
+func (u *RedeemCodeUpsertOne) UpdateCurrencyGroupID() *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.UpdateCurrencyGroupID()
+	})
+}
+
+// ClearCurrencyGroupID clears the value of the "currency_group_id" field.
+func (u *RedeemCodeUpsertOne) ClearCurrencyGroupID() *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.ClearCurrencyGroupID()
 	})
 }
 
@@ -1228,6 +1438,90 @@ func (u *RedeemCodeUpsertBulk) AddValidityDays(v int) *RedeemCodeUpsertBulk {
 func (u *RedeemCodeUpsertBulk) UpdateValidityDays() *RedeemCodeUpsertBulk {
 	return u.Update(func(s *RedeemCodeUpsert) {
 		s.UpdateValidityDays()
+	})
+}
+
+// SetCurrencyID sets the "currency_id" field.
+func (u *RedeemCodeUpsertBulk) SetCurrencyID(v int64) *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.SetCurrencyID(v)
+	})
+}
+
+// AddCurrencyID adds v to the "currency_id" field.
+func (u *RedeemCodeUpsertBulk) AddCurrencyID(v int64) *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.AddCurrencyID(v)
+	})
+}
+
+// UpdateCurrencyID sets the "currency_id" field to the value that was provided on create.
+func (u *RedeemCodeUpsertBulk) UpdateCurrencyID() *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.UpdateCurrencyID()
+	})
+}
+
+// ClearCurrencyID clears the value of the "currency_id" field.
+func (u *RedeemCodeUpsertBulk) ClearCurrencyID() *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.ClearCurrencyID()
+	})
+}
+
+// SetCurrencyAmountUnits sets the "currency_amount_units" field.
+func (u *RedeemCodeUpsertBulk) SetCurrencyAmountUnits(v int64) *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.SetCurrencyAmountUnits(v)
+	})
+}
+
+// AddCurrencyAmountUnits adds v to the "currency_amount_units" field.
+func (u *RedeemCodeUpsertBulk) AddCurrencyAmountUnits(v int64) *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.AddCurrencyAmountUnits(v)
+	})
+}
+
+// UpdateCurrencyAmountUnits sets the "currency_amount_units" field to the value that was provided on create.
+func (u *RedeemCodeUpsertBulk) UpdateCurrencyAmountUnits() *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.UpdateCurrencyAmountUnits()
+	})
+}
+
+// ClearCurrencyAmountUnits clears the value of the "currency_amount_units" field.
+func (u *RedeemCodeUpsertBulk) ClearCurrencyAmountUnits() *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.ClearCurrencyAmountUnits()
+	})
+}
+
+// SetCurrencyGroupID sets the "currency_group_id" field.
+func (u *RedeemCodeUpsertBulk) SetCurrencyGroupID(v int64) *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.SetCurrencyGroupID(v)
+	})
+}
+
+// AddCurrencyGroupID adds v to the "currency_group_id" field.
+func (u *RedeemCodeUpsertBulk) AddCurrencyGroupID(v int64) *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.AddCurrencyGroupID(v)
+	})
+}
+
+// UpdateCurrencyGroupID sets the "currency_group_id" field to the value that was provided on create.
+func (u *RedeemCodeUpsertBulk) UpdateCurrencyGroupID() *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.UpdateCurrencyGroupID()
+	})
+}
+
+// ClearCurrencyGroupID clears the value of the "currency_group_id" field.
+func (u *RedeemCodeUpsertBulk) ClearCurrencyGroupID() *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.ClearCurrencyGroupID()
 	})
 }
 

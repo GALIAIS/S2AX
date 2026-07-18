@@ -36,6 +36,12 @@ const (
 	FieldGroupID = "group_id"
 	// FieldValidityDays holds the string denoting the validity_days field in the database.
 	FieldValidityDays = "validity_days"
+	// FieldCurrencyID holds the string denoting the currency_id field in the database.
+	FieldCurrencyID = "currency_id"
+	// FieldCurrencyAmountUnits holds the string denoting the currency_amount_units field in the database.
+	FieldCurrencyAmountUnits = "currency_amount_units"
+	// FieldCurrencyGroupID holds the string denoting the currency_group_id field in the database.
+	FieldCurrencyGroupID = "currency_group_id"
 	// EdgeUser holds the string denoting the user edge name in mutations.
 	EdgeUser = "user"
 	// EdgeGroup holds the string denoting the group edge name in mutations.
@@ -72,6 +78,9 @@ var Columns = []string{
 	FieldExpiresAt,
 	FieldGroupID,
 	FieldValidityDays,
+	FieldCurrencyID,
+	FieldCurrencyAmountUnits,
+	FieldCurrencyGroupID,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -164,6 +173,21 @@ func ByGroupID(opts ...sql.OrderTermOption) OrderOption {
 // ByValidityDays orders the results by the validity_days field.
 func ByValidityDays(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldValidityDays, opts...).ToFunc()
+}
+
+// ByCurrencyID orders the results by the currency_id field.
+func ByCurrencyID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCurrencyID, opts...).ToFunc()
+}
+
+// ByCurrencyAmountUnits orders the results by the currency_amount_units field.
+func ByCurrencyAmountUnits(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCurrencyAmountUnits, opts...).ToFunc()
+}
+
+// ByCurrencyGroupID orders the results by the currency_group_id field.
+func ByCurrencyGroupID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCurrencyGroupID, opts...).ToFunc()
 }
 
 // ByUserField orders the results by user field.

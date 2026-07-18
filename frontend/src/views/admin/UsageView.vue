@@ -1,6 +1,11 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
+      <div v-if="usageLogsError || usageStatsError || chartDataError || modelStatsError" class="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300" role="alert">
+        <Icon name="xCircle" size="sm" />
+        <span>{{ usageLogsError || usageStatsError || chartDataError || modelStatsError }}</span>
+        <button type="button" class="btn btn-secondary btn-sm" @click="refreshData">{{ t('misc.retry') }}</button>
+      </div>
       <UsageStatsCards :stats="usageStats" />
       <!-- Charts Section -->
       <div class="space-y-4">
@@ -121,6 +126,11 @@
         </UsageFilters>
 
         <div v-show="activeTab === 'usage'" class="overflow-hidden rounded-b-2xl">
+          <div v-if="usageLogsError" class="m-3 flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300" role="alert">
+            <Icon name="xCircle" size="sm" />
+            <span>{{ usageLogsError }}</span>
+            <button type="button" class="btn btn-secondary btn-sm" @click="loadLogs">{{ t('misc.retry') }}</button>
+          </div>
           <UsageTable
             flat
             :data="usageLogs"
@@ -136,6 +146,11 @@
           <Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
         </div>
         <div v-show="activeTab === 'errors'" class="overflow-hidden rounded-b-2xl">
+          <div v-if="errError" class="m-3 flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300" role="alert">
+            <Icon name="xCircle" size="sm" />
+            <span>{{ errError }}</span>
+            <button type="button" class="btn btn-secondary btn-sm" @click="loadAdminErrors">{{ t('misc.retry') }}</button>
+          </div>
           <OpsErrorLogTable
             flat
             :rows="errRows" :total="errTotal" :loading="errLoading"
@@ -188,7 +203,10 @@ import { saveAs } from 'file-saver'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'; import { adminAPI } from '@/api/admin'; import { adminUsageAPI } from '@/api/admin/usage'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
+import { useUrlQueryBindings, parseNumberQuery, parseStringQuery } from '@/composables/useUrlQueryBindings'
 import { formatReasoningEffort } from '@/utils/format'
+import { formatMultiplier } from '@/utils/formatters'
+import { extractApiErrorMessage } from '@/utils/apiError'
 import { resolveUsageRequestType, requestTypeToLegacyStream } from '@/utils/usageRequestType'
 import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination from '@/components/common/Pagination.vue'; import Select from '@/components/common/Select.vue'; import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
@@ -211,7 +229,11 @@ type DistributionMetric = 'tokens' | 'actual_cost'
 type EndpointSource = 'inbound' | 'upstream' | 'path'
 type ModelDistributionSource = 'requested' | 'upstream' | 'mapping'
 const route = useRoute()
-const usageStats = ref<AdminUsageStatsResponse | null>(null); const usageLogs = ref<AdminUsageLog[]>([]); const loading = ref(false); const exporting = ref(false)
+const usageStats = ref<AdminUsageStatsResponse | null>(null); const usageLogs = ref<AdminUsageLog[]>([]); const loading = ref(true); const exporting = ref(false)
+const usageLogsError = ref<string | null>(null)
+const usageStatsError = ref<string | null>(null)
+const chartDataError = ref<string | null>(null)
+const modelStatsError = ref<string | null>(null)
 const trendData = ref<TrendDataPoint[]>([]); const requestedModelStats = ref<ModelStat[]>([]); const upstreamModelStats = ref<ModelStat[]>([]); const mappingModelStats = ref<ModelStat[]>([]); const groupStats = ref<GroupStat[]>([]); const chartsLoading = ref(false); const modelStatsLoading = ref(false); const granularity = ref<'day' | 'hour'>('hour')
 const modelDistributionMetric = ref<DistributionMetric>('tokens')
 const modelDistributionSource = ref<ModelDistributionSource>('requested')
@@ -302,6 +324,20 @@ const sortState = reactive({
   sort_order: 'desc' as 'asc' | 'desc'
 })
 
+useUrlQueryBindings([
+  { key: 'start_date', get: () => startDate.value, set: (value: string) => { startDate.value = value; filters.value.start_date = value }, parse: parseStringQuery, omit: (value: string) => !value },
+  { key: 'end_date', get: () => endDate.value, set: (value: string) => { endDate.value = value; filters.value.end_date = value }, parse: parseStringQuery, omit: (value: string) => !value },
+  { key: 'user_id', get: () => filters.value.user_id, set: (value: number) => { filters.value = { ...filters.value, user_id: value } }, parse: parseNumberQuery, omit: (value: number | undefined) => !value },
+  { key: 'api_key_id', get: () => filters.value.api_key_id, set: (value: number) => { filters.value = { ...filters.value, api_key_id: value } }, parse: parseNumberQuery, omit: (value: number | undefined) => !value },
+  { key: 'account_id', get: () => filters.value.account_id, set: (value: number) => { filters.value = { ...filters.value, account_id: value } }, parse: parseNumberQuery, omit: (value: number | undefined) => !value },
+  { key: 'group_id', get: () => filters.value.group_id, set: (value: number) => { filters.value = { ...filters.value, group_id: value } }, parse: parseNumberQuery, omit: (value: number | undefined) => !value },
+  { key: 'model', get: () => filters.value.model || '', set: (value: string) => { filters.value = { ...filters.value, model: value } }, parse: parseStringQuery, omit: (value: string) => !value },
+  { key: 'page', get: () => pagination.page, set: (value: number) => { pagination.page = Math.max(1, Math.floor(value)) }, parse: parseNumberQuery, omit: (value: number) => value <= 1 },
+  { key: 'page_size', get: () => pagination.page_size, set: (value: number) => { pagination.page_size = Math.max(1, Math.floor(value)) }, parse: parseNumberQuery, omit: (value: number) => value === getPersistedPageSize() },
+  { key: 'sort_by', get: () => sortState.sort_by, set: (value: string) => { sortState.sort_by = value }, parse: parseStringQuery, omit: (value: string) => value === 'created_at' },
+  { key: 'sort_order', get: () => sortState.sort_order, set: (value: string) => { sortState.sort_order = value === 'asc' ? 'asc' : 'desc' }, parse: parseStringQuery, omit: (value: string) => value === 'desc' },
+])
+
 const getSingleQueryValue = (value: string | null | Array<string | null> | undefined): string | undefined => {
   if (Array.isArray(value)) return value.find((item): item is string => typeof item === 'string' && item.length > 0)
   return typeof value === 'string' && value.length > 0 ? value : undefined
@@ -366,18 +402,24 @@ const buildUsageListParams = (
 }
 
 const loadLogs = async () => {
-  abortController?.abort(); const c = new AbortController(); abortController = c; loading.value = true
+  abortController?.abort(); const c = new AbortController(); abortController = c; loading.value = true; usageLogsError.value = null
   try {
     const res = await adminAPI.usage.list(
       buildUsageListParams(pagination.page, pagination.page_size, false),
       { signal: c.signal }
     )
     if(!c.signal.aborted) { usageLogs.value = res.items; pagination.total = res.total }
-  } catch (error: any) { if(error?.name !== 'AbortError') console.error('Failed to load usage logs:', error) } finally { if(abortController === c) loading.value = false }
+  } catch (error: any) {
+    if (error?.name !== 'AbortError' && !c.signal.aborted) {
+      usageLogsError.value = extractApiErrorMessage(error, t('usage.failedToLoad'))
+      console.error('Failed to load usage logs:', error)
+    }
+  } finally { if(abortController === c) loading.value = false }
 }
 const loadStats = async (force = false) => {
   const seq = ++statsReqSeq
   endpointStatsLoading.value = true
+  usageStatsError.value = null
   try {
     const requestType = filters.value.request_type
     const legacyStream = requestType ? requestTypeToLegacyStream(requestType) : filters.value.stream
@@ -394,9 +436,7 @@ const loadStats = async (force = false) => {
   } catch (error) {
     if (seq !== statsReqSeq) return
     console.error('Failed to load usage stats:', error)
-    inboundEndpointStats.value = []
-    upstreamEndpointStats.value = []
-    endpointPathStats.value = []
+    usageStatsError.value = extractApiErrorMessage(error, t('usage.failedToLoad'))
   } finally {
     if (seq === statsReqSeq) endpointStatsLoading.value = false
   }
@@ -416,6 +456,7 @@ const loadModelStats = async (source: ModelDistributionSource, force = false) =>
 
   const seq = ++modelStatsReqSeq
   modelStatsLoading.value = true
+  modelStatsError.value = null
   try {
     const requestType = filters.value.request_type
     const legacyStream = requestType ? requestTypeToLegacyStream(requestType) : filters.value.stream
@@ -448,13 +489,7 @@ const loadModelStats = async (source: ModelDistributionSource, force = false) =>
   } catch (error) {
     if (seq !== modelStatsReqSeq) return
     console.error('Failed to load model stats:', error)
-    if (source === 'requested') {
-      requestedModelStats.value = []
-    } else if (source === 'upstream') {
-      upstreamModelStats.value = []
-    } else {
-      mappingModelStats.value = []
-    }
+    modelStatsError.value = extractApiErrorMessage(error, t('usage.failedToLoad'))
     loadedModelSources[source] = false
   } finally {
     if (seq === modelStatsReqSeq) modelStatsLoading.value = false
@@ -464,6 +499,7 @@ const loadModelStats = async (source: ModelDistributionSource, force = false) =>
 const loadChartData = async () => {
   const seq = ++chartReqSeq
   chartsLoading.value = true
+  chartDataError.value = null
   try {
     const requestType = filters.value.request_type
     const legacyStream = requestType ? requestTypeToLegacyStream(requestType) : filters.value.stream
@@ -488,7 +524,11 @@ const loadChartData = async () => {
     if (seq !== chartReqSeq) return
     trendData.value = snapshot.trend || []
     groupStats.value = snapshot.groups || []
-  } catch (error) { console.error('Failed to load chart data:', error) } finally { if (seq === chartReqSeq) chartsLoading.value = false }
+  } catch (error) {
+    if (seq !== chartReqSeq) return
+    chartDataError.value = extractApiErrorMessage(error, t('usage.failedToLoad'))
+    console.error('Failed to load chart data:', error)
+  } finally { if (seq === chartReqSeq) chartsLoading.value = false }
 }
 const applyFilters = () => {
   pagination.page = 1
@@ -577,7 +617,7 @@ const exportToExcel = async () => {
         log.input_tokens, log.output_tokens, log.cache_read_tokens, log.cache_creation_tokens,
         log.input_cost?.toFixed(6) || '0.000000', log.output_cost?.toFixed(6) || '0.000000',
         log.cache_read_cost?.toFixed(6) || '0.000000', log.cache_creation_cost?.toFixed(6) || '0.000000',
-        log.rate_multiplier?.toPrecision(4) || '1.00', (log.account_rate_multiplier ?? 1).toPrecision(4),
+        formatMultiplier(log.rate_multiplier ?? 1), formatMultiplier(log.account_rate_multiplier ?? 1),
         log.total_cost?.toFixed(6) || '0.000000', log.actual_cost?.toFixed(6) || '0.000000',
         ((log.account_stats_cost ?? log.total_cost) * (log.account_rate_multiplier ?? 1)).toFixed(6), log.first_token_ms ?? '', log.duration_ms,
         log.request_id || '', log.user_agent || '', log.ip_address || ''
@@ -758,9 +798,12 @@ const switchTab = (tab: DetailTab) => {
 // Error tab state
 const errRows = ref<OpsErrorLog[]>([])
 const errLoading = ref(false)
+const errError = ref<string | null>(null)
 const errPage = ref(1)
 const errPageSize = ref(20)
 const errTotal = ref(0)
+let errAbortController: AbortController | null = null
+let errRequestSequence = 0
 const errSortBy = ref('created_at')
 const errSortOrder = ref<'asc' | 'desc'>('desc')
 const showErrorModal = ref(false)
@@ -771,7 +814,12 @@ const toRFC3339 = (d: string | undefined, endOfDay = false): string | undefined 
   d ? new Date(d + (endOfDay ? 'T23:59:59.999' : 'T00:00:00')).toISOString() : undefined
 
 const loadAdminErrors = async () => {
+  errAbortController?.abort()
+  const controller = new AbortController()
+  errAbortController = controller
+  const currentSequence = ++errRequestSequence
   errLoading.value = true
+  errError.value = null
   try {
     const resp = await listErrorLogs({
       page: errPage.value,
@@ -789,14 +837,20 @@ const loadAdminErrors = async () => {
       status_codes: filters.value.status_code != null ? String(filters.value.status_code) : undefined,
       sort_by: errSortBy.value,
       sort_order: errSortOrder.value,
-    })
+    }, { signal: controller.signal })
+    if (controller.signal.aborted || currentSequence !== errRequestSequence) return
     errRows.value = resp.items
     errTotal.value = resp.total
   } catch (error) {
+    if (controller.signal.aborted || currentSequence !== errRequestSequence) return
     console.error('Failed to load admin errors:', error)
-    appStore.showError(t('usage.errors.failedToLoad'))
+    errError.value = extractApiErrorMessage(error, t('usage.errors.failedToLoad'))
+    appStore.showError(errError.value)
   } finally {
-    errLoading.value = false
+    if (errAbortController === controller) {
+      errLoading.value = false
+      errAbortController = null
+    }
   }
 }
 
@@ -831,7 +885,12 @@ onMounted(() => {
   loadSavedErrColumns()
   document.addEventListener('click', handleColumnClickOutside)
 })
-onUnmounted(() => { abortController?.abort(); exportAbortController?.abort(); document.removeEventListener('click', handleColumnClickOutside) })
+onUnmounted(() => {
+  abortController?.abort()
+  exportAbortController?.abort()
+  errAbortController?.abort()
+  document.removeEventListener('click', handleColumnClickOutside)
+})
 
 watch(modelDistributionSource, (source) => {
   void loadModelStats(source)

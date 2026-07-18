@@ -15,6 +15,64 @@ import {
 import { getAPIBaseURL } from './url'
 export { buildApiUrl, buildGatewayUrl } from './url'
 
+export interface ApiError {
+  status: number
+  code?: string | number
+  reason?: unknown
+  error?: unknown
+  message: string
+  metadata?: unknown
+  url?: string
+  retryable?: boolean
+  requestId?: string
+}
+
+export function isApiError(error: unknown): error is ApiError {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      'status' in error &&
+      'message' in error &&
+      typeof (error as { message?: unknown }).message === 'string'
+  )
+}
+
+const asRecord = (value: unknown): Record<string, unknown> => (
+  value && typeof value === 'object' ? value as Record<string, unknown> : {}
+)
+
+const firstMessage = (...values: unknown[]): string | undefined => {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return undefined
+}
+
+const buildApiError = (input: {
+  status: number
+  message?: unknown
+  code?: unknown
+  reason?: unknown
+  error?: unknown
+  metadata?: unknown
+  url?: string
+  retryable?: boolean
+  requestId?: string
+}): ApiError => {
+  const result: ApiError = {
+    status: input.status,
+    message: firstMessage(input.message, 'Unknown error') || 'Unknown error'
+  }
+  if (typeof input.code === 'string' || typeof input.code === 'number') result.code = input.code
+  if (input.reason !== undefined) result.reason = input.reason
+  if (input.error !== undefined) result.error = input.error
+  if (input.metadata !== undefined) result.metadata = input.metadata
+  if (input.url) result.url = input.url
+  if (input.retryable !== undefined) result.retryable = input.retryable
+  if (input.requestId) result.requestId = input.requestId
+  return result
+}
+
 // ==================== Axios Instance Configuration ====================
 
 export const apiClient: AxiosInstance = axios.create({
@@ -110,13 +168,18 @@ apiClient.interceptors.response.use(
       } else {
         // API error
         const resp = apiResponse as unknown as Record<string, unknown>
-        return Promise.reject({
+        return Promise.reject(buildApiError({
           status: response.status,
           code: apiResponse.code,
           message: apiResponse.message || 'Unknown error',
           reason: resp.reason,
           metadata: resp.metadata,
-        })
+          url: response.config.url,
+          retryable: response.status >= 500 || response.status === 429,
+          requestId: typeof response.headers?.['x-request-id'] === 'string'
+            ? response.headers['x-request-id']
+            : undefined
+        }))
       }
     }
     return response
@@ -128,7 +191,7 @@ apiClient.interceptors.response.use(
       return Promise.reject(error)
     }
 
-    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
+    const originalRequest = (error.config ?? {}) as InternalAxiosRequestConfig & { _retry?: boolean }
 
     // Handle common errors
     if (error.response) {
@@ -136,7 +199,21 @@ apiClient.interceptors.response.use(
       const url = String(error.config?.url || '')
 
       // Validate `data` shape to avoid HTML error pages breaking our error handling.
-      const apiData = (typeof data === 'object' && data !== null ? data : {}) as Record<string, any>
+      const apiData = asRecord(data)
+      const nestedData = asRecord(apiData.data)
+      const responseMessage = firstMessage(
+        apiData.message,
+        apiData.detail,
+        nestedData.message,
+        typeof apiData.error === 'string' ? apiData.error : undefined,
+        error.message
+      )
+      const responseCode = apiData.code ?? nestedData.code
+      const responseReason = apiData.reason ?? nestedData.reason
+      const responseMetadata = apiData.metadata ?? nestedData.metadata
+      const requestId = typeof error.response.headers?.['x-request-id'] === 'string'
+        ? error.response.headers['x-request-id']
+        : undefined
 
       // Ops monitoring disabled: treat as feature-flagged 404, and proactively redirect away
       // from ops pages to avoid broken UI states.
@@ -153,15 +230,17 @@ apiClient.interceptors.response.use(
         }
 
         if (window.location.pathname.startsWith('/admin/ops')) {
-          window.location.href = '/admin/settings'
+          window.dispatchEvent(new CustomEvent('ops-monitoring-route-required'))
         }
 
-        return Promise.reject({
+        return Promise.reject(buildApiError({
           status,
           code: 'OPS_DISABLED',
-          message: apiData.message || error.message,
-          url
-        })
+          message: responseMessage,
+          url,
+          metadata: responseMetadata,
+          requestId
+        }))
       }
 
       if (status === 423 && apiData.code === 'ADMIN_COMPLIANCE_ACK_REQUIRED') {
@@ -173,12 +252,14 @@ apiClient.interceptors.response.use(
           // ignore event failures
         }
 
-        return Promise.reject({
+        return Promise.reject(buildApiError({
           status,
-          code: apiData.code,
-          message: apiData.message || error.message,
-          metadata: apiData.metadata,
-        })
+          code: responseCode,
+          message: responseMessage,
+          metadata: responseMetadata,
+          url,
+          requestId
+        }))
       }
 
       // 401: Try to refresh the token if we have a refresh token
@@ -203,11 +284,13 @@ apiClient.interceptors.response.use(
                   resolve(apiClient(originalRequest))
                 } else {
                   // Refresh failed, reject with original error
-                  reject({
+                  reject(buildApiError({
                     status,
-                    code: apiData.code,
-                    message: apiData.message || apiData.detail || error.message
-                  })
+                    code: responseCode,
+                    message: responseMessage,
+                    url,
+                    requestId
+                  }))
                 }
               })
             })
@@ -267,14 +350,16 @@ apiClient.interceptors.response.use(
             sessionStorage.setItem('auth_expired', '1')
 
             if (!window.location.pathname.includes('/login')) {
-              window.location.href = '/login'
+              window.dispatchEvent(new CustomEvent('auth-expired'))
             }
 
-            return Promise.reject({
+            return Promise.reject(buildApiError({
               status: 401,
               code: 'TOKEN_REFRESH_FAILED',
-              message: 'Session expired. Please log in again.'
-            })
+              message: 'Session expired. Please log in again.',
+              url,
+              requestId
+            }))
           }
         }
 
@@ -298,26 +383,34 @@ apiClient.interceptors.response.use(
         }
         // Only redirect if not already on login page
         if (!window.location.pathname.includes('/login')) {
-          window.location.href = '/login'
+          window.dispatchEvent(new CustomEvent('auth-expired'))
         }
       }
 
       // Return structured error
-      return Promise.reject({
+      return Promise.reject(buildApiError({
         status,
-        code: apiData.code,
-        reason: apiData.reason,
+        code: responseCode,
+        reason: responseReason,
         error: apiData.error,
-        message: apiData.message || apiData.detail || error.message,
-        metadata: apiData.metadata,
-      })
+        message: responseMessage,
+        metadata: responseMetadata,
+        url,
+        retryable: status >= 500 || status === 408 || status === 425 || status === 429,
+        requestId
+      }))
     }
 
     // Network error
-    return Promise.reject({
+    return Promise.reject(buildApiError({
       status: 0,
-      message: 'Network error. Please check your connection.'
-    })
+      code: error.code,
+      message: error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
+        ? 'Request timed out. Please try again.'
+        : 'Network error. Please check your connection.',
+      url: String(error.config?.url || ''),
+      retryable: true
+    }))
   }
 )
 

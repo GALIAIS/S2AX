@@ -27,11 +27,18 @@
               class="w-40"
               @change="loadChannels"
             />
+            <SavedViewsControl
+              storage-key="admin-channels"
+              :state="savedViewState"
+              :disabled="loading"
+              @apply="applySavedView"
+            />
           </div>
 
           <!-- Right: Actions -->
           <div class="flex w-full flex-shrink-0 flex-wrap items-center justify-end gap-3 lg:w-auto">
             <button
+              type="button"
               @click="loadChannels"
               :disabled="loading"
               class="btn btn-secondary"
@@ -39,7 +46,7 @@
             >
               <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
             </button>
-            <button @click="openCreateDialog" class="btn btn-primary">
+            <button type="button" @click="openCreateDialog" class="btn btn-primary">
               <Icon name="plus" size="md" class="mr-2" />
               {{ t('admin.channels.createChannel', 'Create Channel') }}
             </button>
@@ -47,16 +54,57 @@
         </div>
       </template>
 
+      <div v-if="selectedChannelCount > 0" class="mb-4 flex flex-wrap items-center gap-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20" role="toolbar">
+        <span class="mr-auto text-sm font-medium text-primary-900 dark:text-primary-100">
+          {{ t('admin.channels.selectedCount', { count: selectedChannelCount }) }}
+        </span>
+        <button
+          type="button"
+          class="btn btn-danger btn-sm"
+          :disabled="bulkDeleting"
+          @click="showBulkDeleteDialog = true"
+        >
+          <Icon :name="bulkDeleting ? 'refresh' : 'trash'" size="sm" :class="{ 'animate-spin': bulkDeleting }" />
+          {{ t('admin.channels.bulkDelete') }}
+        </button>
+        <button type="button" class="btn btn-ghost btn-sm" :disabled="bulkDeleting" @click="clearSelectedChannels">
+          {{ t('common.clear') }}
+        </button>
+      </div>
+
       <template #table>
         <DataTable
           :columns="columns"
           :data="channels"
           :loading="loading"
+          :error="channelsError"
           :server-side-sort="true"
           default-sort-key="created_at"
           default-sort-order="desc"
           @sort="handleSort"
+          @retry="loadChannels"
         >
+          <template #header-select>
+            <input
+              type="checkbox"
+              :checked="allChannelsSelected"
+              :indeterminate="someChannelsSelected && !allChannelsSelected"
+              :aria-label="t('common.selectAll')"
+              @click.stop
+              @change="toggleAllChannels"
+            />
+          </template>
+
+          <template #cell-select="{ row }">
+            <input
+              type="checkbox"
+              :checked="selectedChannelIds.has(row.id)"
+              :aria-label="row.name"
+              @click.stop
+              @change="toggleChannelSelection(row.id)"
+            />
+          </template>
+
           <template #cell-name="{ value }">
             <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
           </template>
@@ -99,19 +147,18 @@
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
               <button
+                type="button"
                 @click="openEditDialog(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
                 <Icon name="edit" size="sm" />
                 <span class="text-xs">{{ t('common.edit', 'Edit') }}</span>
               </button>
-              <button
-                @click="handleDelete(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
-              >
-                <Icon name="trash" size="sm" />
-                <span class="text-xs">{{ t('common.delete', 'Delete') }}</span>
-              </button>
+              <RowActionMenu
+                :items="channelActionItems"
+                :aria-label="t('common.more')"
+                @select="(key) => handleChannelAction(key, row)"
+              />
             </div>
           </template>
 
@@ -313,7 +360,7 @@
                     <span :class="['font-medium', platformTextClass(group.platform)]">{{ group.name }}</span>
                     <span
                       :class="['rounded-full px-1 py-0 text-[10px]', platformBadgeLightClass(group.platform)]"
-                    >{{ group.rate_multiplier }}x</span>
+                    >{{ formatMultiplier(group.rate_multiplier) }}x</span>
                     <span class="text-[10px] text-gray-400">{{ group.account_count || 0 }}</span>
                     <span
                       v-if="isGroupInOtherChannel(group.id, section.platform)"
@@ -621,6 +668,17 @@
       @confirm="confirmDelete"
       @cancel="showDeleteDialog = false"
     />
+
+    <ConfirmDialog
+      :show="showBulkDeleteDialog"
+      :title="t('admin.channels.bulkDelete')"
+      :message="t('admin.channels.bulkDeleteConfirm', { count: selectedChannelCount })"
+      :confirm-text="t('common.delete')"
+      :cancel-text="t('common.cancel')"
+      :danger="true"
+      @confirm="confirmBulkDelete"
+      @cancel="showBulkDeleteDialog = false"
+    />
   </AppLayout>
 </template>
 
@@ -640,6 +698,8 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
+import SavedViewsControl from '@/components/common/SavedViewsControl.vue'
+import RowActionMenu, { type RowActionMenuItem } from '@/components/common/RowActionMenu.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -650,6 +710,8 @@ import Toggle from '@/components/common/Toggle.vue'
 import PricingEntryCard from '@/components/admin/channel/PricingEntryCard.vue'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useKeyedDebouncedSearch } from '@/composables/useKeyedDebouncedSearch'
+import { useUrlQueryBindings, parseNumberQuery, parseStringQuery } from '@/composables/useUrlQueryBindings'
+import { formatMultiplier } from '@/utils/formatters'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -690,6 +752,7 @@ interface PlatformSection {
 
 // ── Table columns ──
 const columns = computed<Column[]>(() => [
+  { key: 'select', label: '', sortable: false, class: 'w-10 text-center' },
   { key: 'name', label: t('admin.channels.columns.name', 'Name'), sortable: true },
   { key: 'description', label: t('admin.channels.columns.description', 'Description'), sortable: false },
   { key: 'status', label: t('admin.channels.columns.status', 'Status'), sortable: true },
@@ -718,7 +781,11 @@ const billingModelSourceOptions = computed(() => [
 
 // ── State ──
 const channels = ref<Channel[]>([])
-const loading = ref(false)
+const loading = ref(true)
+const channelsError = ref<string | null>(null)
+const selectedChannelIds = ref<Set<number>>(new Set())
+const showBulkDeleteDialog = ref(false)
+const bulkDeleting = ref(false)
 const searchQuery = ref('')
 const filters = reactive({ status: '' })
 const pagination = reactive({
@@ -730,6 +797,127 @@ const sortState = reactive({
   sort_by: 'created_at',
   sort_order: 'desc' as 'asc' | 'desc'
 })
+
+const channelActionItems = computed<RowActionMenuItem[]>(() => [
+  { key: 'delete', label: t('common.delete', 'Delete'), icon: 'trash', tone: 'danger' }
+])
+
+const selectedChannelCount = computed(() => selectedChannelIds.value.size)
+const allChannelsSelected = computed(() =>
+  channels.value.length > 0 && channels.value.every((channel) => selectedChannelIds.value.has(channel.id))
+)
+const someChannelsSelected = computed(() =>
+  channels.value.some((channel) => selectedChannelIds.value.has(channel.id))
+)
+
+function toggleChannelSelection(id: number): void {
+  const next = new Set(selectedChannelIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selectedChannelIds.value = next
+}
+
+function toggleAllChannels(): void {
+  if (allChannelsSelected.value) {
+    selectedChannelIds.value = new Set()
+    return
+  }
+  selectedChannelIds.value = new Set(channels.value.map((channel) => channel.id))
+}
+
+function clearSelectedChannels(): void {
+  selectedChannelIds.value = new Set()
+}
+
+async function confirmBulkDelete(): Promise<void> {
+  const ids = Array.from(selectedChannelIds.value)
+  if (ids.length === 0 || bulkDeleting.value) return
+
+  bulkDeleting.value = true
+  try {
+    const results = await Promise.allSettled(ids.map((id) => adminAPI.channels.remove(id)))
+    const success = results.filter((result) => result.status === 'fulfilled').length
+    const failed = results.length - success
+    if (failed === 0) {
+      appStore.showSuccess(t('admin.channels.bulkDeleteSuccess', { count: success }))
+    } else {
+      appStore.showError(t('admin.channels.bulkDeletePartial', { success, failed }))
+    }
+    showBulkDeleteDialog.value = false
+    clearSelectedChannels()
+    await loadChannels()
+  } finally {
+    bulkDeleting.value = false
+  }
+}
+
+const handleChannelAction = (key: string, channel: Channel) => {
+  if (key === 'delete') handleDelete(channel)
+}
+
+const savedViewState = computed<Record<string, unknown>>(() => ({
+  search: searchQuery.value,
+  status: filters.status,
+  page: pagination.page,
+  page_size: pagination.page_size,
+  sort_by: sortState.sort_by,
+  sort_order: sortState.sort_order
+}))
+
+const applySavedView = (state: Record<string, unknown>) => {
+  searchQuery.value = typeof state.search === 'string' ? state.search : ''
+  filters.status = typeof state.status === 'string' ? state.status : ''
+  pagination.page = Number.isFinite(Number(state.page)) ? Math.max(1, Number(state.page)) : 1
+  pagination.page_size = Number.isFinite(Number(state.page_size)) ? Math.max(1, Number(state.page_size)) : pagination.page_size
+  sortState.sort_by = typeof state.sort_by === 'string' ? state.sort_by : 'created_at'
+  sortState.sort_order = state.sort_order === 'asc' ? 'asc' : 'desc'
+  void loadChannels()
+}
+
+useUrlQueryBindings([
+  {
+    key: 'search',
+    get: () => searchQuery.value,
+    set: (value: string) => { searchQuery.value = value },
+    parse: parseStringQuery,
+    omit: (value: string) => !value
+  },
+  {
+    key: 'status',
+    get: () => filters.status,
+    set: (value: string) => { filters.status = value },
+    parse: parseStringQuery,
+    omit: (value: string) => !value
+  },
+  {
+    key: 'page',
+    get: () => pagination.page,
+    set: (value: number) => { pagination.page = Math.max(1, Math.floor(value)) },
+    parse: parseNumberQuery,
+    omit: (value: number) => value <= 1
+  },
+  {
+    key: 'page_size',
+    get: () => pagination.page_size,
+    set: (value: number) => { pagination.page_size = Math.max(1, Math.floor(value)) },
+    parse: parseNumberQuery,
+    omit: (value: number) => value === getPersistedPageSize()
+  },
+  {
+    key: 'sort_by',
+    get: () => sortState.sort_by,
+    set: (value: string) => { sortState.sort_by = value },
+    parse: parseStringQuery,
+    omit: (value: string) => !value || value === 'created_at'
+  },
+  {
+    key: 'sort_order',
+    get: () => sortState.sort_order,
+    set: (value: string) => { sortState.sort_order = value === 'asc' ? 'asc' : 'desc' },
+    parse: parseStringQuery,
+    omit: (value: string) => !value || value === 'desc'
+  }
+])
 
 // Dialog state
 const showDialog = ref(false)
@@ -1236,6 +1424,7 @@ async function loadChannels() {
   const ctrl = new AbortController()
   abortController = ctrl
   loading.value = true
+  channelsError.value = null
 
   try {
     const response = await adminAPI.channels.list(pagination.page, pagination.page_size, {
@@ -1247,11 +1436,15 @@ async function loadChannels() {
 
     if (ctrl.signal.aborted || abortController !== ctrl) return
     channels.value = response.items || []
+    selectedChannelIds.value = new Set(
+      Array.from(selectedChannelIds.value).filter((id) => channels.value.some((channel) => channel.id === id))
+    )
     pagination.total = response.total
   } catch (error: unknown) {
     const e = error as { name?: string; code?: string }
     if (e?.name === 'AbortError' || e?.code === 'ERR_CANCELED') return
-    appStore.showError(extractApiErrorMessage(error, t('admin.channels.loadError', 'Failed to load channels')))
+    channelsError.value = extractApiErrorMessage(error, t('admin.channels.loadError', 'Failed to load channels'))
+    appStore.showError(channelsError.value)
   } finally {
     if (abortController === ctrl) {
       loading.value = false

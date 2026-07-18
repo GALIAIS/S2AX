@@ -415,6 +415,26 @@ func TestRedactContentModerationSecrets_LongHexAndTokens(t *testing.T) {
 	require.Contains(t, out, "[已脱敏]")
 }
 
+func TestContentModerationBuildLog_SanitizesPersistedError(t *testing.T) {
+	svc := &ContentModerationService{}
+	log := svc.buildLog(
+		ContentModerationCheckInput{},
+		defaultContentModerationConfig(),
+		ContentModerationActionError,
+		false,
+		"",
+		0,
+		nil,
+		"",
+		nil,
+		nil,
+		"upstream rejected authorization: Bearer sk-proj-1234567890abcdef",
+	)
+
+	require.NotContains(t, log.Error, "sk-proj-1234567890abcdef")
+	require.Contains(t, log.Error, "[已脱敏]")
+}
+
 func TestContentModerationConfigNormalize_NonHitRetentionMaxThreeDays(t *testing.T) {
 	cfg := defaultContentModerationConfig()
 	cfg.NonHitRetentionDays = 30
@@ -533,6 +553,77 @@ func TestContentModerationCheck_KeywordsIgnoredInObserveMode(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, decision.Allowed, "observe mode must let the request through even on keyword hit")
 	require.Equal(t, ContentModerationActionAllow, decision.Action)
+}
+
+func TestContentModerationCheck_ObserveModeSkipsPreHashLookup(t *testing.T) {
+	cfg := defaultContentModerationConfig()
+	cfg.Enabled = true
+	cfg.Mode = ContentModerationModeObserve
+	cfg.PreHashCheckEnabled = true
+	rawCfg, err := json.Marshal(cfg)
+	require.NoError(t, err)
+
+	hashCache := &contentModerationTestHashCache{hasResult: true, hasResultUsed: true}
+	svc := NewContentModerationService(
+		&contentModerationTestSettingRepo{values: map[string]string{
+			SettingKeyRiskControlEnabled:      "true",
+			SettingKeyContentModerationConfig: string(rawCfg),
+		}},
+		&contentModerationTestRepo{},
+		hashCache,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+
+	decision, err := svc.Check(context.Background(), ContentModerationCheckInput{
+		Protocol: ContentModerationProtocolOpenAIChat,
+		Body:     []byte(`{"messages":[{"role":"user","content":"previously flagged input"}]}`),
+	})
+
+	require.NoError(t, err)
+	require.True(t, decision.Allowed)
+	require.False(t, decision.Blocked)
+	require.Empty(t, hashCache.snapshotChecked(), "observe mode must not consult the blocking hash set")
+}
+
+func TestContentModerationCheckSync_ObserveFlagHasNoEnforcementSideEffects(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(moderationAPIResponse{Results: []moderationAPIResult{{
+			CategoryScores: map[string]float64{"sexual": 0.99},
+		}}})
+	}))
+	defer server.Close()
+
+	cfg := defaultContentModerationConfig()
+	cfg.Enabled = true
+	cfg.Mode = ContentModerationModeObserve
+	cfg.BaseURL = server.URL
+	cfg.APIKeys = []string{"sk-test"}
+	cfg.AutoBanEnabled = true
+	cfg.BanThreshold = 1
+	cfg.EmailOnHit = true
+	content := ContentModerationInput{Text: "observe this flagged input"}
+	content.Normalize()
+	repo := &contentModerationTestRepo{}
+	hashCache := &contentModerationTestHashCache{}
+	userRepo := &contentModerationTestUserRepo{user: &User{ID: 1001, Role: RoleUser, Status: StatusActive}}
+	svc := NewContentModerationService(nil, repo, hashCache, nil, userRepo, nil, nil)
+	queueDelay := 1
+
+	decision := svc.checkSync(context.Background(), ContentModerationCheckInput{UserID: 1001}, cfg, content, content.Hash(), &queueDelay, false)
+
+	require.True(t, decision.Allowed)
+	require.True(t, decision.Flagged)
+	require.False(t, decision.Blocked)
+	require.Empty(t, hashCache.snapshotRecorded())
+	require.Empty(t, userRepo.updated)
+	logs := repo.snapshotLogs()
+	require.Len(t, logs, 1)
+	require.True(t, logs[0].Flagged)
+	require.Zero(t, logs[0].ViolationCount)
+	require.False(t, logs[0].AutoBanned)
 }
 
 func TestContentModerationCheck_KeywordOnlyStrategySkipsAPIOnMiss(t *testing.T) {
@@ -1007,6 +1098,7 @@ func TestContentModerationCheck_OpenAIResponsesRecordsNonHitForCodexPayload(t *t
 	cfg.BaseURL = server.URL
 	cfg.APIKeys = []string{"sk-test"}
 	cfg.RecordNonHits = true
+	cfg.ContextMessageLimit = 1
 	rawCfg, err := json.Marshal(cfg)
 	require.NoError(t, err)
 
@@ -1071,6 +1163,7 @@ func TestContentModerationCheck_PreBlockBlocksCodexResponsesLatestUserInput(t *t
 	cfg.APIKeys = []string{"sk-test"}
 	cfg.BlockStatus = http.StatusUnavailableForLegalReasons
 	cfg.BlockMessage = "内容审计测试阻断"
+	cfg.ContextMessageLimit = 1
 	rawCfg, err := json.Marshal(cfg)
 	require.NoError(t, err)
 
@@ -1703,7 +1796,7 @@ func TestContentModerationClearFlaggedInputHashesAndStatusCount(t *testing.T) {
 	require.Equal(t, int64(0), status.FlaggedHashCount)
 }
 
-func TestContentModerationCheck_AsyncFlaggedWritesRedisHashCache(t *testing.T) {
+func TestContentModerationCheck_ObserveAsyncFlaggedDoesNotWriteRedisHashCache(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(moderationAPIResponse{
 			Results: []moderationAPIResult{{
@@ -1742,8 +1835,10 @@ func TestContentModerationCheck_AsyncFlaggedWritesRedisHashCache(t *testing.T) {
 	}, cfg, ContentModerationInput{Text: "bad prompt"}, strings.Repeat("b", 64), contentModerationIntPtr(25), false)
 
 	require.False(t, decision.Blocked)
-	requireRecordedHashCount(t, hashCache, 1)
-	requireContentModerationLogCount(t, repo, 1)
+	require.Empty(t, hashCache.snapshotRecorded())
+	logs := requireContentModerationLogCount(t, repo, 1)
+	require.True(t, logs[0].Flagged)
+	require.Zero(t, logs[0].ViolationCount)
 }
 
 func TestBuildContentModerationAccountDisabledEmailBody_ContainsBanDetails(t *testing.T) {
@@ -1809,6 +1904,7 @@ func TestContentModerationUpdateConfig_CyberPolicyExcludeFromBanCount(t *testing
 	view, err := svc.GetConfig(context.Background())
 	require.NoError(t, err)
 	require.False(t, view.CyberPolicyExcludeFromBanCount, "默认必须计入封号计数")
+	require.Equal(t, ContentModerationDefaultThresholds(), view.DefaultThresholds)
 
 	// 指针式部分更新为 true
 	exclude := true

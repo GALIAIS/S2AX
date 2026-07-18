@@ -692,7 +692,7 @@
             id="bulk-edit-rate-multiplier"
             type="number"
             min="0"
-            step="0.01"
+            :step="RATE_MULTIPLIER_STEP"
             :disabled="!enableRateMultiplier"
             class="input"
             :class="!enableRateMultiplier && 'cursor-not-allowed opacity-50'"
@@ -1213,6 +1213,7 @@ import ProxySelector from '@/components/common/ProxySelector.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { RATE_MULTIPLIER_STEP } from '@/utils/formatters'
 import {
   buildModelMappingObject as buildModelMappingPayload,
   getPresetMappingsByPlatform

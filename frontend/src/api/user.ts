@@ -17,6 +17,7 @@ import type {
   UserAffiliateDetail,
   AffiliateTransferResponse,
   PlatformQuotasResponse,
+  FetchOptions,
 } from '@/types'
 
 /**
@@ -176,8 +177,10 @@ export async function startOAuthBinding(
   window.location.href = startURL
 }
 
-export async function getAffiliateDetail(): Promise<UserAffiliateDetail> {
-  const { data } = await apiClient.get<UserAffiliateDetail>('/user/aff')
+export async function getAffiliateDetail(options: { signal?: AbortSignal } = {}): Promise<UserAffiliateDetail> {
+  const { data } = await apiClient.get<UserAffiliateDetail>('/user/aff', {
+    signal: options.signal
+  })
   return data
 }
 
@@ -189,8 +192,10 @@ export async function transferAffiliateQuota(): Promise<AffiliateTransferRespons
 /**
  * 获取当前用户的平台限额 + 用量。
  */
-export async function getMyPlatformQuotas(): Promise<PlatformQuotasResponse> {
-  const { data } = await apiClient.get<PlatformQuotasResponse>('/user/platform-quotas')
+export async function getMyPlatformQuotas(options: FetchOptions = {}): Promise<PlatformQuotasResponse> {
+  const { data } = await apiClient.get<PlatformQuotasResponse>('/user/platform-quotas', {
+    signal: options.signal,
+  })
   return data
 }
 

@@ -13,7 +13,7 @@ import type {
   CreateOrderResult,
   PaymentOrder
 } from '@/types/payment'
-import type { BasePaginationResponse } from '@/types'
+import type { BasePaginationResponse, FetchOptions } from '@/types'
 
 export interface PublicOrderVerifyResult {
   out_trade_no: string
@@ -50,8 +50,11 @@ export const paymentAPI = {
   },
 
   /** Get current user's orders */
-  getMyOrders(params?: { page?: number; page_size?: number; status?: string }) {
-    return apiClient.get<BasePaginationResponse<PaymentOrder>>('/payment/orders/my', { params })
+  getMyOrders(params?: { page?: number; page_size?: number; status?: string }, options: FetchOptions = {}) {
+    return apiClient.get<BasePaginationResponse<PaymentOrder>>('/payment/orders/my', {
+      params,
+      signal: options.signal,
+    })
   },
 
   /** Get a specific order by ID */

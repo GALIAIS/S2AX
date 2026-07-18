@@ -32,6 +32,28 @@ func (r *announcementReadRepository) MarkRead(ctx context.Context, announcementI
 	return err
 }
 
+func (r *announcementReadRepository) MarkReadBatch(ctx context.Context, announcementIDs []int64, userID int64, readAt time.Time) error {
+	if len(announcementIDs) == 0 {
+		return nil
+	}
+	client := clientFromContext(ctx, r.client)
+	builders := make([]*dbent.AnnouncementReadCreate, 0, len(announcementIDs))
+	for _, announcementID := range announcementIDs {
+		builders = append(builders, client.AnnouncementRead.Create().
+			SetAnnouncementID(announcementID).
+			SetUserID(userID).
+			SetReadAt(readAt))
+	}
+	err := client.AnnouncementRead.CreateBulk(builders...).
+		OnConflictColumns(announcementread.FieldAnnouncementID, announcementread.FieldUserID).
+		DoNothing().
+		Exec(ctx)
+	if isSQLNoRowsError(err) {
+		return nil
+	}
+	return err
+}
+
 func (r *announcementReadRepository) GetReadMapByUser(ctx context.Context, userID int64, announcementIDs []int64) (map[int64]time.Time, error) {
 	if len(announcementIDs) == 0 {
 		return map[int64]time.Time{}, nil

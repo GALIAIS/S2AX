@@ -283,8 +283,8 @@ func ValidatePeakRateConfig(subscriptionType string, enabled bool, start, end st
 	if st >= en {
 		return errors.New("peak_end 必须大于 peak_start（不支持跨天区间，如 22:00-02:00）")
 	}
-	if multiplier < 0 {
-		return errors.New("peak_rate_multiplier 不能为负")
+	if err := ValidateRateMultiplier(multiplier, true); err != nil {
+		return fmt.Errorf("peak_rate_multiplier: %w", err)
 	}
 	return nil
 }

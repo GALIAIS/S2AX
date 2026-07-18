@@ -1,12 +1,20 @@
 export default {
   common: {
     loading: '加载中...',
+    refreshing: '正在刷新…',
     submitting: '提交中...',
     justNow: '刚刚',
     peakRateTooltip: '高峰倍率：{window}',
     peakRateImageNote: '；token 计费的图片 token 同样适用，图片按次计费不受高峰影响',
     save: '保存',
     saved: '保存成功',
+    savedViews: '已保存视图',
+    savedViewsPlaceholder: '选择已保存的筛选视图',
+    saveView: '保存当前视图',
+    savedViewName: '视图名称',
+    savedViewNamePlaceholder: '例如：活跃 Anthropic 账号',
+    savedViewDescription: '保存当前搜索、筛选、排序和分页设置，之后可快速恢复。',
+    deleteSavedView: '删除已保存视图',
     deleted: '删除成功',
     cancel: '取消',
     delete: '删除',
@@ -32,6 +40,7 @@ export default {
     all: '全部',
     none: '无',
     selectAll: '全选',
+    selectRow: '选择 {name}',
     noData: '暂无数据',
     expand: '展开',
     collapse: '收起',
@@ -43,7 +52,10 @@ export default {
     active: '启用',
     inactive: '禁用',
     more: '更多',
+    menu: '菜单',
+    userMenu: '用户菜单',
     close: '关闭',
+    clear: '清除',
     enabled: '已启用',
     disabled: '已禁用',
 	    total: '总计',
@@ -69,6 +81,7 @@ export default {
     saving: '保存中...',
     selectedCount: '（已选 {count} 个）',
     refresh: '刷新',
+    retry: '重试',
     autoRefresh: {
       title: '自动刷新',
       enable: '启用自动刷新',
@@ -164,6 +177,10 @@ export default {
     channels: '渠道管理',
     availableChannels: '可用渠道',
     subscriptions: '订阅管理',
+    virtualCurrency: '资产',
+    citySimulation: '城市模拟',
+    virtualCurrencies: '虚拟货币',
+    virtualCurrencyIntegrations: '货币接入',
     accounts: '账号管理',
     proxies: 'IP管理',
     redeemCodes: '兑换码',
@@ -194,6 +211,222 @@ export default {
     contentModeration: '内容审核',
     promptAudit: '提示词审计',
     auditLogs: '操作日志',
+  },
+
+  virtualCurrency: {
+    title: '我的资产',
+    description: '查看可用虚拟货币、适用分组和完整流水。',
+    refresh: '刷新资产',
+    available: '可用余额',
+    reserved: '冻结余额',
+    integerUnits: '整数单位',
+    precision: '{count} 位小数',
+    otherAssets: '其他资产',
+    assetCount: '{count} 种自定义资产',
+    groups: '可用分组',
+    noGroups: '暂无可用分组',
+    ledger: '资产流水',
+    viewLedger: '查看流水',
+    noWallets: '当前没有可用的虚拟货币。',
+    noLedger: '暂无流水记录。',
+    createdAt: '时间',
+    type: '类型',
+    amount: '变动',
+    balanceAfter: '余额',
+    source: '来源',
+    reason: '说明',
+    loading: '正在加载资产...',
+    loadFailed: '加载资产失败',
+    ledgerFailed: '加载流水失败',
+    earnHint: '资产可由兑换码、活动、任务、邀请或游戏服务发放。'
+  },
+
+  citySpatial: {
+    title: '城市空间模拟',
+    description: '查看真实 Overmap 与 Chunk 空间事实，逐层检查城市地形及其变更。',
+    classic: 'CLASSIC 空间终端',
+    loading: '正在装载城市空间',
+    loadingDescription: '校验规则集、Overmap 与可见 Chunk…',
+    viewportAria: '城市字符地图，可使用方向键移动、滚轮缩放、方括号切换高度层。',
+    empty: {
+      eyebrow: '尚未建立世界',
+      title: '创建第一座可验证城市',
+      description: '城市世界会绑定固定规则集、生成器和世界种子。地图只展示服务端已经生成并封账的空间事实。'
+    },
+    controls: {
+      world: '城市世界', selectWorld: '选择城市世界', viewMode: '视图模式',
+      overmap: '区域总图', localMap: '局部地图', zoomOut: '缩小', zoomIn: '放大',
+      refresh: '刷新真实空间状态', export: '导出当前 Chunk 文本', depth: '高度层',
+      layerUp: '上移一层', layerDown: '下移一层',
+      dragHint: '拖动地图或使用方向键平移', modeHint: '切换总图/局部图',
+      depthHint: '切换 Z 层', helpHint: '快捷键'
+    },
+    legend: { generated: '已生成', structure: '建筑与分区', selected: '当前选择', unloaded: '未装载' },
+    mapHeader: {
+      overmap: 'OVERMAP / 区域总图', local: 'LOCAL / 局部字符地图',
+      overmapSubtitle: '{count} 个服务端区域 Tile · {buildings} 栋建筑',
+      localSubtitle: '缓存 {count} 个真实 Chunk · 当前层 {buildings} 栋建筑'
+    },
+    live: {
+      overmap: '区域总图，当前 Chunk 坐标 {coordinate}',
+      local: '局部地图，当前坐标 {coordinate}，共 {layers} 个内容层'
+    },
+    inspector: {
+      eyebrow: '空间事实', title: '检查器', chunk: 'Chunk 坐标', district: '行政区',
+      terrain: '基础地形', variant: '生成变体', roadMask: '道路连接', riverMask: '河流连接',
+      state: '投影状态', generated: '已生成', notGenerated: '尚未生成', tileHash: 'Tile 哈希',
+      worldCoordinate: '世界坐标 X / Y / Z', localCoordinate: 'Chunk 内坐标', revision: '修订号',
+      generatedTick: '生成 Tick', cellStack: 'Cell 内容栈',
+      movementCost: '移动成本：{value}', payloadHash: 'Payload 哈希', none: '无',
+      parcels: '地块数', buildings: '建筑数', zoning: '用途分区',
+      floorSummary: '{count} 层 · 容量 {capacity}', landStack: '土地与建筑事实',
+      parcel: '地块', building: '建筑', area: '法定面积', version: '事实版本',
+      floors: '高度层', floorArea: '总建筑面积', occupancy: '占用 / 容量', quality: '质量',
+      allocations: '{count} 条住宅分配',
+      unavailableTitle: '此 Cell 尚无可用事实',
+      unavailableDescription: '目标 Chunk 尚未生成、尚未装载，或当前 Z 层没有空间数据。',
+      emptyTitle: '选择地图位置', emptyDescription: '点击区域 Tile 或局部 Cell 查看服务端返回的完整空间信息。'
+    },
+    development: {
+      eyebrow: '确定性开发事实', title: '开发项目',
+      description: '项目必须经过申请、审批与开工，并由城市 Tick 自动推进施工。',
+      unavailable: '当前世界尚未启用 F7.4 开发项目协议。',
+      tileProjects: '区域开发项目', adjustments: '完工调整',
+      addedFloors: '增加楼层', addedCapacity: '增加容量', qualityGain: '质量提升',
+      all: '全部', active: '进行中', newProject: '提交开发申请',
+      noProjects: '当前筛选条件下没有开发项目。', selectedBuilding: '目标建筑',
+      selectBuildingHint: '先在局部地图中选择一栋建筑，再提交项目。',
+      projectName: '项目名称', projectNamePlaceholder: '可选的项目名称',
+      projectType: '项目类型', developer: '开发者', targetFloors: '目标总楼层',
+      targetQuality: '目标质量', targetQualityHint: '以千分比输入，例如 1150 表示 115%。',
+      resources: '确定性需求预估', basicMaterial: '基础材料', capitalGoods: '资本品',
+      labor: '劳动力', duration: '工期', ticks: '{count} Tick',
+      serverAuthoritative: '最终成本、容量和工期由服务器绑定政策重新计算。',
+      progress: '施工进度', submittedAt: '提交 T{tick}', completionAt: '预计 T{tick}',
+      reviewNote: '审批说明', cancellationReason: '取消原因',
+      actionPrompt: '填写本次操作的事实说明。',
+      status: {
+        submitted: '待审批', approved: '已批准', rejected: '已驳回',
+        under_construction: '施工中', completed: '已完工', cancelled: '已取消'
+      },
+      type: { vertical_expansion: '垂直扩建', renovation: '整修改造' },
+      action: {
+        submit: '提交申请', approve: '批准', reject: '驳回', start: '开工',
+        cancel: '取消项目', confirm: '确认操作', processing: '正在封账…'
+      },
+      commandSuccess: '开发项目事实已通过城市 Tick 封账。',
+      commandFailed: '开发项目操作失败'
+    },
+    enterprise: {
+      eyebrow: '企业空间事实', title: '企业场所与迁址',
+      description: '查看企业在建筑中的真实占用，并通过城市 Tick 执行开设、扩缩、关闭和跨区迁址。',
+      unavailable: '当前世界尚未启用 F7.5 企业空间协议。',
+      noSites: '当前筛选条件下没有企业场所。', primary: '主要场所',
+      version: '事实版本 v{version}',
+      filter: {
+        firm: '企业', district: '行政区', type: '场所类型', status: '状态',
+        allFirms: '全部企业', allDistricts: '全部行政区', allTypes: '全部类型', allStatuses: '全部状态'
+      },
+      columns: { site: '场所', firm: '企业主体', location: '建筑与空间池', capacity: '占用单元', status: '状态' },
+      siteType: { headquarters: '总部', office: '办公室', production: '生产场所', warehouse: '仓库', retail: '零售点' },
+      status: { active: '运营中', closed: '已关闭' },
+      factType: { opened: '开设', resized: '调整占用', closed: '关闭', relocated: '跨区迁址' },
+      action: { open: '开设场所', resize: '调整占用', close: '关闭场所', relocate: '跨区迁址', confirm: '确认并提交' },
+      form: {
+        firm: '企业主体', siteType: '场所类型', pool: '目标空间池', name: '场所名称',
+        occupiedUnits: '目标占用单元', policyMinimum: '留空使用政策最低值', reason: '事实说明',
+        currentDistrict: '当前主要运营区', targetDistrict: '目标行政区',
+        headquartersPool: '新总部空间池', productionPool: '新生产空间池',
+        serverAuthoritative: '最低占用、用途兼容性、容量和必要场所约束由服务器绑定政策重新计算。',
+        relocationWarning: '迁址会原子关闭旧主要场所、建立新总部与生产场所，并守恒转移全部非零企业库存。'
+      },
+      facts: { title: '不可变企业空间事实', count: '{count} 条', multiSite: '多个主要场所', empty: '尚无企业空间变更。' },
+      inspector: { tileSites: '区域企业场所', poolCapacity: '空间池 {occupied} / {effective}' },
+      commandSuccess: '企业空间事实已通过城市 Tick 封账。',
+      commandFailed: '企业空间操作失败'
+    },
+    runtime: {
+      eyebrow: '开放世界运行时', title: '角色、成长与规则',
+      description: '角色状态、行为、职业迁移、规则案件与处罚均由服务端事实链确定。',
+      unavailable: '当前世界尚未启用开放世界运行时。', actorSelection: '选择角色', unknown: '未知定义',
+      processing: '正在封账…', perform: '执行', transition: '更换职业',
+      attributes: '角色属性', activities: '可执行行为', roles: '身份与职业', statuses: '状态与处罚',
+      cases: '规则案件', rules: '公开规则', facts: '角色事实记录',
+      serverAuthoritative: '数值由服务端计算', activitiesHint: '行为会改变属性并触发世界规则',
+      rolesHint: '满足属性、经历和身份条件后方可迁移',
+      statusSummary: '{stacks} 层 · 强度 {intensity}', noStatuses: '当前角色没有状态或处罚记录。',
+      noCases: '当前角色没有规则案件。', commandSuccess: '角色事实已通过城市 Tick 封账。',
+      commandFailed: '开放世界操作失败',
+      counters: { actors: '角色', facts: '事实', cases: '案件' },
+      creation: {
+        eyebrow: '角色初始化', title: '选择基础角色并进入世界', archetype: '基础角色',
+        capacity: '角色槽位 {current} / {maximum}', name: '角色名称',
+        namePlaceholder: '输入角色名称', confirm: '创建角色'
+      },
+      roleState: {
+        active: '当前生效', eligible: '已满足迁移条件', requirements: '尚未满足条件',
+        cooldown: '还需等待 {count} Tick'
+      }
+    },
+    landUse: { residential: '住宅', commercial: '商业', industrial: '工业' },
+    portalType: { entrance: '入口', stair: '楼梯' },
+    context: {
+      chunk: 'Chunk {x}, {y}, {z}', inspect: '进入局部地图', generate: '生成真实 Chunk',
+      generating: '正在生成…', generatedSuccess: 'Chunk 已通过城市 Tick 生成并装载',
+      generateFailed: 'Chunk 生成失败'
+    },
+    changes: {
+      eyebrow: '不可变事实流', title: '空间变更记录', count: '{count} 条',
+      empty: '当前世界还没有空间变更。'
+    },
+    createWorld: {
+      action: '新建城市', title: '创建城市世界', name: '城市名称',
+      namePlaceholder: '例如：港湾实验城', timezone: 'IANA 时区',
+      timezoneHint: '用于城市日历边界，例如 Asia/Shanghai。', creating: '正在创建…',
+      confirm: '创建并绑定规则集', success: '城市世界已创建', failed: '创建城市世界失败'
+    },
+    help: {
+      action: '查看快捷键', title: 'CLASSIC 地图操作', pan: '按 Cell 平移地图', zoom: '缩放字符尺寸',
+      depth: '切换当前 Z 层', surface: '返回地表 Z=0', mode: '切换区域总图与局部地图',
+      inspect: '进入选择的区域或检查 Cell', back: '返回区域总图', openHelp: '打开本帮助',
+      note: '焦点位于输入框时不会触发地图快捷键；所有快捷操作均有对应按钮。'
+    },
+    export: { unavailable: '请先选择一个已装载的 Chunk', success: 'Chunk 文本已导出' }
+  },
+
+  worldRuntime: {
+    actorTypes: { character: '角色' },
+    attributes: {
+      vitality: '体能', reasoning: '推理', coordination: '协调', communication: '沟通', discipline: '自律'
+    },
+    archetypes: {
+      residentGeneralist: '城市通才', residentGeneralistDescription: '属性均衡、拥有居民身份与学徒职业。',
+      urbanApprentice: '城市学徒', urbanApprenticeDescription: '擅长推理与自律，适合沿技术职业路径成长。',
+      fieldSurvivor: '野外生存者', fieldSurvivorDescription: '体能与协调突出，适合高强度行动与探索。'
+    },
+    roles: {
+      resident: '居民', residentDescription: '城市共同体中的基础身份。',
+      apprentice: '学徒', apprenticeDescription: '通过学习与实践积累职业能力。',
+      technician: '技术员', technicianDescription: '满足推理、协调和学徒经历后的技术职业。'
+    },
+    activities: {
+      technicalStudy: '技术研习', technicalStudyDescription: '提升推理、自律与相关经验。',
+      physicalTraining: '体能训练', physicalTrainingDescription: '提升体能、协调与相关经验。',
+      communityService: '社区服务', communityServiceDescription: '通过公共服务提升自律与沟通。',
+      disruptiveNoise: '制造扰民噪音', disruptiveNoiseDescription: '降低自律并触发公共秩序规则。'
+    },
+    statuses: {
+      civicWarning: '市民警告', civicWarningDescription: '公共秩序违规产生的限时警告。',
+      communityServiceOrder: '社区服务令', communityServiceOrderDescription: '重复违规后产生的社区服务处罚。'
+    },
+    rules: {
+      publicOrderNoise: '公共秩序：噪音', publicOrderNoiseDescription: '对扰民噪音按时间窗内累计次数分级处理。'
+    },
+    facts: {
+      actor_created: '角色创建', actor_activity_performed: '行为完成',
+      actor_role_transitioned: '职业迁移', actor_status_expired: '状态到期',
+      rule_consequence_applied: '规则后果执行'
+    }
   },
 
   // Auth

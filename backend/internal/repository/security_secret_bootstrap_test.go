@@ -64,6 +64,54 @@ func TestEnsureBootstrapSecretsGenerateAndPersistJWTSecret(t *testing.T) {
 	require.Equal(t, cfg.JWT.Secret, stored.Value)
 }
 
+func TestEnsureBootstrapSecretsGenerateAndPersistTOTPEncryptionKey(t *testing.T) {
+	client := newSecuritySecretTestClient(t)
+	cfg := &config.Config{}
+
+	err := ensureBootstrapSecrets(context.Background(), client, cfg)
+	require.NoError(t, err)
+	require.Len(t, cfg.Totp.EncryptionKey, 64)
+	require.False(t, cfg.Totp.EncryptionKeyConfigured)
+
+	stored, err := client.SecuritySecret.Query().Where(securitysecret.KeyEQ(securitySecretKeyTOTP)).Only(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, cfg.Totp.EncryptionKey, stored.Value)
+}
+
+func TestEnsureBootstrapSecretsReusesPersistedTOTPEncryptionKey(t *testing.T) {
+	client := newSecuritySecretTestClient(t)
+	persisted := strings.Repeat("ab", 32)
+	_, err := client.SecuritySecret.Create().SetKey(securitySecretKeyTOTP).SetValue(persisted).Save(context.Background())
+	require.NoError(t, err)
+	cfg := &config.Config{
+		Totp: config.TotpConfig{
+			EncryptionKey:           strings.Repeat("cd", 32),
+			EncryptionKeyConfigured: true,
+		},
+	}
+
+	err = ensureBootstrapSecrets(context.Background(), client, cfg)
+	require.NoError(t, err)
+	require.Equal(t, persisted, cfg.Totp.EncryptionKey)
+	require.False(t, cfg.Totp.EncryptionKeyConfigured, "a configured key mismatch must not satisfy the TOTP safety gate")
+}
+
+func TestEnsureBootstrapSecretsKeepsMatchingConfiguredTOTPKeyEnabled(t *testing.T) {
+	client := newSecuritySecretTestClient(t)
+	configured := strings.Repeat("ef", 32)
+	cfg := &config.Config{
+		Totp: config.TotpConfig{
+			EncryptionKey:           configured,
+			EncryptionKeyConfigured: true,
+		},
+	}
+
+	err := ensureBootstrapSecrets(context.Background(), client, cfg)
+	require.NoError(t, err)
+	require.Equal(t, configured, cfg.Totp.EncryptionKey)
+	require.True(t, cfg.Totp.EncryptionKeyConfigured)
+}
+
 func TestEnsureBootstrapSecretsLoadExistingJWTSecret(t *testing.T) {
 	client := newSecuritySecretTestClient(t)
 	_, err := client.SecuritySecret.Create().SetKey(securitySecretKeyJWT).SetValue("existing-jwt-secret-32bytes-long!!!!").Save(context.Background())

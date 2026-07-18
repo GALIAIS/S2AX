@@ -35,3 +35,7 @@ func redactContentModerationSecrets(text string) string {
 	}
 	return out
 }
+
+func sanitizeContentModerationError(text string) string {
+	return trimRunes(redactContentModerationSecrets(text), maxModerationExcerptRunes*4)
+}

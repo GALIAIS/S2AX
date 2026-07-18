@@ -136,10 +136,17 @@ docs/*
 !docs/PAYMENT_CN.md
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md
 !docs/ASYNC_IMAGE_TASKS.md
+!docs/RISK_CONTROL_ENTERPRISE_DESIGN_CN.md
+!docs/VIRTUAL_CURRENCY_SYSTEM_DESIGN_CN.md
+!docs/CITY_SIMULATION_GAME_DESIGN_CN.md
+!docs/CITY_SIMULATION_FOUNDATION_IMPLEMENTATION_CN.md
+!docs/CITY_SIMULATION_ENGINE_HARDENING_CN.md
+!docs/CITY_SIMULATION_*.md
 !docs/legal/
 !docs/legal/*.md
 .serena/
 .codex/
 frontend/coverage/
+frontend-next/
 aicodex
 output/

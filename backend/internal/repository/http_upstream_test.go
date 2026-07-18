@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -425,6 +426,18 @@ func TestApplyGrokCLIProxyHeaders(t *testing.T) {
 		require.Empty(t, req.Header.Get("X-XAI-Token-Auth"))
 		require.Equal(t, "sub2api-grok/1.0", req.Header.Get("User-Agent"))
 	})
+}
+
+func TestOpenAIHTTP2FallbackStateCacheBoundsEntries(t *testing.T) {
+	svc := &httpUpstreamService{}
+	for i := 0; i < openAIHTTP2FallbackMaxEntries+50; i++ {
+		svc.getOrCreateOpenAIHTTP2FallbackState("http://proxy-" + strconv.Itoa(i) + ":8080")
+	}
+
+	svc.openAIHTTP2FallbackMu.Lock()
+	count := len(svc.openAIHTTP2Fallbacks)
+	svc.openAIHTTP2FallbackMu.Unlock()
+	require.Equal(t, openAIHTTP2FallbackMaxEntries, count)
 }
 
 // HTTPUpstreamSuite HTTP 上游服务测试套件

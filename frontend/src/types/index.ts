@@ -940,7 +940,7 @@ export interface Account {
   } | null
   scheduler_scores?: AccountSchedulerGroupScore[] | null
   priority: number
-  rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
+  rate_multiplier?: number // Account billing multiplier (0 or >=0.000001; 0 means free)
   status: 'active' | 'inactive' | 'error'
   error_message: string | null
   last_used_at: string | null
@@ -1202,7 +1202,7 @@ export interface CreateAccountRequest {
   concurrency?: number
   load_factor?: number | null
   priority?: number
-  rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
+  rate_multiplier?: number // Account billing multiplier (0 or >=0.000001; 0 means free)
   group_ids?: number[]
   expires_at?: number | null
   auto_pause_on_expired?: boolean
@@ -1219,7 +1219,7 @@ export interface UpdateAccountRequest {
   concurrency?: number
   load_factor?: number | null
   priority?: number
-  rate_multiplier?: number // Account billing multiplier (>=0, 0 means free)
+  rate_multiplier?: number // Account billing multiplier (0 or >=0.000001; 0 means free)
   schedulable?: boolean
   status?: 'active' | 'inactive' | 'error'
   group_ids?: number[]
@@ -1392,7 +1392,7 @@ export interface CodexSessionImportResult {
 
 // ==================== Usage & Redeem Types ====================
 
-export type RedeemCodeType = 'balance' | 'concurrency' | 'subscription' | 'invitation'
+export type RedeemCodeType = 'balance' | 'concurrency' | 'subscription' | 'invitation' | 'virtual_currency'
 export type UsageRequestType = 'unknown' | 'sync' | 'stream' | 'ws_v2' | 'cyber'
 export type ImageSizeSource = 'output' | 'input' | 'default' | 'legacy'
 export type ImageSizeBreakdown = Record<string, number>
@@ -1529,6 +1529,9 @@ export interface RedeemCode {
   notes?: string
   group_id?: number | null // 订阅类型专用
   validity_days?: number // 订阅类型专用
+  currency_id?: number | null
+  currency_amount_units?: number | null
+  currency_group_id?: number | null
   user?: User
   group?: Group // 关联的分组
 }
@@ -1539,6 +1542,9 @@ export interface GenerateRedeemCodesRequest {
   value: number
   group_id?: number | null // 订阅类型专用
   validity_days?: number // 订阅类型专用
+  currency_code?: string
+  currency_amount_units?: number
+  currency_group_id?: number | null
   expires_at?: string | null
   expires_in_days?: number
 }

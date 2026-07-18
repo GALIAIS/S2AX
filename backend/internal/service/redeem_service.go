@@ -70,9 +70,12 @@ type RedeemCodeRepository interface {
 
 // GenerateCodesRequest 生成兑换码请求
 type GenerateCodesRequest struct {
-	Count int     `json:"count"`
-	Value float64 `json:"value"`
-	Type  string  `json:"type"`
+	Count               int     `json:"count"`
+	Value               float64 `json:"value"`
+	Type                string  `json:"type"`
+	CurrencyCode        string  `json:"currency_code"`
+	CurrencyAmountUnits int64   `json:"currency_amount_units"`
+	CurrencyGroupID     *int64  `json:"currency_group_id"`
 }
 
 // RedeemCodeResponse 兑换码响应
@@ -142,6 +145,7 @@ type RedeemService struct {
 	entClient            *dbent.Client
 	authCacheInvalidator APIKeyAuthCacheInvalidator
 	affiliateService     *AffiliateService
+	virtualCurrency      *VirtualCurrencyService
 }
 
 // NewRedeemService 创建兑换码服务实例
@@ -154,8 +158,13 @@ func NewRedeemService(
 	entClient *dbent.Client,
 	authCacheInvalidator APIKeyAuthCacheInvalidator,
 	affiliateService *AffiliateService,
+	virtualCurrencyServices ...*VirtualCurrencyService,
 ) *RedeemService {
 	redeemUserRepo, _ := userRepo.(RedeemUserAdjustmentRepository)
+	var virtualCurrency *VirtualCurrencyService
+	if len(virtualCurrencyServices) > 0 {
+		virtualCurrency = virtualCurrencyServices[0]
+	}
 	return &RedeemService{
 		redeemRepo:           redeemRepo,
 		userRepo:             userRepo,
@@ -166,6 +175,7 @@ func NewRedeemService(
 		entClient:            entClient,
 		authCacheInvalidator: authCacheInvalidator,
 		affiliateService:     affiliateService,
+		virtualCurrency:      virtualCurrency,
 	}
 }
 
@@ -198,7 +208,7 @@ func (s *RedeemService) GenerateCodes(ctx context.Context, req GenerateCodesRequ
 	}
 
 	// 邀请码类型不需要数值，其他类型需要非零值（支持负数用于退款）
-	if req.Type != RedeemTypeInvitation && req.Value == 0 {
+	if req.Type != RedeemTypeInvitation && req.Type != RedeemTypeVirtualCurrency && req.Value == 0 {
 		return nil, errors.New("value must not be zero")
 	}
 
@@ -211,6 +221,28 @@ func (s *RedeemService) GenerateCodes(ctx context.Context, req GenerateCodesRequ
 		codeType = RedeemTypeBalance
 	}
 
+	var currencyID *int64
+	if codeType == RedeemTypeVirtualCurrency {
+		if s.virtualCurrency == nil || strings.TrimSpace(req.CurrencyCode) == "" || req.CurrencyAmountUnits <= 0 || req.CurrencyGroupID == nil || *req.CurrencyGroupID <= 0 {
+			return nil, infraerrors.BadRequest("REDEEM_CODE_VIRTUAL_CURRENCY_INVALID", "currency code, amount, and group are required")
+		}
+		currency, err := s.virtualCurrency.GetCurrencyByCode(ctx, req.CurrencyCode)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := s.virtualCurrency.ValidateGrantPolicy(ctx, currency.ID, *req.CurrencyGroupID); err != nil {
+			return nil, err
+		}
+		if req.CurrencyAmountUnits > maxVirtualCurrencyMutationUnits {
+			return nil, ErrVirtualCurrencyInvalidInput
+		}
+		currencyID = &currency.ID
+		req.CurrencyCode = currency.Code
+		req.Value = 0
+	} else if req.CurrencyCode != "" || req.CurrencyAmountUnits != 0 || req.CurrencyGroupID != nil {
+		return nil, infraerrors.BadRequest("REDEEM_CODE_VIRTUAL_CURRENCY_FIELDS_FORBIDDEN", "virtual currency fields require virtual_currency type")
+	}
+
 	// 邀请码类型的 value 设为 0
 	value := req.Value
 	if codeType == RedeemTypeInvitation {
@@ -219,17 +251,25 @@ func (s *RedeemService) GenerateCodes(ctx context.Context, req GenerateCodesRequ
 
 	codes := make([]RedeemCode, 0, req.Count)
 	for i := 0; i < req.Count; i++ {
-		code, err := s.GenerateRandomCode()
+		codeString, err := s.GenerateRandomCode()
 		if err != nil {
 			return nil, fmt.Errorf("generate code: %w", err)
 		}
 
-		codes = append(codes, RedeemCode{
-			Code:   code,
+		code := RedeemCode{
+			Code:   codeString,
 			Type:   codeType,
 			Value:  value,
 			Status: StatusUnused,
-		})
+		}
+		if codeType == RedeemTypeVirtualCurrency {
+			amountUnits := req.CurrencyAmountUnits
+			code.CurrencyID = currencyID
+			code.CurrencyAmountUnits = &amountUnits
+			code.CurrencyGroupID = req.CurrencyGroupID
+			code.CurrencyCode = req.CurrencyCode
+		}
+		codes = append(codes, code)
 	}
 
 	// 批量插入
@@ -254,8 +294,15 @@ func (s *RedeemService) CreateCode(ctx context.Context, code *RedeemCode) error 
 	if code.Type == "" {
 		code.Type = RedeemTypeBalance
 	}
-	if code.Type != RedeemTypeInvitation && code.Value == 0 {
+	if code.Type != RedeemTypeInvitation && code.Type != RedeemTypeVirtualCurrency && code.Value == 0 {
 		return errors.New("value must not be zero")
+	}
+	if code.Type == RedeemTypeVirtualCurrency {
+		if err := s.prepareVirtualCurrencyCode(ctx, code); err != nil {
+			return err
+		}
+	} else if code.CurrencyID != nil || code.CurrencyAmountUnits != nil || code.CurrencyGroupID != nil || strings.TrimSpace(code.CurrencyCode) != "" {
+		return infraerrors.BadRequest("REDEEM_CODE_VIRTUAL_CURRENCY_FIELDS_FORBIDDEN", "virtual currency fields require virtual_currency type")
 	}
 	if code.Status == "" {
 		code.Status = StatusUnused
@@ -267,6 +314,31 @@ func (s *RedeemService) CreateCode(ctx context.Context, code *RedeemCode) error 
 	if err := s.redeemRepo.Create(ctx, code); err != nil {
 		return fmt.Errorf("create redeem code: %w", err)
 	}
+	return nil
+}
+
+func (s *RedeemService) prepareVirtualCurrencyCode(ctx context.Context, code *RedeemCode) error {
+	if s.virtualCurrency == nil || code.CurrencyAmountUnits == nil || *code.CurrencyAmountUnits <= 0 || code.CurrencyGroupID == nil || *code.CurrencyGroupID <= 0 {
+		return infraerrors.BadRequest("REDEEM_CODE_VIRTUAL_CURRENCY_INVALID", "currency amount and group are required")
+	}
+	if code.CurrencyID == nil {
+		if strings.TrimSpace(code.CurrencyCode) == "" {
+			return infraerrors.BadRequest("REDEEM_CODE_VIRTUAL_CURRENCY_INVALID", "currency code is required")
+		}
+		currency, err := s.virtualCurrency.GetCurrencyByCode(ctx, code.CurrencyCode)
+		if err != nil {
+			return err
+		}
+		code.CurrencyID = &currency.ID
+		code.CurrencyCode = currency.Code
+	}
+	if _, err := s.virtualCurrency.ValidateGrantPolicy(ctx, *code.CurrencyID, *code.CurrencyGroupID); err != nil {
+		return err
+	}
+	if *code.CurrencyAmountUnits > maxVirtualCurrencyMutationUnits {
+		return ErrVirtualCurrencyInvalidInput
+	}
+	code.Value = 0
 	return nil
 }
 
@@ -424,6 +496,10 @@ func (s *RedeemService) Redeem(ctx context.Context, userID int64, code string) (
 		if redeemCode.GroupID == nil {
 			return nil, infraerrors.BadRequest("REDEEM_CODE_INVALID", "invalid subscription redeem code: missing group_id")
 		}
+	case RedeemTypeVirtualCurrency:
+		if s.virtualCurrency == nil || redeemCode.CurrencyID == nil || redeemCode.CurrencyAmountUnits == nil || redeemCode.CurrencyGroupID == nil || *redeemCode.CurrencyAmountUnits <= 0 || *redeemCode.CurrencyGroupID <= 0 {
+			return nil, infraerrors.BadRequest("REDEEM_CODE_VIRTUAL_CURRENCY_INVALID", "invalid virtual currency redeem code")
+		}
 	default:
 		return nil, unsupportedRedeemTypeError(redeemCode.Type)
 	}
@@ -502,6 +578,22 @@ func (s *RedeemService) Redeem(ctx context.Context, userID int64, code string) (
 			if err != nil {
 				return nil, fmt.Errorf("assign or extend subscription: %w", err)
 			}
+		}
+
+	case RedeemTypeVirtualCurrency:
+		_, err := s.virtualCurrency.GrantByID(txCtx, *redeemCode.CurrencyID, VirtualCurrencyGrantInput{
+			UserID:            userID,
+			GroupID:           *redeemCode.CurrencyGroupID,
+			AmountUnits:       *redeemCode.CurrencyAmountUnits,
+			SourceType:        VirtualCurrencySourceRedeemCode,
+			SourceID:          redeemCode.Code,
+			IdempotencyKey:    fmt.Sprintf("redeem-code:%d", redeemCode.ID),
+			Reason:            redeemCode.Notes,
+			Metadata:          map[string]any{"redeem_code_id": redeemCode.ID, "redeem_code": redeemCode.Code},
+			RequireUserAccess: true,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("grant virtual currency: %w", err)
 		}
 
 	default:

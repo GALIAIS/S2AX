@@ -132,9 +132,11 @@ func (h *AccountHandler) ImportCodexSession(c *gin.Context) {
 		response.BadRequest(c, "priority must be >= 0")
 		return
 	}
-	if req.RateMultiplier != nil && *req.RateMultiplier < 0 {
-		response.BadRequest(c, "rate_multiplier must be >= 0")
-		return
+	if req.RateMultiplier != nil {
+		if err := service.ValidateRateMultiplier(*req.RateMultiplier, true); err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
 	}
 	if req.LoadFactor != nil && *req.LoadFactor > 10000 {
 		response.BadRequest(c, "load_factor must be <= 10000")
@@ -479,6 +481,17 @@ func flattenCodexImportValues(values []any) []any {
 			}
 			return
 		}
+		if obj, ok := value.(map[string]any); ok {
+			// GPTSession2CPAandSub2API emits the standard sub2api export envelope.
+			// Unwrap only its top-level accounts collection; nested account/session
+			// fields must remain intact for the normalizer below.
+			if accounts, ok := obj["accounts"].([]any); ok {
+				for _, account := range accounts {
+					appendValue(account)
+				}
+				return
+			}
+		}
 		out = append(out, value)
 	}
 	for _, value := range values {
@@ -501,6 +514,7 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 	case string:
 		item.AccessToken = strings.TrimSpace(raw)
 	case map[string]any:
+		item.Extra["import_source"] = codexImportSource(raw)
 		if agentIdentity, ok := firstCodexMap(raw, []string{"agent_identity"}, []string{"agentIdentity"}); ok || strings.EqualFold(firstCodexString(raw, []string{"auth_mode"}, []string{"authMode"}), service.OpenAIAuthModeAgentIdentity) {
 			if !ok {
 				agentIdentity = raw
@@ -541,6 +555,8 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 			[]string{"tokens", "accessToken"},
 			[]string{"access_token"},
 			[]string{"accessToken"},
+			[]string{"credentials", "access_token"},
+			[]string{"credentials", "accessToken"},
 			[]string{"token"},
 		)
 		item.RefreshToken = firstCodexString(raw,
@@ -548,14 +564,23 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 			[]string{"tokens", "refreshToken"},
 			[]string{"refresh_token"},
 			[]string{"refreshToken"},
+			[]string{"credentials", "refresh_token"},
+			[]string{"credentials", "refreshToken"},
 		)
 		item.IDToken = firstCodexString(raw,
 			[]string{"tokens", "id_token"},
 			[]string{"tokens", "idToken"},
 			[]string{"id_token"},
 			[]string{"idToken"},
+			[]string{"credentials", "id_token"},
+			[]string{"credentials", "idToken"},
 		)
-		item.Email = firstCodexString(raw, []string{"email"}, []string{"user", "email"})
+		item.Email = firstCodexString(raw,
+			[]string{"email"},
+			[]string{"user", "email"},
+			[]string{"credentials", "email"},
+			[]string{"extra", "email"},
+		)
 		item.AccountID = firstCodexString(raw,
 			[]string{"chatgpt_account_id"},
 			[]string{"chatgptAccountId"},
@@ -564,6 +589,10 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 			[]string{"account", "id"},
 			[]string{"account", "account_id"},
 			[]string{"account", "chatgpt_account_id"},
+			[]string{"credentials", "chatgpt_account_id"},
+			[]string{"credentials", "chatgptAccountId"},
+			[]string{"credentials", "account_id"},
+			[]string{"credentials", "accountId"},
 		)
 		item.UserID = firstCodexString(raw,
 			[]string{"chatgpt_user_id"},
@@ -571,20 +600,32 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 			[]string{"user_id"},
 			[]string{"userId"},
 			[]string{"user", "id"},
+			[]string{"credentials", "chatgpt_user_id"},
+			[]string{"credentials", "chatgptUserId"},
+			[]string{"credentials", "user_id"},
+			[]string{"credentials", "userId"},
 		)
 		item.PlanType = firstCodexString(raw,
 			[]string{"plan_type"},
 			[]string{"planType"},
 			[]string{"account", "plan_type"},
 			[]string{"account", "planType"},
+			[]string{"credentials", "plan_type"},
+			[]string{"credentials", "planType"},
 		)
 		item.Organization = firstCodexString(raw,
 			[]string{"organization_id"},
 			[]string{"organizationId"},
 			[]string{"org_id"},
 			[]string{"orgId"},
+			[]string{"credentials", "organization_id"},
+			[]string{"credentials", "organizationId"},
 		)
-		item.Name = firstCodexString(raw, []string{"name"}, []string{"user", "name"})
+		item.Name = firstCodexString(raw,
+			[]string{"name"},
+			[]string{"user", "name"},
+			[]string{"extra", "name"},
+		)
 		authProvider := firstCodexString(raw, []string{"auth_provider"}, []string{"authProvider"})
 		if authProvider != "" {
 			item.Extra["auth_provider"] = authProvider
@@ -601,6 +642,10 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 			[]string{"tokens", "expiresAt"},
 			[]string{"expires_at"},
 			[]string{"expiresAt"},
+			[]string{"expired"},
+			[]string{"credentials", "expires_at"},
+			[]string{"credentials", "expiresAt"},
+			[]string{"credentials", "expired"},
 		); ok {
 			if tokenExpiresAt.Unix() <= now.Unix()-codexImportClockSkewSeconds {
 				return nil, fmt.Errorf("access_token 已过期: %s", tokenExpiresAt.Format(time.RFC3339))
@@ -1094,6 +1139,19 @@ func looksLikeJSON(content string) bool {
 	default:
 		return false
 	}
+}
+
+func codexImportSource(raw map[string]any) string {
+	if strings.EqualFold(firstCodexString(raw, []string{"type"}), "codex") &&
+		firstCodexString(raw, []string{"access_token"}, []string{"accessToken"}) != "" {
+		return "cpa"
+	}
+	if strings.EqualFold(firstCodexString(raw, []string{"platform"}), service.PlatformOpenAI) &&
+		strings.EqualFold(firstCodexString(raw, []string{"type"}), service.AccountTypeOAuth) &&
+		firstCodexString(raw, []string{"credentials", "access_token"}, []string{"credentials", "accessToken"}) != "" {
+		return "sub2api_export"
+	}
+	return "codex_session"
 }
 
 func firstCodexString(obj map[string]any, paths ...[]string) string {

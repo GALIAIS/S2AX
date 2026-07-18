@@ -38,7 +38,14 @@
 
           <!-- Right: All action buttons -->
           <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
+            <SavedViewsControl
+              storage-key="admin-proxies"
+              :state="savedViewState"
+              :disabled="loading"
+              @apply="applySavedView"
+            />
             <button
+              type="button"
               @click="loadProxies"
               :disabled="loading"
               class="btn btn-secondary"
@@ -47,6 +54,7 @@
               <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
             </button>
             <button
+              type="button"
               @click="handleBatchTest"
               :disabled="batchTesting || loading"
               class="btn btn-secondary"
@@ -56,6 +64,7 @@
               {{ t('admin.proxies.testConnection') }}
             </button>
             <button
+              type="button"
               @click="handleBatchQualityCheck"
               :disabled="batchQualityChecking || loading"
               class="btn btn-secondary"
@@ -65,6 +74,7 @@
               {{ t('admin.proxies.batchQualityCheck') }}
             </button>
             <button
+              type="button"
               @click="openBatchDelete"
               :disabled="selectedCount === 0"
               class="btn btn-danger"
@@ -73,13 +83,13 @@
               <Icon name="trash" size="md" class="mr-2" />
               {{ t('admin.proxies.batchDeleteAction') }}
             </button>
-            <button @click="showImportData = true" class="btn btn-secondary">
+            <button type="button" @click="showImportData = true" class="btn btn-secondary">
               {{ t('admin.proxies.dataImport') }}
             </button>
-            <button @click="showExportDataDialog = true" class="btn btn-secondary">
+            <button type="button" @click="showExportDataDialog = true" class="btn btn-secondary">
               {{ selectedCount > 0 ? t('admin.proxies.dataExportSelected') : t('admin.proxies.dataExport') }}
             </button>
-            <button @click="showCreateModal = true" class="btn btn-primary">
+            <button type="button" @click="showCreateModal = true" class="btn btn-primary">
               <Icon name="plus" size="md" class="mr-2" />
               {{ t('admin.proxies.createProxy') }}
             </button>
@@ -93,16 +103,19 @@
           :columns="columns"
           :data="proxies"
           :loading="loading"
+          :error="proxiesError"
           :server-side-sort="true"
           default-sort-key="id"
           default-sort-order="desc"
           @sort="handleSort"
+          @retry="loadProxies"
         >
           <template #header-select>
             <input
               type="checkbox"
               class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500"
               :checked="allVisibleSelected"
+              :aria-label="t('common.selectAll')"
               @click.stop
               @change="toggleSelectAllVisible($event)"
             />
@@ -113,6 +126,7 @@
               type="checkbox"
               class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500"
               :checked="selectedProxyIds.has(row.id)"
+              :aria-label="t('common.selectRow', { name: row.name })"
               @click.stop
               @change="toggleSelectRow(row.id, $event)"
             />
@@ -153,6 +167,7 @@
                   <button
                     v-for="fmt in getCopyFormats(row)"
                     :key="fmt.label"
+                    type="button"
                     class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-gray-100 dark:hover:bg-dark-600"
                     @click.stop="copyFormat(fmt.value)"
                   >
@@ -270,6 +285,7 @@
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
               <button
+                type="button"
                 @click="handleTestConnection(row)"
                 :disabled="testingProxyIds.has(row.id)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-emerald-50 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-emerald-900/20 dark:hover:text-emerald-400"
@@ -298,47 +314,18 @@
                 <span class="text-xs">{{ t('admin.proxies.testConnection') }}</span>
               </button>
               <button
-                @click="handleQualityCheck(row)"
-                :disabled="qualityCheckingProxyIds.has(row.id)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
-              >
-                <svg
-                  v-if="qualityCheckingProxyIds.has(row.id)"
-                  class="h-4 w-4 animate-spin"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    class="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    stroke-width="4"
-                  ></circle>
-                  <path
-                    class="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  ></path>
-                </svg>
-                <Icon v-else name="shield" size="sm" />
-                <span class="text-xs">{{ t('admin.proxies.qualityCheck') }}</span>
-              </button>
-              <button
+                type="button"
                 @click="handleEdit(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
                 <Icon name="edit" size="sm" />
                 <span class="text-xs">{{ t('common.edit') }}</span>
               </button>
-              <button
-                @click="handleDelete(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
-              >
-                <Icon name="trash" size="sm" />
-                <span class="text-xs">{{ t('common.delete') }}</span>
-              </button>
+              <RowActionMenu
+                :items="proxyActionItems"
+                :aria-label="t('common.more')"
+                @select="(key) => handleProxyAction(key, row)"
+              />
             </div>
           </template>
 
@@ -909,7 +896,7 @@
       </div>
       <template #footer>
         <div class="flex justify-end">
-          <button @click="closeQualityReportDialog" class="btn btn-secondary">
+          <button type="button" @click="closeQualityReportDialog" class="btn btn-secondary">
             {{ t('common.close') }}
           </button>
         </div>
@@ -954,7 +941,7 @@
       </div>
       <template #footer>
         <div class="flex justify-end">
-          <button @click="closeAccountsModal" class="btn btn-secondary">
+          <button type="button" @click="closeAccountsModal" class="btn btn-secondary">
             {{ t('common.close') }}
           </button>
         </div>
@@ -974,6 +961,8 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
+import SavedViewsControl from '@/components/common/SavedViewsControl.vue'
+import RowActionMenu, { type RowActionMenuItem } from '@/components/common/RowActionMenu.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -986,6 +975,7 @@ import { useClipboard } from '@/composables/useClipboard'
 import { useSwipeSelect } from '@/composables/useSwipeSelect'
 import { useTableSelection } from '@/composables/useTableSelection'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
+import { useUrlQueryBindings, parseNumberQuery, parseStringQuery } from '@/composables/useUrlQueryBindings'
 import { formatDateTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 
@@ -1040,7 +1030,8 @@ const editStatusOptions = computed(() => [
 const proxies = ref<Proxy[]>([])
 const visiblePasswordIds = reactive(new Set<number>())
 const copyMenuProxyId = ref<number | null>(null)
-const loading = ref(false)
+const loading = ref(true)
+const proxiesError = ref<string | null>(null)
 const searchQuery = ref('')
 const filters = reactive({
   protocol: '',
@@ -1056,6 +1047,92 @@ const sortState = reactive({
   sort_by: 'id',
   sort_order: 'desc' as 'asc' | 'desc'
 })
+
+const proxyActionItems = computed<RowActionMenuItem[]>(() => [
+  { key: 'quality', label: t('admin.proxies.qualityCheck'), icon: 'shield' },
+  { key: 'delete', label: t('common.delete'), icon: 'trash', tone: 'danger' }
+])
+
+const handleProxyAction = (key: string, proxy: Proxy) => {
+  if (key === 'quality') {
+    void handleQualityCheck(proxy)
+  } else if (key === 'delete') {
+    handleDelete(proxy)
+  }
+}
+
+const savedViewState = computed<Record<string, unknown>>(() => ({
+  search: searchQuery.value,
+  protocol: filters.protocol,
+  status: filters.status,
+  page: pagination.page,
+  page_size: pagination.page_size,
+  sort_by: sortState.sort_by,
+  sort_order: sortState.sort_order
+}))
+
+const applySavedView = (state: Record<string, unknown>) => {
+  searchQuery.value = typeof state.search === 'string' ? state.search : ''
+  filters.protocol = typeof state.protocol === 'string' ? state.protocol : ''
+  filters.status = typeof state.status === 'string' ? state.status : ''
+  pagination.page = Number.isFinite(Number(state.page)) ? Math.max(1, Number(state.page)) : 1
+  pagination.page_size = Number.isFinite(Number(state.page_size)) ? Math.max(1, Number(state.page_size)) : pagination.page_size
+  sortState.sort_by = typeof state.sort_by === 'string' ? state.sort_by : 'id'
+  sortState.sort_order = state.sort_order === 'asc' ? 'asc' : 'desc'
+  void loadProxies()
+}
+
+useUrlQueryBindings([
+  {
+    key: 'search',
+    get: () => searchQuery.value,
+    set: (value: string) => { searchQuery.value = value },
+    parse: parseStringQuery,
+    omit: (value: string) => !value
+  },
+  {
+    key: 'protocol',
+    get: () => filters.protocol,
+    set: (value: string) => { filters.protocol = value },
+    parse: parseStringQuery,
+    omit: (value: string) => !value
+  },
+  {
+    key: 'status',
+    get: () => filters.status,
+    set: (value: string) => { filters.status = value },
+    parse: parseStringQuery,
+    omit: (value: string) => !value
+  },
+  {
+    key: 'page',
+    get: () => pagination.page,
+    set: (value: number) => { pagination.page = Math.max(1, Math.floor(value)) },
+    parse: parseNumberQuery,
+    omit: (value: number) => value <= 1
+  },
+  {
+    key: 'page_size',
+    get: () => pagination.page_size,
+    set: (value: number) => { pagination.page_size = Math.max(1, Math.floor(value)) },
+    parse: parseNumberQuery,
+    omit: (value: number) => value === getPersistedPageSize()
+  },
+  {
+    key: 'sort_by',
+    get: () => sortState.sort_by,
+    set: (value: string) => { sortState.sort_by = value },
+    parse: parseStringQuery,
+    omit: (value: string) => !value || value === 'id'
+  },
+  {
+    key: 'sort_order',
+    get: () => sortState.sort_order,
+    set: (value: string) => { sortState.sort_order = value === 'asc' ? 'asc' : 'desc' },
+    parse: parseStringQuery,
+    omit: (value: string) => !value || value === 'desc'
+  }
+])
 
 const showCreateModal = ref(false)
 const createPasswordVisible = ref(false)
@@ -1194,6 +1271,7 @@ const loadProxies = async () => {
   const currentAbortController = new AbortController()
   abortController = currentAbortController
   loading.value = true
+  proxiesError.value = null
   try {
     const response = await adminAPI.proxies.list(
       pagination.page,
@@ -1211,7 +1289,8 @@ const loadProxies = async () => {
     if (isAbortError(error)) {
       return
     }
-    appStore.showError(t('admin.proxies.failedToLoad'))
+    proxiesError.value = t('admin.proxies.failedToLoad')
+    appStore.showError(proxiesError.value)
     console.error('Error loading proxies:', error)
   } finally {
     if (abortController === currentAbortController) {
