@@ -98,6 +98,28 @@ func TestAccountAllocationFiltersGloballyLeasedAccountsWithoutGroupContext(t *te
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestListUserAssignmentsDerivesUsageTotalsFromStoredTokenColumns(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(`COUNT\(ul\.id\),\s*COALESCE\(SUM\(\s*ul\.input_tokens\s*\+\s*ul\.output_tokens\s*\+\s*ul\.cache_creation_tokens\s*\+\s*ul\.cache_read_tokens\s*\),\s*0\)`).
+		WithArgs(int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "policy_id", "group_id", "group_name", "platform", "account_type", "concurrency", "account_status", "schedulable", "rate_limit_reset_at", "assigned_at", "request_count", "total_tokens",
+		}).AddRow(
+			int64(91), int64(12), int64(4), "demo", "openai", "oauth", 3, StatusActive, true, nil, time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC), int64(8), int64(1234),
+		))
+
+	svc := NewAccountAllocationService(db, nil)
+	items, err := svc.ListUserAssignments(context.Background(), 7)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, int64(8), items[0].Usage.RequestCount)
+	require.Equal(t, int64(1234), items[0].Usage.TotalTokens)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestAccountAllocationAssignmentScannerSupportsDeletedAccountHistory(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)

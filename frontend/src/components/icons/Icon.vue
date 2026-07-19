@@ -6,12 +6,23 @@
     stroke="currentColor"
     :stroke-width="strokeWidth"
   >
-    <path stroke-linecap="round" stroke-linejoin="round" :d="iconPath" />
+    <circle
+      v-if="isLoadingSpinner()"
+      cx="12"
+      cy="12"
+      r="9"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2.5"
+      stroke-linecap="round"
+      stroke-dasharray="42 15"
+    />
+    <path v-else stroke-linecap="round" stroke-linejoin="round" :d="iconPath" />
   </svg>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, useAttrs } from 'vue'
 
 const props = withDefaults(defineProps<{
   name: keyof typeof icons
@@ -21,6 +32,8 @@ const props = withDefaults(defineProps<{
   size: 'md',
   strokeWidth: 1.5
 })
+
+const attrs = useAttrs()
 
 const icons = {
   // Actions
@@ -134,6 +147,23 @@ const icons = {
 } as const
 
 const iconPath = computed(() => icons[props.name])
+
+function isLoadingSpinner() {
+  return classIncludes(attrs.class, 'animate-spin')
+}
+
+function classIncludes(value: unknown, className: string): boolean {
+  if (typeof value === 'string') {
+    return value.split(/\s+/).includes(className)
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => classIncludes(item, className))
+  }
+  if (value && typeof value === 'object') {
+    return Boolean((value as Record<string, unknown>)[className])
+  }
+  return false
+}
 
 const sizeClass = computed(() => ({
   xs: 'h-3 w-3',

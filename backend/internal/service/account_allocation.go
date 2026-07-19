@@ -799,7 +799,9 @@ func (s *AccountAllocationService) ListUserAssignments(ctx context.Context, user
 			aa.id, aa.policy_id, p.group_id, g.name, COALESCE(g.platform, ''), COALESCE(a.type, ''),
 			COALESCE(a.concurrency, 0), COALESCE(a.status, 'removed'), COALESCE(a.schedulable, FALSE),
 			a.rate_limit_reset_at, aa.assigned_at,
-			COUNT(ul.id), COALESCE(SUM(ul.total_tokens), 0)
+			COUNT(ul.id), COALESCE(SUM(
+				ul.input_tokens + ul.output_tokens + ul.cache_creation_tokens + ul.cache_read_tokens
+			), 0)
 		FROM account_allocation_assignments aa
 		JOIN account_allocation_policies p ON p.id = aa.policy_id
 		JOIN groups g ON g.id = p.group_id
