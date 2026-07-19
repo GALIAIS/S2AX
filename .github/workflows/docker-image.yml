@@ -55,6 +55,11 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
+          # Buildx provenance attestations are published as a second OCI
+          # manifest. GHCR renders that manifest as an `unknown/unknown`
+          # package entry, which is noise for this single-platform image.
+          provenance: false
+          sbom: false
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
           build-args: |

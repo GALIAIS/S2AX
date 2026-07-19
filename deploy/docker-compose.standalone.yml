@@ -12,7 +12,7 @@
 
 services:
   sub2api:
-    image: ghcr.io/galiais/sub2api:latest
+    image: ${SUB2API_IMAGE:-ghcr.io/galiais/s2ax:edge}
     container_name: sub2api
     restart: unless-stopped
     ulimits:
