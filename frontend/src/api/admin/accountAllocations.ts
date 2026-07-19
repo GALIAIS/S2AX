@@ -136,6 +136,11 @@ export async function update(id: number, input: AccountAllocationPolicyUpdate): 
   return data
 }
 
+export async function remove(id: number): Promise<{ message: string }> {
+  const { data } = await apiClient.delete<{ message: string }>(`/admin/account-allocations/policies/${id}`)
+  return data
+}
+
 export async function setStatus(id: number, enabled: boolean): Promise<AccountAllocationPolicy> {
   const { data } = await apiClient.post<AccountAllocationPolicy>(`/admin/account-allocations/policies/${id}/status`, { enabled })
   return data
@@ -189,6 +194,7 @@ const accountAllocationsAPI = {
   getById,
   create,
   update,
+  remove,
   setStatus,
   reconcile,
   listAssignments,

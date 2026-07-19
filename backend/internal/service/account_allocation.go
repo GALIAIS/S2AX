@@ -378,12 +378,56 @@ func (s *AccountAllocationService) SetPolicyStatus(ctx context.Context, policyID
 	return s.GetPolicy(ctx, policyID)
 }
 
+// DeletePolicy releases live leases and hides the policy from normal control
+// plane queries. Assignment and event history remains immutable for audit.
+func (s *AccountAllocationService) DeletePolicy(ctx context.Context, policyID, actorUserID int64) error {
+	if policyID <= 0 {
+		return ErrAccountAllocationPolicyNotFound
+	}
+	if s == nil || s.db == nil {
+		return fmt.Errorf("account allocation database is unavailable")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin account allocation policy deletion: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := loadAccountAllocationPolicyForUpdate(ctx, tx, policyID, false); err != nil {
+		return err
+	}
+	actorID := nullablePositiveID(actorUserID)
+	assignmentIDs, err := releaseActiveAssignmentsForPolicy(ctx, tx, policyID, "policy_deleted")
+	if err != nil {
+		return err
+	}
+	for _, assignmentID := range assignmentIDs {
+		if err := insertAccountAllocationEvent(ctx, tx, policyID, &assignmentID, "assignment_released", actorID, map[string]any{"reason": "policy_deleted"}); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE account_allocation_policies
+		SET status = $2, deleted_at = NOW(), last_reconciled_at = NOW(), updated_at = NOW()
+		WHERE id = $1 AND deleted_at IS NULL`, policyID, accountAllocationPolicyDisabled); err != nil {
+		return fmt.Errorf("delete account allocation policy: %w", err)
+	}
+	if err := insertAccountAllocationEvent(ctx, tx, policyID, nil, "policy_deleted", actorID, map[string]any{"released_assignments": len(assignmentIDs)}); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit account allocation policy deletion: %w", err)
+	}
+	return nil
+}
+
 func (s *AccountAllocationService) GetPolicy(ctx context.Context, policyID int64) (*AccountAllocationPolicy, error) {
 	if policyID <= 0 || s == nil || s.db == nil {
 		return nil, ErrAccountAllocationPolicyNotFound
 	}
 	row := s.db.QueryRowContext(ctx, accountAllocationPolicySelect+`
-		WHERE p.id = $1
+		WHERE p.id = $1 AND p.deleted_at IS NULL
 		GROUP BY p.id, u.id, g.id`, policyID)
 	policy, err := scanAccountAllocationPolicy(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -405,7 +449,7 @@ func (s *AccountAllocationService) ListPolicies(ctx context.Context, filter Acco
 	if pageSize < 1 || pageSize > 200 {
 		pageSize = 20
 	}
-	clauses := []string{"1 = 1"}
+	clauses := []string{"p.deleted_at IS NULL"}
 	args := make([]any, 0, 3)
 	if filter.UserID != nil && *filter.UserID > 0 {
 		args = append(args, *filter.UserID)
@@ -968,7 +1012,7 @@ func (s *AccountAllocationService) hasActivePolicy(ctx context.Context, userID, 
 	err := s.db.QueryRowContext(ctx, `
 		SELECT EXISTS(
 			SELECT 1 FROM account_allocation_policies
-			WHERE user_id = $1 AND group_id = $2 AND status = 'active'
+			WHERE user_id = $1 AND group_id = $2 AND status = 'active' AND deleted_at IS NULL
 		)`, userID, groupID).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("check account allocation policy: %w", err)
@@ -990,7 +1034,7 @@ func (s *AccountAllocationService) activeAssignmentOwners(ctx context.Context, a
 		SELECT aa.account_id, p.user_id, aa.group_id
 		FROM account_allocation_assignments aa
 		JOIN account_allocation_policies p ON p.id = aa.policy_id
-		WHERE aa.status = 'active' AND p.status = 'active'
+		WHERE aa.status = 'active' AND p.status = 'active' AND p.deleted_at IS NULL
 			AND aa.account_id = ANY($1)`, pq.Array(accountIDs))
 	if err != nil {
 		return nil, fmt.Errorf("load account allocation owners: %w", err)
@@ -1060,7 +1104,7 @@ type accountAllocationPolicyLock struct {
 func loadAccountAllocationPolicyForUpdate(ctx context.Context, tx *sql.Tx, policyID int64, skipLocked bool) (accountAllocationPolicyLock, error) {
 	query := `
 		SELECT id, user_id, group_id, desired_count, auto_replenish, replace_on_401, replace_on_429, status
-		FROM account_allocation_policies WHERE id = $1 FOR UPDATE`
+		FROM account_allocation_policies WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`
 	if skipLocked {
 		query += " SKIP LOCKED"
 	}

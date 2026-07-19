@@ -71,7 +71,7 @@ func (s *AccountAllocationService) ReconcileAll(ctx context.Context) ([]AccountA
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id
 		FROM account_allocation_policies
-		WHERE status = $1 AND auto_replenish = TRUE AND desired_count > 0
+		WHERE status = $1 AND auto_replenish = TRUE AND desired_count > 0 AND deleted_at IS NULL
 		ORDER BY last_reconciled_at NULLS FIRST, id ASC
 		LIMIT $2`, accountAllocationPolicyActive, s.policyBatchSize)
 	if err != nil {
@@ -206,7 +206,7 @@ func lockAccountAllocationPolicyForReconcile(ctx context.Context, tx *sql.Tx, po
 	}
 
 	var exists bool
-	if existsErr := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM account_allocation_policies WHERE id = $1)`, policyID).Scan(&exists); existsErr != nil {
+	if existsErr := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM account_allocation_policies WHERE id = $1 AND deleted_at IS NULL)`, policyID).Scan(&exists); existsErr != nil {
 		return accountAllocationPolicyLock{}, false, fmt.Errorf("check account allocation policy after lock miss: %w", existsErr)
 	}
 	if exists {

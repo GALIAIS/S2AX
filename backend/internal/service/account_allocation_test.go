@@ -165,7 +165,7 @@ func TestAccountAllocationEnableRejectsSoftDeletedReferenceBeforePolicyUpdate(t 
 	t.Cleanup(func() { _ = db.Close() })
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, user_id, group_id, desired_count, auto_replenish, replace_on_401, replace_on_429, status FROM account_allocation_policies WHERE id = $1 FOR UPDATE")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, user_id, group_id, desired_count, auto_replenish, replace_on_401, replace_on_429, status FROM account_allocation_policies WHERE id = $1 AND deleted_at IS NULL FOR UPDATE")).
 		WithArgs(int64(9)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "user_id", "group_id", "desired_count", "auto_replenish", "replace_on_401", "replace_on_429", "status",
@@ -179,6 +179,36 @@ func TestAccountAllocationEnableRejectsSoftDeletedReferenceBeforePolicyUpdate(t 
 	_, err = svc.SetPolicyStatus(context.Background(), 9, true, 1)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "active target user not found")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestAccountAllocationDeletePolicyReleasesLeasesAndKeepsAuditHistory(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT id, user_id, group_id, desired_count").
+		WithArgs(int64(9)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "user_id", "group_id", "desired_count", "auto_replenish", "replace_on_401", "replace_on_429", "status",
+		}).AddRow(int64(9), int64(7), int64(4), 2, true, true, true, accountAllocationPolicyActive))
+	mock.ExpectQuery("UPDATE account_allocation_assignments").
+		WithArgs(int64(9), accountAllocationAssignmentGone, "policy_deleted", accountAllocationAssignmentLive).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(31)))
+	mock.ExpectExec("INSERT INTO account_allocation_events").
+		WithArgs(int64(9), int64(31), "assignment_released", int64(1), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("UPDATE account_allocation_policies").
+		WithArgs(int64(9), accountAllocationPolicyDisabled).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("INSERT INTO account_allocation_events").
+		WithArgs(int64(9), nil, "policy_deleted", int64(1), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(2, 1))
+	mock.ExpectCommit()
+
+	svc := NewAccountAllocationService(db, nil)
+	require.NoError(t, svc.DeletePolicy(context.Background(), 9, 1))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

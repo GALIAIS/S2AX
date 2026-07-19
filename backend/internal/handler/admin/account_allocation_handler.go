@@ -168,6 +168,28 @@ func (h *AccountAllocationHandler) UpdatePolicy(c *gin.Context) {
 	response.Success(c, policy)
 }
 
+// DeletePolicy DELETE /api/v1/admin/account-allocations/policies/:id
+func (h *AccountAllocationHandler) DeletePolicy(c *gin.Context) {
+	if h == nil || h.service == nil {
+		response.InternalError(c, "Account allocation service unavailable")
+		return
+	}
+	policyID, ok := parsePositivePathID(c, "id")
+	if !ok {
+		return
+	}
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok || subject.UserID <= 0 {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	if err := h.service.DeletePolicy(c.Request.Context(), policyID, subject.UserID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"message": "deleted"})
+}
+
 // SetPolicyStatus POST /api/v1/admin/account-allocations/policies/:id/status
 func (h *AccountAllocationHandler) SetPolicyStatus(c *gin.Context) {
 	if h == nil || h.service == nil {

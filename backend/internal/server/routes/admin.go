@@ -411,6 +411,7 @@ func registerAccountAllocationRoutes(admin *gin.RouterGroup, h *handler.Handlers
 		allocations.POST("/policies", h.Admin.AccountAllocation.CreatePolicy)
 		allocations.GET("/policies/:id", h.Admin.AccountAllocation.GetPolicy)
 		allocations.PUT("/policies/:id", h.Admin.AccountAllocation.UpdatePolicy)
+		allocations.DELETE("/policies/:id", h.Admin.AccountAllocation.DeletePolicy)
 		allocations.POST("/policies/:id/status", h.Admin.AccountAllocation.SetPolicyStatus)
 		allocations.POST("/policies/:id/reconcile", h.Admin.AccountAllocation.ReconcilePolicy)
 		allocations.GET("/policies/:id/assignments", h.Admin.AccountAllocation.ListAssignments)

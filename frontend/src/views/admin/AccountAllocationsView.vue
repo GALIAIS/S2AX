@@ -220,11 +220,12 @@
           <div class="mt-4 flex flex-col gap-3 sm:flex-row">
             <Select
               v-model="selectedCandidateID"
+              class="min-w-0 flex-1"
               :options="candidateOptions"
               :placeholder="selectedPolicy.status === 'active' ? t('admin.accountAllocations.selectCandidate') : t('admin.accountAllocations.policyDisabled')"
               :empty-text="t('admin.accountAllocations.noCandidates')"
               :disabled="selectedPolicy.status !== 'active' || detailsLoading"
-              searchable
+              :searchable="candidateOptions.length > 0"
             />
             <button type="button" class="btn btn-primary shrink-0" :disabled="!selectedCandidateID || assigning || selectedPolicy.status !== 'active'" @click="assignCandidate">
               <Icon name="plus" size="sm" />
@@ -277,6 +278,16 @@
       :danger="statusTarget?.status === 'active'"
       @confirm="togglePolicyStatus"
       @cancel="statusTarget = null"
+    />
+
+    <ConfirmDialog
+      :show="Boolean(deleteTarget)"
+      :title="t('admin.accountAllocations.deletePolicy')"
+      :message="t('admin.accountAllocations.deleteConfirm')"
+      :confirm-text="t('common.delete')"
+      danger
+      @confirm="deletePolicy"
+      @cancel="deleteTarget = null"
     />
 
     <ConfirmDialog
@@ -346,6 +357,7 @@ const reconcilingPolicyID = ref<number | null>(null)
 const editingPolicy = ref<AccountAllocationPolicy | null>(null)
 const selectedPolicy = ref<AccountAllocationPolicy | null>(null)
 const statusTarget = ref<AccountAllocationPolicy | null>(null)
+const deleteTarget = ref<AccountAllocationPolicy | null>(null)
 const releaseTarget = ref<AccountAllocationAssignment | null>(null)
 const assignments = ref<AccountAllocationAssignment[]>([])
 const candidates = ref<AccountAllocationCandidate[]>([])
@@ -412,7 +424,8 @@ const policyActionItems = (policy: AccountAllocationPolicy): RowActionMenuItem[]
     label: policy.status === 'active' ? t('admin.accountAllocations.disable') : t('admin.accountAllocations.enable'),
     icon: 'checkCircle',
     tone: policy.status === 'active' ? 'warning' : 'default'
-  }
+  },
+  { key: 'delete', label: t('common.delete'), icon: 'trash', tone: 'danger' }
 ]
 
 const handlePolicyAction = (key: string, policy: AccountAllocationPolicy) => {
@@ -420,6 +433,7 @@ const handlePolicyAction = (key: string, policy: AccountAllocationPolicy) => {
   else if (key === 'reconcile') void reconcilePolicy(policy)
   else if (key === 'edit') openEditDialog(policy)
   else if (key === 'toggle') statusTarget.value = policy
+  else if (key === 'delete') deleteTarget.value = policy
 }
 
 const loadReferences = async () => {
@@ -669,6 +683,32 @@ const togglePolicyStatus = async () => {
     if (selectedPolicy.value?.id === updated.id) await loadDetails(updated)
   } catch (error: unknown) {
     appStore.showError(extractApiErrorMessage(error, t('admin.accountAllocations.statusFailed')))
+  }
+}
+
+const deletePolicy = async () => {
+  if (!deleteTarget.value) return
+  const target = deleteTarget.value
+  deleteTarget.value = null
+  try {
+    await adminAPI.accountAllocations.remove(target.id)
+    if (selectedPolicy.value?.id === target.id) {
+      showDetailsDialog.value = false
+      selectedPolicy.value = null
+      assignments.value = []
+      candidates.value = []
+      events.value = []
+      eventsTotal.value = 0
+    }
+    if (editingPolicy.value?.id === target.id) {
+      showEditDialog.value = false
+      editingPolicy.value = null
+    }
+    if (policies.value.length === 1 && pagination.page > 1) pagination.page -= 1
+    appStore.showSuccess(t('admin.accountAllocations.deleted'))
+    await loadPolicies()
+  } catch (error: unknown) {
+    appStore.showError(extractApiErrorMessage(error, t('admin.accountAllocations.deleteFailed')))
   }
 }
 
