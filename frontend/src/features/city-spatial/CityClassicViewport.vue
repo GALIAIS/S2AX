@@ -31,9 +31,10 @@ let classicViewportInstance = 0
 </script>
 
 <script setup lang="ts">
+import 'pixi.js/unsafe-eval'
 import { Application, BitmapFont, BitmapText, Container, Graphics } from 'pixi.js'
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { CityOvermapTile } from '@/api/citySpatial'
+import type { CityNavigationPath, CityOvermapTile } from '@/api/citySpatial'
 import {
   cityLandUseColor,
   chunkKey,
@@ -57,6 +58,7 @@ const props = withDefaults(defineProps<{
   selectedTile?: CityOvermapTile | null
   generatedChunkKeys?: ReadonlySet<string>
   glyphCharacters?: string
+  navigationPath?: CityNavigationPath | null
   busy?: boolean
   viewportLabel: string
 }>(), {
@@ -64,6 +66,7 @@ const props = withDefaults(defineProps<{
   selectedTile: null,
   generatedChunkKeys: () => new Set<string>(),
   glyphCharacters: '',
+  navigationPath: null,
   busy: false
 })
 
@@ -147,7 +150,10 @@ function addGlyph(
     text: glyph,
     style: {
       fontFamily: fontName,
-      fontSize: Math.max(8, Math.floor(size * 0.78)),
+      // Match a terminal's compact glyph cell rather than treating map cells
+      // like icon tiles. The 8 px zoom remains readable without glyphs
+      // spilling into neighbouring cells.
+      fontSize: Math.max(7, Math.floor(size * 0.9)),
       fill: color
     }
   })
@@ -184,6 +190,27 @@ function renderLocalScene(layer: Container, scene: ClassicLocalScene): void {
     backgrounds.set(cell.background, items)
   }
   addBackgroundGroups(layer, backgrounds)
+
+  const visibleZ = scene.cells.find(Boolean)?.z
+  if (props.navigationPath?.reachable && visibleZ !== undefined) {
+    const route = new Graphics()
+    for (const step of props.navigationPath.steps) {
+      if (step.coordinate.z !== visibleZ) continue
+      const column = step.coordinate.x - scene.startWorldX
+      const row = step.coordinate.y - scene.startWorldY
+      if (column < 0 || column >= scene.columns || row < 0 || row >= scene.rows) continue
+      const inset = Math.max(2, Math.floor(scene.cellSize * 0.12))
+      route
+        .rect(
+          column * scene.cellSize + inset,
+          row * scene.cellSize + inset,
+          scene.cellSize - inset * 2,
+          scene.cellSize - inset * 2
+        )
+        .fill({ color: '#5aa2ff', alpha: 0.22 })
+    }
+    layer.addChild(route)
+  }
 
   for (const cell of scene.cells) {
     if (!cell) continue
@@ -448,7 +475,7 @@ function handleKeyDown(event: KeyboardEvent): void {
 }
 
 watch(
-  () => [props.scene, props.selectedCoordinate, props.selectedTile, props.generatedChunkKeys],
+  () => [props.scene, props.selectedCoordinate, props.selectedTile, props.generatedChunkKeys, props.navigationPath],
   scheduleRender,
   { flush: 'post' }
 )

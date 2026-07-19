@@ -1,10 +1,14 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
+	"reflect"
+	"sort"
 )
 
 type worldRuntimeRecoveryIdentity struct {
@@ -71,7 +75,10 @@ func replayWorldRuntimeFacts(
 	}
 	for _, fact := range facts {
 		if fact.ActorCode == nil || (fact.FactType != WorldRuntimeFactActivityPerformed &&
-			fact.FactType != WorldRuntimeFactRoleTransitioned && fact.FactType != WorldRuntimeFactStatusExpired) {
+			fact.FactType != WorldRuntimeFactRoleTransitioned && fact.FactType != WorldRuntimeFactStatusExpired &&
+			fact.FactType != WorldRuntimeFactLocationMoved && fact.FactType != WorldRuntimeFactControlGranted &&
+			fact.FactType != WorldRuntimeFactControlRevoked && fact.FactType != WorldRuntimeFactPortalStateChanged &&
+			!isWorldNavigationIntentFact(fact.FactType)) {
 			continue
 		}
 		index := findWorldRuntimeActor(runtime.Actors, *fact.ActorCode)
@@ -80,6 +87,38 @@ func replayWorldRuntimeFacts(
 		}
 		runtime.Actors[index].UpdatedTick = tick
 		runtime.Actors[index].Version++
+	}
+	if runtime.Locations != nil {
+		sort.SliceStable(*runtime.Locations, func(left, right int) bool {
+			return (*runtime.Locations)[left].ActorCode < (*runtime.Locations)[right].ActorCode
+		})
+	}
+	if runtime.ControlGrants != nil {
+		sort.SliceStable(*runtime.ControlGrants, func(left, right int) bool {
+			leftGrant, rightGrant := (*runtime.ControlGrants)[left], (*runtime.ControlGrants)[right]
+			if leftGrant.ActorCode != rightGrant.ActorCode {
+				return leftGrant.ActorCode < rightGrant.ActorCode
+			}
+			if leftGrant.Capability != rightGrant.Capability {
+				return leftGrant.Capability < rightGrant.Capability
+			}
+			if leftGrant.GrantedTick != rightGrant.GrantedTick {
+				return leftGrant.GrantedTick < rightGrant.GrantedTick
+			}
+			return leftGrant.Code < rightGrant.Code
+		})
+	}
+	if runtime.PortalStates != nil {
+		sort.SliceStable(*runtime.PortalStates, func(left, right int) bool {
+			leftState, rightState := (*runtime.PortalStates)[left], (*runtime.PortalStates)[right]
+			if leftState.BuildingCode != rightState.BuildingCode {
+				return leftState.BuildingCode < rightState.BuildingCode
+			}
+			return leftState.PortalCode < rightState.PortalCode
+		})
+	}
+	if runtime.NavigationIntents != nil {
+		sortWorldNavigationIntents(*runtime.NavigationIntents)
 	}
 	runtime.RuleCases = append(runtime.RuleCases, cases...)
 	runtime.Profile.ActorCount = int64(len(runtime.Actors))
@@ -91,19 +130,28 @@ func replayWorldRuntimeFacts(
 }
 
 func replayWorldRuntimeEffect(runtime *worldRuntimeHashState, effect WorldEffectOperation) error {
-	if runtime == nil || effect.TargetActorCode == nil || effect.TargetKey == nil ||
+	portalEffect := effect.EffectType == WorldRuntimeEffectPortalStateSet ||
+		effect.EffectType == WorldRuntimeEffectPortalAccessSet
+	if runtime == nil || (!portalEffect && effect.TargetActorCode == nil) || effect.TargetKey == nil ||
 		effect.BeforeUnits == nil || effect.DeltaUnits == nil || effect.AfterUnits == nil ||
 		*effect.BeforeUnits+*effect.DeltaUnits != *effect.AfterUnits {
 		return fmt.Errorf("effect envelope is incomplete")
 	}
-	if findWorldRuntimeActor(runtime.Actors, *effect.TargetActorCode) < 0 {
+	if effect.TargetActorCode != nil && findWorldRuntimeActor(runtime.Actors, *effect.TargetActorCode) < 0 {
 		return fmt.Errorf("effect target actor does not exist")
 	}
 	var payload struct {
-		SchemaVersion  int                  `json:"schema_version"`
-		AttributeAfter *WorldActorAttribute `json:"attribute_after,omitempty"`
-		RoleAfter      *WorldActorRole      `json:"role_after,omitempty"`
-		StatusAfter    *WorldActorStatus    `json:"status_after,omitempty"`
+		SchemaVersion          int                         `json:"schema_version"`
+		AttributeAfter         *WorldActorAttribute        `json:"attribute_after,omitempty"`
+		RoleAfter              *WorldActorRole             `json:"role_after,omitempty"`
+		StatusAfter            *WorldActorStatus           `json:"status_after,omitempty"`
+		LocationBefore         *WorldActorLocation         `json:"location_before,omitempty"`
+		LocationAfter          *WorldActorLocation         `json:"location_after,omitempty"`
+		ControlGrantAfter      *WorldActorControlGrant     `json:"control_grant_after,omitempty"`
+		PortalBefore           *WorldPortalState           `json:"portal_before,omitempty"`
+		PortalAfter            *WorldPortalState           `json:"portal_after,omitempty"`
+		NavigationIntentBefore *WorldActorNavigationIntent `json:"navigation_intent_before,omitempty"`
+		NavigationIntentAfter  *WorldActorNavigationIntent `json:"navigation_intent_after,omitempty"`
 	}
 	if err := json.Unmarshal(effect.Payload, &payload); err != nil || payload.SchemaVersion != 1 {
 		return fmt.Errorf("invalid effect payload")
@@ -192,10 +240,246 @@ func replayWorldRuntimeEffect(runtime *worldRuntimeHashState, effect WorldEffect
 		} else {
 			runtime.Statuses[index] = *payload.StatusAfter
 		}
+	case WorldRuntimeEffectLocationSet:
+		if runtime.Locations == nil || effect.ExecutorVersion != worldRuntimeSpatialControlVersion ||
+			payload.LocationAfter == nil || payload.LocationAfter.ActorCode != *effect.TargetActorCode ||
+			*effect.TargetKey != "position" || payload.LocationAfter.Version != *effect.AfterUnits {
+			return fmt.Errorf("location effect payload mismatch")
+		}
+		index := findWorldRuntimeLocation(*runtime.Locations, *effect.TargetActorCode)
+		if index < 0 {
+			if payload.LocationBefore != nil || *effect.BeforeUnits != 0 || payload.LocationAfter.Version != 1 {
+				return fmt.Errorf("location effect before state mismatch")
+			}
+			*runtime.Locations = append(*runtime.Locations, *payload.LocationAfter)
+		} else {
+			before := (*runtime.Locations)[index]
+			if payload.LocationBefore == nil || !reflect.DeepEqual(before, *payload.LocationBefore) ||
+				before.Version != *effect.BeforeUnits || payload.LocationAfter.Version != before.Version+1 {
+				return fmt.Errorf("location effect before state mismatch")
+			}
+			(*runtime.Locations)[index] = *payload.LocationAfter
+		}
+	case WorldRuntimeEffectControlGrant, WorldRuntimeEffectControlRevoke:
+		if runtime.ControlGrants == nil || effect.ExecutorVersion != worldRuntimeSpatialControlVersion ||
+			payload.ControlGrantAfter == nil || payload.ControlGrantAfter.ActorCode != *effect.TargetActorCode ||
+			payload.ControlGrantAfter.Capability != *effect.TargetKey {
+			return fmt.Errorf("control effect payload mismatch")
+		}
+		grant := *payload.ControlGrantAfter
+		index := findWorldRuntimeControlGrant(*runtime.ControlGrants, grant.Code)
+		if effect.EffectType == WorldRuntimeEffectControlGrant {
+			if index >= 0 || grant.Status != "active" || grant.Version != 1 ||
+				*effect.BeforeUnits != 0 || *effect.AfterUnits != 1 {
+				return fmt.Errorf("control grant before state mismatch")
+			}
+			*runtime.ControlGrants = append(*runtime.ControlGrants, grant)
+		} else {
+			if index < 0 || (*runtime.ControlGrants)[index].Status != "active" ||
+				grant.Status != "revoked" || grant.Version != (*runtime.ControlGrants)[index].Version+1 ||
+				*effect.BeforeUnits != 1 || *effect.AfterUnits != 0 {
+				return fmt.Errorf("control revoke before state mismatch")
+			}
+			(*runtime.ControlGrants)[index] = grant
+		}
+	case WorldRuntimeEffectPortalStateSet, WorldRuntimeEffectPortalAccessSet:
+		if runtime.PortalStates == nil || effect.ExecutorVersion != worldRuntimePortalAccessVersion ||
+			payload.PortalBefore == nil || payload.PortalAfter == nil ||
+			worldPortalTargetKey(payload.PortalAfter.BuildingCode, payload.PortalAfter.PortalCode) != *effect.TargetKey ||
+			payload.PortalAfter.BuildingCode != payload.PortalBefore.BuildingCode ||
+			payload.PortalAfter.PortalCode != payload.PortalBefore.PortalCode ||
+			payload.PortalAfter.PortalType != payload.PortalBefore.PortalType ||
+			payload.PortalAfter.ChangedTick != effect.Tick ||
+			payload.PortalAfter.SourceFact == nil || *payload.PortalAfter.SourceFact != effect.SourceFact {
+			return fmt.Errorf("portal effect payload mismatch")
+		}
+		beforeRequirement, _, beforeHash, beforeErr := canonicalWorldPortalAccessRequirement(
+			payload.PortalBefore.AccessRequirement,
+		)
+		afterRequirement, _, afterHash, afterErr := canonicalWorldPortalAccessRequirement(
+			payload.PortalAfter.AccessRequirement,
+		)
+		if beforeErr != nil || afterErr != nil ||
+			beforeHash != payload.PortalBefore.AccessPolicyHash ||
+			afterHash != payload.PortalAfter.AccessPolicyHash {
+			return fmt.Errorf("portal effect access policy mismatch")
+		}
+		payload.PortalBefore.AccessRequirement = beforeRequirement
+		payload.PortalAfter.AccessRequirement = afterRequirement
+		index := findWorldRuntimePortalState(
+			*runtime.PortalStates, payload.PortalAfter.BuildingCode, payload.PortalAfter.PortalCode,
+		)
+		if index < 0 {
+			return fmt.Errorf("portal effect before state mismatch: portal is absent")
+		}
+		if field := worldPortalReplayStateMismatch((*runtime.PortalStates)[index], *payload.PortalBefore); field != "" {
+			return fmt.Errorf("portal effect before state mismatch: %s", field)
+		}
+		if payload.PortalBefore.Version != *effect.BeforeUnits ||
+			payload.PortalAfter.Version != *effect.AfterUnits ||
+			payload.PortalAfter.Version != payload.PortalBefore.Version+1 {
+			return fmt.Errorf("portal effect before state mismatch: version")
+		}
+		if !worldRuntimeJSONEqual(payload.PortalAfter.Metadata, json.RawMessage(`{"schema_version":1}`)) {
+			return fmt.Errorf("portal effect after state mismatch: metadata")
+		}
+		if effect.EffectType == WorldRuntimeEffectPortalStateSet {
+			validTransition := false
+			for _, action := range []string{
+				WorldPortalActionOpen, WorldPortalActionClose,
+				WorldPortalActionLock, WorldPortalActionUnlock,
+			} {
+				if next, valid := nextWorldPortalState(payload.PortalBefore.StateCode, action); valid &&
+					next == payload.PortalAfter.StateCode {
+					validTransition = true
+					break
+				}
+			}
+			if effect.TargetActorCode == nil || !validTransition ||
+				payload.PortalAfter.AccessPolicyHash != payload.PortalBefore.AccessPolicyHash ||
+				!reflect.DeepEqual(payload.PortalAfter.AccessRequirement, payload.PortalBefore.AccessRequirement) {
+				return fmt.Errorf("portal state effect after state mismatch")
+			}
+		} else {
+			if effect.TargetActorCode != nil ||
+				payload.PortalAfter.StateCode != payload.PortalBefore.StateCode ||
+				payload.PortalAfter.AccessPolicyHash == payload.PortalBefore.AccessPolicyHash ||
+				reflect.DeepEqual(payload.PortalAfter.AccessRequirement, payload.PortalBefore.AccessRequirement) {
+				return fmt.Errorf("portal access effect after state mismatch")
+			}
+		}
+		(*runtime.PortalStates)[index] = *payload.PortalAfter
+	case WorldRuntimeEffectNavigationIntentSet:
+		if runtime.NavigationIntents == nil ||
+			effect.ExecutorVersion != worldRuntimeNavigationIntentVersion ||
+			payload.NavigationIntentAfter == nil || effect.TargetActorCode == nil ||
+			payload.NavigationIntentAfter.ActorCode != *effect.TargetActorCode ||
+			*effect.TargetKey != "navigation.intent" ||
+			payload.NavigationIntentAfter.SourceFact != effect.SourceFact ||
+			payload.NavigationIntentAfter.UpdatedTick != effect.Tick ||
+			payload.NavigationIntentAfter.Version != *effect.AfterUnits ||
+			payload.NavigationIntentAfter.BudgetUnits < 0 ||
+			payload.NavigationIntentAfter.BudgetUnits > payload.NavigationIntentAfter.BudgetCapUnits {
+			return fmt.Errorf("navigation intent effect payload mismatch")
+		}
+		index := findWorldRuntimeNavigationIntent(
+			*runtime.NavigationIntents, *effect.TargetActorCode,
+		)
+		if index < 0 {
+			if payload.NavigationIntentBefore != nil || *effect.BeforeUnits != 0 ||
+				payload.NavigationIntentAfter.Version != 1 {
+				return fmt.Errorf("navigation intent effect before state mismatch")
+			}
+			*runtime.NavigationIntents = append(
+				*runtime.NavigationIntents, *payload.NavigationIntentAfter,
+			)
+		} else {
+			before := (*runtime.NavigationIntents)[index]
+			if payload.NavigationIntentBefore == nil ||
+				worldNavigationIntentReplayMismatch(before, *payload.NavigationIntentBefore) != "" ||
+				before.Version != *effect.BeforeUnits ||
+				payload.NavigationIntentAfter.Version != before.Version+1 {
+				return fmt.Errorf("navigation intent effect before state mismatch")
+			}
+			(*runtime.NavigationIntents)[index] = *payload.NavigationIntentAfter
+		}
 	default:
 		return fmt.Errorf("unknown effect type %s", effect.EffectType)
 	}
 	return nil
+}
+
+func isWorldNavigationIntentFact(factType string) bool {
+	switch factType {
+	case WorldRuntimeFactNavigationIntentCreated, WorldRuntimeFactNavigationIntentReplaced,
+		WorldRuntimeFactNavigationIntentCancelled, WorldRuntimeFactNavigationIntentWaited,
+		WorldRuntimeFactNavigationIntentBlocked, WorldRuntimeFactNavigationIntentProgressed,
+		WorldRuntimeFactNavigationIntentArrived, WorldRuntimeFactNavigationIntentFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+func worldNavigationIntentReplayMismatch(
+	actual, expected WorldActorNavigationIntent,
+) string {
+	actualMetadata, expectedMetadata := actual.Metadata, expected.Metadata
+	actual.Metadata, expected.Metadata = nil, nil
+	if !reflect.DeepEqual(actual, expected) {
+		return "state"
+	}
+	if !worldRuntimeJSONEqual(actualMetadata, expectedMetadata) {
+		return "metadata"
+	}
+	return ""
+}
+
+func worldPortalReplayStateMismatch(actual, expected WorldPortalState) string {
+	if actual.BuildingCode != expected.BuildingCode {
+		return "building_code"
+	}
+	if actual.PortalCode != expected.PortalCode {
+		return "portal_code"
+	}
+	if actual.PortalType != expected.PortalType {
+		return "portal_type"
+	}
+	if actual.StateCode != expected.StateCode {
+		return "state_code"
+	}
+	actualRequirement, _, actualHash, actualErr := canonicalWorldPortalAccessRequirement(actual.AccessRequirement)
+	expectedRequirement, _, expectedHash, expectedErr := canonicalWorldPortalAccessRequirement(expected.AccessRequirement)
+	if actualErr != nil || expectedErr != nil {
+		return "access_requirement_invalid"
+	}
+	if actualHash != actual.AccessPolicyHash {
+		return "actual_access_policy_hash"
+	}
+	if expectedHash != expected.AccessPolicyHash {
+		return "expected_access_policy_hash"
+	}
+	if !reflect.DeepEqual(actualRequirement, expectedRequirement) || actual.AccessPolicyHash != expected.AccessPolicyHash {
+		return "access_requirement"
+	}
+	if actual.ChangedTick != expected.ChangedTick {
+		return "changed_tick"
+	}
+	if !reflect.DeepEqual(actual.SourceFact, expected.SourceFact) {
+		return "source_fact"
+	}
+	if actual.Version != expected.Version {
+		return "version"
+	}
+	if !worldRuntimeJSONEqual(actual.Metadata, expected.Metadata) {
+		return "metadata"
+	}
+	return ""
+}
+
+func worldRuntimeJSONEqual(left, right json.RawMessage) bool {
+	leftCanonical, leftErr := canonicalWorldRuntimeJSON(left)
+	rightCanonical, rightErr := canonicalWorldRuntimeJSON(right)
+	return leftErr == nil && rightErr == nil && bytes.Equal(leftCanonical, rightCanonical)
+}
+
+func canonicalWorldRuntimeJSON(raw json.RawMessage) ([]byte, error) {
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("empty JSON value")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("multiple JSON values")
+		}
+		return nil, err
+	}
+	return json.Marshal(value)
 }
 
 func findWorldRuntimeDefinition(items []WorldRuntimeDefinition, kind, code string) *WorldRuntimeDefinition {
@@ -243,6 +527,42 @@ func findWorldRuntimeStatus(items []WorldActorStatus, instanceCode string) int {
 	return -1
 }
 
+func findWorldRuntimeLocation(items []WorldActorLocation, actorCode string) int {
+	for index := range items {
+		if items[index].ActorCode == actorCode {
+			return index
+		}
+	}
+	return -1
+}
+
+func findWorldRuntimeControlGrant(items []WorldActorControlGrant, code string) int {
+	for index := range items {
+		if items[index].Code == code {
+			return index
+		}
+	}
+	return -1
+}
+
+func findWorldRuntimePortalState(items []WorldPortalState, buildingCode, portalCode string) int {
+	for index := range items {
+		if items[index].BuildingCode == buildingCode && items[index].PortalCode == portalCode {
+			return index
+		}
+	}
+	return -1
+}
+
+func findWorldRuntimeNavigationIntent(items []WorldActorNavigationIntent, actorCode string) int {
+	for index := range items {
+		if items[index].ActorCode == actorCode {
+			return index
+		}
+	}
+	return -1
+}
+
 func loadWorldRuntimeRecoveryIDs(
 	ctx context.Context,
 	queryer citySQLQueryer,
@@ -284,13 +604,19 @@ func clearWorldRuntimeProjection(ctx context.Context, tx *sql.Tx, worldID int64)
 	count := 0
 	for _, statement := range []string{
 		`DELETE FROM world_rule_cases WHERE world_id = $1`,
+		`DELETE FROM world_navigation_reservations WHERE world_id = $1`,
+		`DELETE FROM world_actor_navigation_intents WHERE world_id = $1`,
 		`DELETE FROM world_effect_operations WHERE world_id = $1`,
+		`DELETE FROM world_portal_states WHERE world_id = $1`,
+		`DELETE FROM world_actor_control_grants WHERE world_id = $1`,
+		`DELETE FROM world_actor_locations WHERE world_id = $1`,
 		`DELETE FROM world_actor_statuses WHERE world_id = $1`,
 		`DELETE FROM world_actor_roles WHERE world_id = $1`,
 		`DELETE FROM world_actor_attributes WHERE world_id = $1`,
 		`DELETE FROM world_runtime_facts WHERE world_id = $1`,
 		`DELETE FROM world_actors WHERE world_id = $1`,
 		`DELETE FROM world_runtime_definitions WHERE world_id = $1`,
+		`DELETE FROM world_navigation_profiles WHERE world_id = $1`,
 		`DELETE FROM world_runtime_profiles WHERE world_id = $1`,
 	} {
 		result, err := tx.ExecContext(ctx, statement, worldID)
@@ -317,7 +643,8 @@ func restoreWorldRuntimeProjection(
 		return 0, fmt.Errorf("recovery world runtime state is unavailable")
 	}
 	runtime := state.WorldRuntime
-	if runtime.Profile.RuntimeID != worldRuntimeID || runtime.Profile.RuntimeVersion != worldRuntimeVersion ||
+	if runtime.Profile.RuntimeID != worldRuntimeID ||
+		runtime.Profile.RuntimeVersion != expectedWorldRuntimeVersion(state.SimulationVersion) ||
 		runtime.Profile.CatalogVersion != worldRuntimeCatalogVersion ||
 		runtime.Profile.ActorCount != int64(len(runtime.Actors)) ||
 		runtime.Profile.FactCount != int64(len(runtime.Facts)) ||
@@ -325,6 +652,30 @@ func restoreWorldRuntimeProjection(
 		runtime.Profile.CaseCount != int64(len(runtime.RuleCases)) ||
 		runtime.Profile.Revision != int64(len(runtime.Facts))+1 {
 		return 0, fmt.Errorf("recovery world runtime profile is inconsistent")
+	}
+	if cityEngineSupportsWorldActorSpatialControl(state.SimulationVersion) {
+		if runtime.Locations == nil || runtime.ControlGrants == nil || len(*runtime.Locations) != len(runtime.Actors) {
+			return 0, fmt.Errorf("recovery world actor spatial-control state is inconsistent")
+		}
+	} else if runtime.Locations != nil || runtime.ControlGrants != nil {
+		return 0, fmt.Errorf("legacy recovery state contains world actor spatial-control data")
+	}
+	if cityEngineSupportsWorldPortalAccess(state.SimulationVersion) {
+		if runtime.PortalStates == nil {
+			return 0, fmt.Errorf("recovery world portal-access state is inconsistent")
+		}
+	} else if runtime.PortalStates != nil {
+		return 0, fmt.Errorf("legacy recovery state contains world portal-access data")
+	}
+	if cityEngineSupportsWorldNavigationIntents(state.SimulationVersion) {
+		if runtime.NavigationProfile == nil || runtime.NavigationIntents == nil {
+			return 0, fmt.Errorf("recovery world navigation-intent state is inconsistent")
+		}
+		if err := validateWorldNavigationProfile(*runtime.NavigationProfile); err != nil {
+			return 0, fmt.Errorf("recovery world navigation profile is invalid: %w", err)
+		}
+	} else if runtime.NavigationProfile != nil || runtime.NavigationIntents != nil {
+		return 0, fmt.Errorf("legacy recovery state contains world navigation-intent data")
 	}
 	count, err := clearWorldRuntimeProjection(ctx, tx, worldID)
 	if err != nil {
@@ -344,6 +695,24 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)`,
 		return count, fmt.Errorf("restore world runtime profile: %w", err)
 	}
 	count++
+	if runtime.NavigationProfile != nil {
+		profile := runtime.NavigationProfile
+		if _, err = tx.ExecContext(ctx, `
+INSERT INTO world_navigation_profiles
+    (world_id, profile_version, baseline_tick, maximum_intents_per_tick,
+     default_budget_gain_units, default_budget_cap_units, default_max_steps,
+     maximum_blocked_attempts, maximum_retry_delay_ticks, fairness_aging_cap,
+     revision, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)`,
+			worldID, profile.ProfileVersion, profile.BaselineTick,
+			profile.MaximumIntentsPerTick, profile.DefaultBudgetGainUnits,
+			profile.DefaultBudgetCapUnits, profile.DefaultMaxSteps,
+			profile.MaximumBlockedAttempts, profile.MaximumRetryDelayTicks,
+			profile.FairnessAgingCap, profile.Revision, []byte(profile.Metadata)); err != nil {
+			return count, fmt.Errorf("restore world navigation profile: %w", err)
+		}
+		count++
+	}
 	for _, definition := range runtime.Definitions {
 		if _, err = tx.ExecContext(ctx, `
 INSERT INTO world_runtime_definitions
@@ -441,6 +810,178 @@ RETURNING id`
 		}
 		factIDs[identity] = id
 		count++
+	}
+	if runtime.Locations != nil {
+		for _, location := range *runtime.Locations {
+			actorID, exists := actorIDs[location.ActorCode]
+			if !exists {
+				return count, fmt.Errorf("restore world actor location references unknown actor %s", location.ActorCode)
+			}
+			var sourceFactID any
+			if location.SourceFact != nil {
+				resolved, found := factIDs[worldRuntimeRecoveryIdentity{
+					tick: location.SourceFact.Tick, sequence: location.SourceFact.Sequence,
+				}]
+				if !found {
+					return count, fmt.Errorf("restore world actor location references unknown fact %d/%d",
+						location.SourceFact.Tick, location.SourceFact.Sequence)
+				}
+				sourceFactID = resolved
+			}
+			if _, err = tx.ExecContext(ctx, `
+INSERT INTO world_actor_locations
+    (world_id, actor_id, space_kind, space_code, x, y, z, chunk_x, chunk_y,
+     local_x, local_y, anchor_kind, anchor_code, jurisdiction_code, moved_tick,
+     source_fact_id, version, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+        $15, $16, $17, $18::jsonb)`, worldID, actorID, location.SpaceKind,
+				location.SpaceCode, location.X, location.Y, location.Z, location.ChunkX,
+				location.ChunkY, location.LocalX, location.LocalY,
+				nullableStringValue(location.AnchorKind), nullableStringValue(location.AnchorCode),
+				location.JurisdictionCode, location.MovedTick, sourceFactID,
+				location.Version, []byte(location.Metadata)); err != nil {
+				return count, fmt.Errorf("restore world actor location %s: %w", location.ActorCode, err)
+			}
+			count++
+		}
+	}
+	if runtime.ControlGrants != nil {
+		for _, grant := range *runtime.ControlGrants {
+			actorID, exists := actorIDs[grant.ActorCode]
+			if !exists {
+				return count, fmt.Errorf("restore world actor control grant references unknown actor %s", grant.ActorCode)
+			}
+			grantFactID, factErr := resolveOptionalWorldRuntimeRecoveryFactID(factIDs, grant.GrantSourceFact)
+			if factErr != nil {
+				return count, fmt.Errorf("restore world actor control grant %s: %w", grant.Code, factErr)
+			}
+			revokeFactID, factErr := resolveOptionalWorldRuntimeRecoveryFactID(factIDs, grant.RevokeSourceFact)
+			if factErr != nil {
+				return count, fmt.Errorf("restore world actor control grant %s: %w", grant.Code, factErr)
+			}
+			if _, err = tx.ExecContext(ctx, `
+INSERT INTO world_actor_control_grants
+    (world_id, code, actor_id, user_id, capability, status, granted_by_user_id,
+     granted_tick, revoked_tick, grant_source_fact_id, revoke_source_fact_id,
+     version, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)`,
+				worldID, grant.Code, actorID, grant.UserID, grant.Capability, grant.Status,
+				grant.GrantedByUserID, grant.GrantedTick, cityNullableInt64(grant.RevokedTick),
+				grantFactID, revokeFactID, grant.Version, []byte(grant.Metadata)); err != nil {
+				return count, fmt.Errorf("restore world actor control grant %s: %w", grant.Code, err)
+			}
+			count++
+		}
+	}
+	if runtime.PortalStates != nil {
+		for _, portalState := range *runtime.PortalStates {
+			var portalID int64
+			if err = tx.QueryRowContext(ctx, `
+SELECT portal.id
+FROM city_building_portals portal
+JOIN city_buildings building
+  ON building.id = portal.building_id AND building.world_id = portal.world_id
+WHERE portal.world_id = $1 AND building.code = $2 AND portal.code = $3`,
+				worldID, portalState.BuildingCode, portalState.PortalCode).Scan(&portalID); err != nil {
+				return count, fmt.Errorf("resolve recovery world portal %s/%s: %w",
+					portalState.BuildingCode, portalState.PortalCode, err)
+			}
+			requirement, requirementRaw, policyHash, requirementErr :=
+				canonicalWorldPortalAccessRequirement(portalState.AccessRequirement)
+			if requirementErr != nil || policyHash != portalState.AccessPolicyHash {
+				return count, fmt.Errorf("restore world portal access policy %s/%s is invalid",
+					portalState.BuildingCode, portalState.PortalCode)
+			}
+			portalState.AccessRequirement = requirement
+			sourceFactID, factErr := resolveOptionalWorldRuntimeRecoveryFactID(factIDs, portalState.SourceFact)
+			if factErr != nil {
+				return count, fmt.Errorf("restore world portal state %s/%s: %w",
+					portalState.BuildingCode, portalState.PortalCode, factErr)
+			}
+			if _, err = tx.ExecContext(ctx, `
+INSERT INTO world_portal_states
+    (world_id, portal_id, state_code, access_requirement, access_policy_hash,
+     changed_tick, source_fact_id, version, metadata)
+VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9::jsonb)`,
+				worldID, portalID, portalState.StateCode, []byte(requirementRaw),
+				portalState.AccessPolicyHash, portalState.ChangedTick, sourceFactID,
+				portalState.Version, []byte(portalState.Metadata)); err != nil {
+				return count, fmt.Errorf("restore world portal state %s/%s: %w",
+					portalState.BuildingCode, portalState.PortalCode, err)
+			}
+			count++
+		}
+	}
+	if runtime.NavigationIntents != nil {
+		for _, intent := range *runtime.NavigationIntents {
+			actorID, exists := actorIDs[intent.ActorCode]
+			if !exists {
+				return count, fmt.Errorf("restore world navigation intent references unknown actor %s", intent.ActorCode)
+			}
+			sourceFactID, found := factIDs[worldRuntimeRecoveryIdentity{
+				tick: intent.SourceFact.Tick, sequence: intent.SourceFact.Sequence,
+			}]
+			if !found {
+				return count, fmt.Errorf("restore world navigation intent references unknown fact %d/%d",
+					intent.SourceFact.Tick, intent.SourceFact.Sequence)
+			}
+			if _, err = tx.ExecContext(ctx, `
+INSERT INTO world_actor_navigation_intents
+    (world_id, actor_id, intent_code, destination_x, destination_y, destination_z,
+     status, on_blocked, priority, max_steps, budget_units, budget_gain_units,
+     budget_cap_units, blocked_attempts, last_reason, next_attempt_tick,
+     created_tick, updated_tick, source_fact_id, version, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+        $14, $15, $16, $17, $18, $19, $20, $21::jsonb)`,
+				worldID, actorID, intent.IntentCode, intent.Destination.X,
+				intent.Destination.Y, intent.Destination.Z, intent.Status,
+				intent.OnBlocked, intent.Priority, intent.MaxSteps,
+				intent.BudgetUnits, intent.BudgetGainUnits, intent.BudgetCapUnits,
+				intent.BlockedAttempts, nullableStringValue(intent.LastReason),
+				intent.NextAttemptTick, intent.CreatedTick, intent.UpdatedTick,
+				sourceFactID, intent.Version, []byte(intent.Metadata)); err != nil {
+				return count, fmt.Errorf("restore world navigation intent %s: %w", intent.ActorCode, err)
+			}
+			count++
+		}
+		for _, fact := range runtime.Facts {
+			if fact.FactType != WorldRuntimeFactNavigationIntentProgressed || fact.ActorCode == nil {
+				continue
+			}
+			var payload struct {
+				SchemaVersion int                        `json:"schema_version"`
+				Reservation   WorldNavigationReservation `json:"reservation"`
+			}
+			if err = json.Unmarshal(fact.Payload, &payload); err != nil ||
+				payload.SchemaVersion != 1 || payload.Reservation.ActorCode != *fact.ActorCode ||
+				payload.Reservation.SourceFact != fact.Ref() {
+				return count, fmt.Errorf("restore world navigation reservation fact %d/%d is invalid",
+					fact.Tick, fact.Sequence)
+			}
+			actorID, exists := actorIDs[*fact.ActorCode]
+			if !exists {
+				return count, fmt.Errorf("restore world navigation reservation references unknown actor %s", *fact.ActorCode)
+			}
+			sourceFactID := factIDs[worldRuntimeRecoveryIdentity{tick: fact.Tick, sequence: fact.Sequence}]
+			reservation := payload.Reservation
+			if _, err = tx.ExecContext(ctx, `
+INSERT INTO world_navigation_reservations
+    (world_id, tick, sequence, actor_id, intent_code,
+     from_x, from_y, from_z, to_x, to_y, to_z, target_key, edge_key,
+     step_cost, source_fact_id, status, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+        $14, $15, $16, $17::jsonb)`,
+				worldID, reservation.Tick, reservation.Sequence, actorID,
+				reservation.IntentCode, reservation.From.X, reservation.From.Y,
+				reservation.From.Z, reservation.To.X, reservation.To.Y,
+				reservation.To.Z, reservation.TargetKey, reservation.EdgeKey,
+				reservation.StepCost, sourceFactID, reservation.Status,
+				[]byte(reservation.Metadata)); err != nil {
+				return count, fmt.Errorf("restore world navigation reservation %d/%d: %w",
+					reservation.Tick, reservation.Sequence, err)
+			}
+			count++
+		}
 	}
 	for _, status := range runtime.Statuses {
 		sourceFactID := factIDs[worldRuntimeRecoveryIdentity{tick: status.SourceFactTick, sequence: status.SourceFactSeq}]
@@ -544,4 +1085,18 @@ func nullableWorldRuntimeActorID(actorIDs map[string]int64, actorCode *string) a
 		return nil
 	}
 	return actorID
+}
+
+func resolveOptionalWorldRuntimeRecoveryFactID(
+	factIDs map[worldRuntimeRecoveryIdentity]int64,
+	reference *WorldRuntimeFactRef,
+) (any, error) {
+	if reference == nil {
+		return nil, nil
+	}
+	id, exists := factIDs[worldRuntimeRecoveryIdentity{tick: reference.Tick, sequence: reference.Sequence}]
+	if !exists {
+		return nil, fmt.Errorf("unknown source fact %d/%d", reference.Tick, reference.Sequence)
+	}
+	return id, nil
 }

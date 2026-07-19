@@ -222,6 +222,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeyAvailableChannelsEnabled,
 		SettingKeyAffiliateEnabled,
 		SettingKeyRiskControlEnabled,
+		SettingKeyCitySimulationEnabled,
 		SettingKeyAllowUserViewErrorRequests,
 	}
 
@@ -335,6 +336,8 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		AffiliateEnabled: settings[SettingKeyAffiliateEnabled] == "true",
 
 		RiskControlEnabled: settings[SettingKeyRiskControlEnabled] == "true",
+
+		CitySimulationEnabled: settings[SettingKeyCitySimulationEnabled] == "true",
 
 		AllowUserViewErrorRequests: settings[SettingKeyAllowUserViewErrorRequests] == "true",
 	}, nil
@@ -496,6 +499,7 @@ type PublicSettingsInjectionPayload struct {
 	AvailableChannelsEnabled             bool `json:"available_channels_enabled"`
 	AffiliateEnabled                     bool `json:"affiliate_enabled"`
 	RiskControlEnabled                   bool `json:"risk_control_enabled"`
+	CitySimulationEnabled                bool `json:"city_simulation_enabled"`
 	AllowUserViewErrorRequests           bool `json:"allow_user_view_error_requests"`
 }
 
@@ -561,6 +565,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		AvailableChannelsEnabled:             settings.AvailableChannelsEnabled,
 		AffiliateEnabled:                     settings.AffiliateEnabled,
 		RiskControlEnabled:                   settings.RiskControlEnabled,
+		CitySimulationEnabled:                settings.CitySimulationEnabled,
 		AllowUserViewErrorRequests:           settings.AllowUserViewErrorRequests,
 	}, nil
 }

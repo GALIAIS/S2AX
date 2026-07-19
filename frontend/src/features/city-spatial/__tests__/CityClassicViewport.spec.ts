@@ -3,6 +3,8 @@ import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import type { ClassicOvermapScene } from '../projection'
 
+vi.mock('pixi.js/unsafe-eval', () => ({}))
+
 vi.mock('pixi.js', () => {
   class MockDisplayObject {
     destroy = vi.fn()

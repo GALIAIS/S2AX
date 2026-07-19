@@ -54,6 +54,7 @@ type GeminiMessagesCompatService struct {
 	antigravityGatewayService *AntigravityGatewayService
 	cfg                       *config.Config
 	responseHeaderFilter      *responseheaders.CompiledHeaderFilter
+	accountAllocationService  *AccountAllocationService
 }
 
 func (s *GeminiMessagesCompatService) readUpstreamErrorBody(resp *http.Response) []byte {
@@ -422,10 +423,26 @@ func (s *GeminiMessagesCompatService) GetAntigravityGatewayService() *Antigravit
 }
 
 func (s *GeminiMessagesCompatService) getSchedulableAccount(ctx context.Context, accountID int64) (*Account, error) {
+	var (
+		account *Account
+		err     error
+	)
 	if s.schedulerSnapshot != nil {
-		return s.schedulerSnapshot.GetAccount(ctx, accountID)
+		account, err = s.schedulerSnapshot.GetAccount(ctx, accountID)
+	} else {
+		account, err = s.accountRepo.GetByID(ctx, accountID)
 	}
-	return s.accountRepo.GetByID(ctx, accountID)
+	if err != nil || account == nil {
+		return account, err
+	}
+	allowed, err := canUseAllocatedAccount(ctx, s.accountAllocationService, account.ID)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, ErrNoAvailableAccounts
+	}
+	return account, nil
 }
 
 func (s *GeminiMessagesCompatService) hydrateSelectedAccount(ctx context.Context, account *Account) (*Account, error) {
@@ -445,7 +462,10 @@ func (s *GeminiMessagesCompatService) hydrateSelectedAccount(ctx context.Context
 func (s *GeminiMessagesCompatService) listSchedulableAccountsOnce(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, error) {
 	if s.schedulerSnapshot != nil {
 		accounts, _, err := s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, platform, hasForcePlatform)
-		return accounts, err
+		if err != nil {
+			return nil, err
+		}
+		return filterAccountAllocationCandidates(ctx, s.accountAllocationService, groupID, accounts)
 	}
 
 	useMixedScheduling := platform == PlatformGemini && !hasForcePlatform
@@ -455,12 +475,24 @@ func (s *GeminiMessagesCompatService) listSchedulableAccountsOnce(ctx context.Co
 	}
 
 	if groupID != nil {
-		return s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, *groupID, queryPlatforms)
+		accounts, err := s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, *groupID, queryPlatforms)
+		if err != nil {
+			return nil, err
+		}
+		return filterAccountAllocationCandidates(ctx, s.accountAllocationService, groupID, accounts)
 	}
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
-		return s.accountRepo.ListSchedulableByPlatforms(ctx, queryPlatforms)
+		accounts, err := s.accountRepo.ListSchedulableByPlatforms(ctx, queryPlatforms)
+		if err != nil {
+			return nil, err
+		}
+		return filterAccountAllocationCandidates(ctx, s.accountAllocationService, groupID, accounts)
 	}
-	return s.accountRepo.ListSchedulableUngroupedByPlatforms(ctx, queryPlatforms)
+	accounts, err := s.accountRepo.ListSchedulableUngroupedByPlatforms(ctx, queryPlatforms)
+	if err != nil {
+		return nil, err
+	}
+	return filterAccountAllocationCandidates(ctx, s.accountAllocationService, groupID, accounts)
 }
 
 func (s *GeminiMessagesCompatService) validateUpstreamBaseURL(raw string) (string, error) {

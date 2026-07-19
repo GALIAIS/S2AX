@@ -1150,7 +1150,10 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 	platform = normalizeOpenAICompatiblePlatform(platform)
 	if s.schedulerSnapshot != nil {
 		accounts, _, err := s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, platform, false)
-		return accounts, err
+		if err != nil {
+			return nil, err
+		}
+		return filterAccountAllocationCandidates(ctx, s.accountAllocationService, groupID, accounts)
 	}
 	var accounts []Account
 	var err error
@@ -1164,7 +1167,7 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 	if err != nil {
 		return nil, fmt.Errorf("query accounts failed: %w", err)
 	}
-	return accounts, nil
+	return filterAccountAllocationCandidates(ctx, s.accountAllocationService, groupID, accounts)
 }
 
 func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int) (*AcquireResult, error) {
@@ -1268,6 +1271,13 @@ func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accoun
 	}
 	if err != nil || account == nil {
 		return account, err
+	}
+	allowed, err := canUseAllocatedAccount(ctx, s.accountAllocationService, account.ID)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, ErrNoAvailableAccounts
 	}
 	return account, nil
 }

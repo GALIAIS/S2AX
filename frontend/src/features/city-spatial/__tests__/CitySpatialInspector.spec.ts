@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
-import type { CityEnterpriseLocationState, CityLandState, CityOvermapTile, CitySpatialRuleSet } from '@/api/citySpatial'
+import type {
+  CityEnterpriseLocationState,
+  CityLandState,
+  CityOvermapTile,
+  CitySpatialRuleSet,
+  WorldActor
+} from '@/api/citySpatial'
 import CitySpatialInspector from '../CitySpatialInspector.vue'
 
 const message = (value: string) => () => value
@@ -22,6 +28,7 @@ const i18n = createI18n({
           area: message('Area'), version: message('Version'), building: message('Building'), floors: message('Floors'),
           floorArea: message('Floor area'), occupancy: message('Occupancy'), quality: message('Quality'),
           allocations: ({ named }: any) => `${named('count')} housing allocations`,
+          actorsHere: message('Actors here'), focusActor: message('Locate'),
           unavailableTitle: message('Unavailable'), unavailableDescription: message('Chunk unavailable')
         },
         landUse: { residential: message('Residential') },
@@ -116,6 +123,17 @@ const baseProps = {
   generated: true
 }
 
+const actor: WorldActor = {
+  code: 'actor_00000001', owner_user_id: 9, actor_type_code: 'character', name: 'Aster', status: 'active',
+  archetype_code: 'urban_apprentice', archetype_version: '1.0.0', created_tick: 1, updated_tick: 2,
+  version: 2, metadata: {},
+  location: {
+    actor_code: 'actor_00000001', space_kind: 'world', space_code: 'world',
+    x: 4, y: 6, z: 0, chunk_x: 0, chunk_y: 0, local_x: 4, local_y: 6,
+    jurisdiction_code: 'central', moved_tick: 1, version: 1, metadata: {}
+  }
+}
+
 describe('CitySpatialInspector', () => {
   it('shows the selected Overmap tile land-use and building facts', () => {
     const wrapper = mount(CitySpatialInspector, {
@@ -169,5 +187,20 @@ describe('CitySpatialInspector', () => {
     })
     expect(local.text()).toContain('site_firm_central_headquarters')
     expect(local.text()).toContain('Pool 5 / 40')
+  })
+
+  it('lists authoritative actors at the selected tile and cell and emits a focus intent', async () => {
+    const wrapper = mount(CitySpatialInspector, {
+      props: {
+        ...baseProps,
+        mode: 'local', tile: null, coordinate: { worldX: 4, worldY: 6, z: 0 }, actors: [actor]
+      },
+      global: { plugins: [i18n], stubs: { Icon: true } }
+    })
+
+    expect(wrapper.text()).toContain('Actors here')
+    expect(wrapper.text()).toContain('Aster')
+    await wrapper.get('.city-actor-card').trigger('click')
+    expect(wrapper.emitted('selectActor')?.[0]).toEqual([actor.code])
   })
 })

@@ -6,6 +6,15 @@ BACKEND_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 REPO_DIR="$(CDPATH= cd -- "$BACKEND_DIR/.." && pwd)"
 VERSION_FILE="$BACKEND_DIR/cmd/server/VERSION"
 
+format_version() {
+  version="${1#v}"
+  case "$version" in
+    *-SAX) ;;
+    *) version="${version}-SAX" ;;
+  esac
+  printf '%s\n' "$version"
+}
+
 # Prefer the exact release tag when building from a tagged checkout so
 # source builds from vX.Y.Z don't inherit the previous VERSION file value.
 if command -v git >/dev/null 2>&1; then
@@ -15,9 +24,9 @@ if command -v git >/dev/null 2>&1; then
     true
   )"
   if [ -n "$TAG" ]; then
-    printf '%s\n' "${TAG#v}"
+    format_version "$TAG"
     exit 0
   fi
 fi
 
-printf '%s\n' "$(tr -d '\r\n' < "$VERSION_FILE")"
+format_version "$(tr -d '\r\n' < "$VERSION_FILE")"

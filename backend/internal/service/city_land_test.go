@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/cityspatial"
@@ -54,6 +55,40 @@ func TestFilterCityLandStateKeepsTheCompleteSelectedBuildingFactChain(t *testing
 			{Code: "stair_000_001", BuildingCode: "building_selected", PortalType: "stair", FromZ: 0, ToZ: 1},
 			{Code: "outside", BuildingCode: "building_outside", PortalType: "entrance", FromZ: 0, ToZ: 0},
 		},
+		BuildingLayouts: []cityspatial.GeneratedBuildingLayout{
+			{
+				BuildingCode: "building_selected", LayoutVersion: cityspatial.DefaultBuildingLayoutVersion,
+				Archetype: "residential.rowhouse",
+				Cells: []cityspatial.GeneratedBuildingLayoutCell{
+					{X: 2, Y: 2, Z: 0, Kind: cityspatial.BuildingLayoutCellDoor},
+					{X: 2, Y: 2, Z: 1, Kind: cityspatial.BuildingLayoutCellFloor},
+				},
+			},
+			{
+				BuildingCode: "building_outside", LayoutVersion: cityspatial.DefaultBuildingLayoutVersion,
+				Archetype: "commercial.shopfront",
+				Cells: []cityspatial.GeneratedBuildingLayoutCell{
+					{X: 34, Y: 2, Z: 0, Kind: cityspatial.BuildingLayoutCellFloor},
+				},
+			},
+		},
+		ParcelLayouts: []cityspatial.GeneratedParcelLayout{
+			{
+				ParcelCode: "parcel_selected", LayoutVersion: cityspatial.DefaultParcelLayoutVersion,
+				Style: "residential.garden",
+				Cells: []cityspatial.GeneratedParcelLayoutCell{
+					{X: 1, Y: 1, Z: 0, Kind: cityspatial.ParcelLayoutCellPath},
+					{X: 1, Y: 2, Z: 1, Kind: cityspatial.ParcelLayoutCellGarden},
+				},
+			},
+			{
+				ParcelCode: "parcel_outside", LayoutVersion: cityspatial.DefaultParcelLayoutVersion,
+				Style: "commercial.frontage",
+				Cells: []cityspatial.GeneratedParcelLayoutCell{
+					{X: 33, Y: 1, Z: 0, Kind: cityspatial.ParcelLayoutCellSidewalk},
+				},
+			},
+		},
 	}
 
 	filtered := filterCityLandState(full, CityLandQueryInput{
@@ -70,6 +105,16 @@ func TestFilterCityLandStateKeepsTheCompleteSelectedBuildingFactChain(t *testing
 	require.Len(t, filtered.HousingAllocations, 1)
 	require.Len(t, filtered.Portals, 1)
 	require.Equal(t, "stair_000_001", filtered.Portals[0].Code)
+	require.Len(t, filtered.BuildingLayouts, 1)
+	require.Equal(t, "building_selected", filtered.BuildingLayouts[0].BuildingCode)
+	require.Equal(t, []cityspatial.GeneratedBuildingLayoutCell{{
+		X: 2, Y: 2, Z: 1, Kind: cityspatial.BuildingLayoutCellFloor,
+	}}, filtered.BuildingLayouts[0].Cells)
+	require.Len(t, filtered.ParcelLayouts, 1)
+	require.Equal(t, "parcel_selected", filtered.ParcelLayouts[0].ParcelCode)
+	require.Equal(t, []cityspatial.GeneratedParcelLayoutCell{{
+		X: 1, Y: 2, Z: 1, Kind: cityspatial.ParcelLayoutCellGarden,
+	}}, filtered.ParcelLayouts[0].Cells)
 
 	filtered.Parcels[0].Code = "mutated-copy"
 	require.Equal(t, "parcel_selected", full.Parcels[0].Code)
@@ -144,6 +189,39 @@ func TestApplyCityBuildingAdjustmentsBuildsEffectiveProjectionAndVerticalPortals
 	require.Equal(t, int32(3), state.Portals[2].ToZ)
 }
 
+func TestAttachCityLandPresentationLayoutsUsesAllPortalFactsAndReturnsRequestedLevel(t *testing.T) {
+	state := &CityLandState{
+		Buildings: []cityspatial.GeneratedBuilding{{
+			Code: "building_central", PrimaryUse: cityspatial.LandUseResidential,
+			Footprint: cityspatial.LandRectangle{
+				ChunkX: 0, ChunkY: 0, Z: cityspatial.SurfaceZ,
+				LocalMinX: 4, LocalMinY: 4, LocalMaxX: 9, LocalMaxY: 9,
+			},
+			BaseZ: 0, TopZ: 1, FloorCount: 2,
+		}},
+	}
+	portals := []cityspatial.GeneratedBuildingPortal{
+		{
+			Code: "entrance", BuildingCode: "building_central", PortalType: "entrance",
+			FromX: 3, FromY: 6, FromZ: 0, ToX: 4, ToY: 6, ToZ: 0, Status: "active",
+		},
+		{
+			Code: "stair_000_001", BuildingCode: "building_central", PortalType: "stair",
+			FromX: 6, FromY: 6, FromZ: 0, ToX: 6, ToY: 6, ToZ: 1, Status: "active",
+		},
+	}
+
+	require.NoError(t, attachCityLandPresentationLayouts(state, portals, 1))
+	require.Len(t, state.BuildingLayouts, 1)
+	require.Contains(t, state.BuildingLayouts[0].Archetype, "residential.")
+	for _, cell := range state.BuildingLayouts[0].Cells {
+		require.Equal(t, int32(1), cell.Z)
+	}
+	require.Contains(t, state.BuildingLayouts[0].Cells, cityspatial.GeneratedBuildingLayoutCell{
+		X: 6, Y: 6, Z: 1, Kind: cityspatial.BuildingLayoutCellFloor, Feature: "stairs",
+	})
+}
+
 func TestApplyCityBuildingAdjustmentsRejectsBrokenProjectionLinks(t *testing.T) {
 	state := &CityLandState{
 		Buildings: []cityspatial.GeneratedBuilding{{
@@ -154,4 +232,31 @@ func TestApplyCityBuildingAdjustmentsRejectsBrokenProjectionLinks(t *testing.T) 
 		ProjectCode: "development_7", BuildingCode: "building_missing", DistrictCode: "central",
 	}})
 	require.Error(t, err)
+}
+
+func TestAttachCityLandWorldgenProducesAQueryScopedDerivedWindow(t *testing.T) {
+	state := &CityLandState{Profile: CityLandProfile{SpatialOvermapRootHash: strings.Repeat("a", 64)}}
+	spatialProfile := &CitySpatialProfile{
+		MinimumChunkX: -4, MaximumChunkX: 4, MinimumChunkY: -4, MaximumChunkY: 4,
+	}
+	query := CityLandQueryInput{MinimumX: -1, MaximumX: 1, MinimumY: -1, MaximumY: 1, Z: cityspatial.SurfaceZ}
+
+	require.NoError(t, attachCityLandWorldgen(
+		state, CitySimulationVersionF8V3, 8110042, spatialProfile, query,
+	))
+	require.NotNil(t, state.Worldgen)
+	require.Equal(t, "sub2api-openworld-citygen", state.Worldgen.GeneratorID)
+	require.NotEmpty(t, state.Worldgen.PlanHash)
+	require.Len(t, state.Worldgen.Terrain, 9)
+	for _, lot := range state.Worldgen.Lots {
+		require.True(t, lot.Bounds.MinimumX <= int64((query.MaximumX+1)*cityspatial.DefaultChunkSize-1))
+		require.True(t, lot.Bounds.MaximumX >= int64(query.MinimumX*cityspatial.DefaultChunkSize))
+	}
+
+	upperFloor := CityLandQueryInput{MinimumX: -1, MaximumX: 1, MinimumY: -1, MaximumY: 1, Z: 1}
+	require.NoError(t, attachCityLandWorldgen(
+		state, CitySimulationVersionF8V3, 8110042, spatialProfile, upperFloor,
+	))
+	require.Empty(t, state.Worldgen.Terrain)
+	require.Empty(t, state.Worldgen.Roads)
 }

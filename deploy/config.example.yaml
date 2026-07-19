@@ -36,9 +36,12 @@ server:
   # Keep-alive idle timeout in seconds.
   # Keep-Alive 空闲连接超时（秒）。
   idle_timeout: 120
-  # Trusted proxies for X-Forwarded-For parsing (CIDR/IP). Empty disables trusted proxies.
-  # 信任的代理地址（CIDR/IP 格式），用于解析 X-Forwarded-For 头。留空则禁用代理信任。
-  trusted_proxies: []
+  # Trusted proxies for X-Forwarded-For parsing (CIDR/IP). Keep this exact and
+  # add Docker/LB peer CIDRs only when they directly connect to this process.
+  # 信任的代理地址（CIDR/IP 格式）；仅加入实际直连本进程的反向代理地址。
+  trusted_proxies:
+    - 127.0.0.1/32
+    - ::1/128
   # Global max request body size in bytes (default: 256MB)
   # 全局最大请求体大小（字节，默认 256MB）
   # Applies to all requests, especially important for h2c first request memory protection
@@ -65,6 +68,36 @@ server:
     # Max upload buffer per stream in bytes (default: 512KB)
     # 每个流的最大上传缓冲区（字节，默认 512KB）
     max_upload_buffer_per_stream: 524288
+
+# =============================================================================
+# Offline IP Geolocation
+# 离线 IP 归属查询
+# =============================================================================
+ip_geolocation:
+  # ip2region is the default local provider. Use disabled to skip local lookup.
+  # ip2region 是默认本地查询；设为 disabled 可关闭本地查询。
+  provider: "ip2region"
+  # Use verified official xdb data files. Leave a family empty when unavailable;
+  # the web UI will retain its existing compatibility fallback for that family.
+  # 填写经校验的官方 xdb 文件路径；某个族不可用时可留空。
+  ipv4_xdb_path: ""
+  ipv6_xdb_path: ""
+  # file / vectorindex / content. vectorindex balances memory and throughput.
+  cache_policy: "vectorindex"
+  searchers: 4
+
+# =============================================================================
+# User Account Allocation
+# 用户账号分配策略
+# =============================================================================
+account_allocation:
+  # Background reconciliation for administrator-created allocation policies.
+  # 管理员创建的账号分配策略的后台协调周期。
+  reconcile_interval_seconds: 15
+  policy_batch_size: 100
+  # Hard upper bound for a single user's automatic desired account count.
+  # 单个用户自动补齐目标账号数的硬上限。
+  max_desired_count: 50
 
 # =============================================================================
 # Run Mode Configuration

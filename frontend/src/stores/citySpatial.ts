@@ -1,22 +1,47 @@
 import { computed, ref, shallowRef } from 'vue'
 import { defineStore } from 'pinia'
 import citySpatialAPI, {
+  type AddCityWorldMemberRequest,
+  type CityCommand,
   type CityDevelopmentProject,
   type CityDevelopmentState,
   type CityEnterpriseLocationCommandType,
   type CityEnterpriseLocationState,
+  type CityPhysicalNetworkCatalogView,
+  type CityPhysicalNetworkDiagnosticQuery,
+  type CityPhysicalNetworkDiagnosticsView,
+  type CityPhysicalNetworkEdgePage,
+  type CityPhysicalNetworkFactPage,
+  type CityPhysicalNetworkFlowPage,
+  type CityPhysicalNetworkListQuery,
+  type CityPhysicalNetworkNodePage,
+  type CityPhysicalNetworkPage,
+  type CityServiceCatalogView,
+  type CityServiceCommandType,
+  type CityServiceConnectionPage,
+  type CityServiceDemandPage,
+  type CityServiceFacilityPage,
+  type CityServiceListQuery,
+  type CityServiceSettlementPage,
   type CityLandState,
   type CityMapChunkSummary,
+  type CityNavigationCoordinate,
+  type CityNavigationPath,
   type CityOvermapState,
   type CityOvermapTile,
   type CitySpatialMutation,
+  type CityMember,
   type CityWorld,
   type CityWorldSpatialRuleSet,
   type CreateCityWorldRequest,
+  type UpdateCityWorldMemberRequest,
   type WorldActor,
+  type WorldActorNavigationIntent,
   type WorldActorRoleOption,
   type WorldActorState,
+  type WorldNavigationReservation,
   type WorldRuleCase,
+  type WorldPortalAccessView,
   type WorldRuntimeCatalog,
   type WorldRuntimeCommandType,
   type WorldRuntimeDefinition
@@ -43,10 +68,17 @@ export type CityLandAvailability = 'unknown' | 'available' | 'unavailable'
 export type CityDevelopmentAvailability = 'unknown' | 'available' | 'unavailable'
 export type CityEnterpriseLocationAvailability = 'unknown' | 'available' | 'unavailable'
 export type WorldRuntimeAvailability = 'unknown' | 'available' | 'unavailable'
+export type WorldPortalAccessAvailability = 'unknown' | 'available' | 'unavailable'
+export type WorldNavigationIntentAvailability = 'unknown' | 'available' | 'unavailable'
+export type CityPublicServiceAvailability = 'unknown' | 'available' | 'unsupported'
 
-const CELL_SIZE_STEPS = [12, 16, 20, 24, 32] as const
+// CLASSIC is a glyph renderer, not a tile renderer. Keep the two compact
+// steps available so a 960×560 viewport can show 96×56 cells by default and
+// 120×70 cells on the densest supported zoom level.
+const CELL_SIZE_STEPS = [8, 10, 12, 16, 20, 24, 32] as const
 const DEFAULT_VIEWPORT: ViewportSize = { width: 960, height: 560 }
 const CHUNK_CACHE_CAPACITY = 64
+const OPEN_WORLD_SIMULATION_VERSION = 'city-openworld-v1'
 
 function readableError(error: unknown): string {
   if (isApiError(error)) return error.message
@@ -65,19 +97,45 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
   const developmentAvailability = ref<CityDevelopmentAvailability>('unknown')
   const enterpriseLocationState = shallowRef<CityEnterpriseLocationState | null>(null)
   const enterpriseLocationAvailability = ref<CityEnterpriseLocationAvailability>('unknown')
+  const cityServiceCatalog = shallowRef<CityServiceCatalogView | null>(null)
+  const cityServiceFacilities = shallowRef<CityServiceFacilityPage | null>(null)
+  const cityServiceDemands = shallowRef<CityServiceDemandPage | null>(null)
+  const cityServiceConnections = shallowRef<CityServiceConnectionPage | null>(null)
+  const cityServiceSettlements = shallowRef<CityServiceSettlementPage | null>(null)
+  const cityServiceAvailability = ref<CityPublicServiceAvailability>('unknown')
+  const cityPhysicalNetworkCatalog = shallowRef<CityPhysicalNetworkCatalogView | null>(null)
+  const cityPhysicalNetworks = shallowRef<CityPhysicalNetworkPage | null>(null)
+  const cityPhysicalNetworkNodes = shallowRef<CityPhysicalNetworkNodePage | null>(null)
+  const cityPhysicalNetworkEdges = shallowRef<CityPhysicalNetworkEdgePage | null>(null)
+  const cityPhysicalNetworkFlows = shallowRef<CityPhysicalNetworkFlowPage | null>(null)
+  const cityPhysicalNetworkFacts = shallowRef<CityPhysicalNetworkFactPage | null>(null)
+  const cityPhysicalNetworkDiagnostics = shallowRef<CityPhysicalNetworkDiagnosticsView | null>(null)
+  const cityPhysicalNetworkAvailability = ref<CityPublicServiceAvailability>('unknown')
   const worldRuntimeCatalog = shallowRef<WorldRuntimeCatalog | null>(null)
   const worldActors = ref<WorldActor[]>([])
   const selectedActorCode = ref<string | null>(null)
   const worldActorState = shallowRef<WorldActorState | null>(null)
+  const navigationPath = shallowRef<CityNavigationPath | null>(null)
+  const navigationLoading = ref(false)
+  const navigationError = ref<string | null>(null)
+  const worldPortalStates = ref<WorldPortalAccessView[]>([])
+  const worldPortalAccessAvailability = ref<WorldPortalAccessAvailability>('unknown')
+  const worldNavigationIntents = ref<WorldActorNavigationIntent[]>([])
+  const worldNavigationReservations = ref<WorldNavigationReservation[]>([])
+  const worldNavigationIntentAvailability = ref<WorldNavigationIntentAvailability>('unknown')
+  const worldNavigationIntentLoading = ref(false)
+  const worldNavigationIntentError = ref<string | null>(null)
   const worldActorRoleOptions = ref<WorldActorRoleOption[]>([])
   const worldRuntimeRules = ref<WorldRuntimeDefinition[]>([])
   const worldRuleCases = ref<WorldRuleCase[]>([])
+  const worldMembers = ref<CityMember[]>([])
+  const worldCommandReceipts = ref<CityCommand[]>([])
   const worldRuntimeAvailability = ref<WorldRuntimeAvailability>('unknown')
   const chunkSummaries = shallowRef<ReadonlyMap<string, CityMapChunkSummary>>(new Map())
   const projectedChunks = shallowRef<ReadonlyMap<string, ProjectedCityChunk>>(new Map())
   const spatialChanges = ref<CitySpatialMutation[]>([])
   const mapMode = ref<CityMapMode>('overmap')
-  const camera = ref<CameraState>({ worldX: 16, worldY: 16, z: 0, cellSize: CELL_SIZE_STEPS[2] })
+  const camera = ref<CameraState>({ worldX: 16, worldY: 16, z: 0, cellSize: CELL_SIZE_STEPS[1] })
   const viewport = ref<ViewportSize>({ ...DEFAULT_VIEWPORT })
   const selectedTile = ref<CityOvermapTile | null>(null)
   const selectedCoordinate = ref<{ worldX: number; worldY: number; z: number } | null>(null)
@@ -88,18 +146,46 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
   const landLoading = ref(false)
   const developmentLoading = ref(false)
   const enterpriseLocationLoading = ref(false)
+  const cityServiceLoading = ref(false)
+  const cityPhysicalNetworkLoading = ref(false)
   const worldRuntimeLoading = ref(false)
+  const worldPortalLoading = ref(false)
+  const worldMembersLoading = ref(false)
   const creatingWorld = ref(false)
   const generatingChunkKey = ref<string | null>(null)
   const developmentCommandCode = ref<string | null>(null)
   const enterpriseLocationCommandCode = ref<string | null>(null)
+  const cityServiceCommandCode = ref<string | null>(null)
   const worldRuntimeCommandCode = ref<string | null>(null)
+  const worldMemberMutationKey = ref<string | null>(null)
   const loadError = ref<string | null>(null)
 
   const cache = new CityChunkCache(CHUNK_CACHE_CAPACITY)
   const inFlightChunks = new Map<string, Promise<ProjectedCityChunk>>()
   const inFlightLandLayers = new Map<string, Promise<CityLandState | null>>()
+  const inFlightCommandReceipts = new Map<number, Promise<void>>()
   let worldGeneration = 0
+  let navigationRequestGeneration = 0
+  let worldNavigationRequestGeneration = 0
+  let cityServiceRequestGeneration = 0
+  const cityServiceSectionGeneration = {
+    facilities: 0,
+    demands: 0,
+    connections: 0,
+    settlements: 0
+  }
+  let cityPhysicalNetworkRequestGeneration = 0
+  let cityPhysicalNetworkDiagnosticGeneration = 0
+  let lastCityPhysicalNetworkDiagnosticQuery: CityPhysicalNetworkDiagnosticQuery | null = null
+  const cityPhysicalNetworkSectionGeneration = {
+    networks: 0,
+    nodes: 0,
+    edges: 0,
+    flows: 0,
+    facts: 0
+  }
+  let activeCityServiceLoads = 0
+  let activeCityPhysicalNetworkLoads = 0
   let activeChunkLoads = 0
   let activeLandLoads = 0
   let visibleLoadTimer: ReturnType<typeof setTimeout> | null = null
@@ -169,11 +255,32 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
     return !chunkSummaries.value.has(chunkKey(tile.chunk_x, tile.chunk_y, tile.z))
   })
 
+  function isOpenWorld(world: CityWorld | null | undefined): boolean {
+    return world?.simulation_version === OPEN_WORLD_SIMULATION_VERSION
+  }
+
   function publishCache(): void {
     projectedChunks.value = cache.snapshot()
   }
 
   function resetSpatialState(): void {
+    ++navigationRequestGeneration
+    ++worldNavigationRequestGeneration
+    ++cityServiceRequestGeneration
+    ++cityPhysicalNetworkRequestGeneration
+    ++cityPhysicalNetworkDiagnosticGeneration
+    cityServiceSectionGeneration.facilities++
+    cityServiceSectionGeneration.demands++
+    cityServiceSectionGeneration.connections++
+    cityServiceSectionGeneration.settlements++
+    cityPhysicalNetworkSectionGeneration.networks++
+    cityPhysicalNetworkSectionGeneration.nodes++
+    cityPhysicalNetworkSectionGeneration.edges++
+    cityPhysicalNetworkSectionGeneration.flows++
+    cityPhysicalNetworkSectionGeneration.facts++
+    activeCityServiceLoads = 0
+    activeCityPhysicalNetworkLoads = 0
+    lastCityPhysicalNetworkDiagnosticQuery = null
     cache.clear()
     publishCache()
     chunkSummaries.value = new Map()
@@ -185,20 +292,51 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
     developmentAvailability.value = 'unknown'
     enterpriseLocationState.value = null
     enterpriseLocationAvailability.value = 'unknown'
+    cityServiceCatalog.value = null
+    cityServiceFacilities.value = null
+    cityServiceDemands.value = null
+    cityServiceConnections.value = null
+    cityServiceSettlements.value = null
+    cityServiceAvailability.value = 'unknown'
+    cityPhysicalNetworkCatalog.value = null
+    cityPhysicalNetworks.value = null
+    cityPhysicalNetworkNodes.value = null
+    cityPhysicalNetworkEdges.value = null
+    cityPhysicalNetworkFlows.value = null
+    cityPhysicalNetworkFacts.value = null
+    cityPhysicalNetworkDiagnostics.value = null
+    cityPhysicalNetworkAvailability.value = 'unknown'
+    cityServiceCommandCode.value = null
     worldRuntimeCatalog.value = null
     worldActors.value = []
     selectedActorCode.value = null
     worldActorState.value = null
+    navigationPath.value = null
+    navigationLoading.value = false
+    navigationError.value = null
+    worldPortalStates.value = []
+    worldPortalAccessAvailability.value = 'unknown'
+    worldNavigationIntents.value = []
+    worldNavigationReservations.value = []
+    worldNavigationIntentAvailability.value = 'unknown'
+    worldNavigationIntentLoading.value = false
+    worldNavigationIntentError.value = null
     worldActorRoleOptions.value = []
     worldRuntimeRules.value = []
     worldRuleCases.value = []
+    worldMembers.value = []
+    worldCommandReceipts.value = []
     worldRuntimeAvailability.value = 'unknown'
+    cityServiceLoading.value = false
+    cityPhysicalNetworkLoading.value = false
+    worldPortalLoading.value = false
+    worldMembersLoading.value = false
     spatialChanges.value = []
     selectedTile.value = null
     selectedCoordinate.value = null
     hoveredCoordinate.value = null
     mapMode.value = 'overmap'
-    camera.value = { worldX: 16, worldY: 16, z: 0, cellSize: CELL_SIZE_STEPS[2] }
+    camera.value = { worldX: 16, worldY: 16, z: 0, cellSize: CELL_SIZE_STEPS[1] }
   }
 
   function updateWorldTick(tick: number): void {
@@ -265,6 +403,258 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
     )
   }
 
+  function isWorldPortalAccessNotFound(error: unknown): boolean {
+    return isApiError(error) && (
+      error.status === 404 || String(error.code ?? '') === 'WORLD_PORTAL_ACCESS_UNAVAILABLE'
+    )
+  }
+
+  function isWorldNavigationIntentNotFound(error: unknown): boolean {
+    return isApiError(error) && (
+      error.status === 404 || String(error.code ?? '') === 'WORLD_NAVIGATION_INTENT_UNAVAILABLE'
+    )
+  }
+
+  async function requestWorldPortalStates(
+    worldID: number,
+    actorCode: string | undefined,
+    force: boolean
+  ): Promise<{ items: WorldPortalAccessView[]; availability: WorldPortalAccessAvailability }> {
+    if (worldPortalAccessAvailability.value === 'unavailable' && !force) {
+      return { items: [], availability: 'unavailable' }
+    }
+    try {
+      return {
+        items: await citySpatialAPI.listWorldPortalStates(worldID, actorCode),
+        availability: 'available'
+      }
+    } catch (error: unknown) {
+      if (isWorldPortalAccessNotFound(error)) {
+        return { items: [], availability: 'unavailable' }
+      }
+      throw error
+    }
+  }
+
+  async function loadWorldPortalStates(
+    actorCode: string | null = selectedActorCode.value,
+    force = false
+  ): Promise<WorldPortalAccessView[]> {
+    const worldID = activeWorldID.value
+    if (!worldID) return []
+    const normalizedActorCode = actorCode || undefined
+    const token = worldGeneration
+    worldPortalLoading.value = true
+    try {
+      const snapshot = await requestWorldPortalStates(worldID, normalizedActorCode, force)
+      if (
+        token !== worldGeneration || activeWorldID.value !== worldID ||
+        (normalizedActorCode ?? null) !== selectedActorCode.value
+      ) return []
+      worldPortalStates.value = snapshot.items
+      worldPortalAccessAvailability.value = snapshot.availability
+      return snapshot.items
+    } catch (error: unknown) {
+      if (token === worldGeneration && activeWorldID.value === worldID) {
+        loadError.value = readableError(error)
+      }
+      throw error
+    } finally {
+      if (token === worldGeneration) worldPortalLoading.value = false
+    }
+  }
+
+  async function requestWorldNavigationSnapshot(
+    worldID: number,
+    force: boolean
+  ): Promise<{
+    intents: WorldActorNavigationIntent[]
+    reservations: WorldNavigationReservation[]
+    availability: WorldNavigationIntentAvailability
+  }> {
+    if (worldNavigationIntentAvailability.value === 'unavailable' && !force) {
+      return { intents: [], reservations: [], availability: 'unavailable' }
+    }
+    try {
+      const [intents, reservations] = await Promise.all([
+        citySpatialAPI.listWorldNavigationIntents(worldID),
+        citySpatialAPI.listWorldNavigationReservations(worldID)
+      ])
+      return { intents, reservations, availability: 'available' }
+    } catch (error: unknown) {
+      if (isWorldNavigationIntentNotFound(error)) {
+        return { intents: [], reservations: [], availability: 'unavailable' }
+      }
+      throw error
+    }
+  }
+
+  async function loadWorldNavigationState(force = false): Promise<void> {
+    const worldID = activeWorldID.value
+    if (!worldID) return
+    const requestToken = ++worldNavigationRequestGeneration
+    const worldToken = worldGeneration
+    worldNavigationIntentLoading.value = true
+    worldNavigationIntentError.value = null
+    try {
+      const snapshot = await requestWorldNavigationSnapshot(worldID, force)
+      if (
+        requestToken !== worldNavigationRequestGeneration || worldToken !== worldGeneration ||
+        activeWorldID.value !== worldID
+      ) return
+      worldNavigationIntents.value = snapshot.intents
+      worldNavigationReservations.value = snapshot.reservations
+      worldNavigationIntentAvailability.value = snapshot.availability
+    } catch (error: unknown) {
+      if (
+        requestToken === worldNavigationRequestGeneration && worldToken === worldGeneration &&
+        activeWorldID.value === worldID
+      ) {
+        worldNavigationIntentError.value = readableError(error)
+      }
+    } finally {
+      if (
+        requestToken === worldNavigationRequestGeneration && worldToken === worldGeneration &&
+        activeWorldID.value === worldID
+      ) {
+        worldNavigationIntentLoading.value = false
+      }
+    }
+  }
+
+  function upsertWorldCommandReceipt(command: CityCommand): void {
+    worldCommandReceipts.value = [
+      command,
+      ...worldCommandReceipts.value.filter(item => item.id !== command.id)
+    ]
+      .sort((left, right) => right.sequence - left.sequence)
+      .slice(0, 24)
+  }
+
+  function replaceWorldSnapshot(world: CityWorld): void {
+    worlds.value = worlds.value.map(item => item.id === world.id ? world : item)
+  }
+
+  function waitForReceiptPoll(milliseconds: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, milliseconds))
+  }
+
+  async function pollWorldCommandReceipt(worldID: number, commandID: number, token: number): Promise<void> {
+    const existing = inFlightCommandReceipts.get(commandID)
+    if (existing) return existing
+    const request = (async () => {
+      const pollDelays = [0, 400, 600, 800, 1000, 1400, 1800, 2400, 3000, 4000, 5000, 6000]
+      for (const delay of pollDelays) {
+        if (delay > 0) await waitForReceiptPoll(delay)
+        if (token !== worldGeneration || activeWorldID.value !== worldID) return
+        try {
+          const receipt = await citySpatialAPI.getCommand(worldID, commandID)
+          if (token !== worldGeneration || activeWorldID.value !== worldID) return
+          upsertWorldCommandReceipt(receipt)
+          if (receipt.status === 'pending') continue
+          if (receipt.processed_tick !== undefined) updateWorldTick(receipt.processed_tick)
+          try {
+            const world = await citySpatialAPI.getWorld(worldID)
+            if (token === worldGeneration && activeWorldID.value === worldID) replaceWorldSnapshot(world)
+          } catch {
+            // The terminal command receipt remains authoritative when the world snapshot refresh is transiently unavailable.
+          }
+          if (receipt.status === 'applied' && token === worldGeneration && activeWorldID.value === worldID) {
+            await loadWorldRuntime(true)
+          }
+          return
+        } catch {
+          // Receipt polling tolerates transient network failures and retries within a bounded window.
+        }
+      }
+    })().finally(() => {
+      if (inFlightCommandReceipts.get(commandID) === request) inFlightCommandReceipts.delete(commandID)
+    })
+    inFlightCommandReceipts.set(commandID, request)
+    return request
+  }
+
+  async function loadWorldMembers(): Promise<CityMember[]> {
+    const worldID = activeWorldID.value
+    if (!worldID) return []
+    const token = worldGeneration
+    worldMembersLoading.value = true
+    try {
+      const members = await citySpatialAPI.listWorldMembers(worldID)
+      if (token !== worldGeneration || activeWorldID.value !== worldID) return []
+      worldMembers.value = members
+      return members
+    } catch (error: unknown) {
+      if (token === worldGeneration && activeWorldID.value === worldID) loadError.value = readableError(error)
+      throw error
+    } finally {
+      if (token === worldGeneration) worldMembersLoading.value = false
+    }
+  }
+
+  async function loadWorldCommandReceipts(): Promise<CityCommand[]> {
+    const worldID = activeWorldID.value
+    if (!worldID) return []
+    const token = worldGeneration
+    try {
+      const page = await citySpatialAPI.listCommands(worldID, { latest: true, limit: 24 })
+      if (token !== worldGeneration || activeWorldID.value !== worldID) return []
+      const merged = new Map<number, CityCommand>()
+      for (const receipt of worldCommandReceipts.value) merged.set(receipt.id, receipt)
+      for (const receipt of page.items) merged.set(receipt.id, receipt)
+      worldCommandReceipts.value = [...merged.values()]
+        .sort((left, right) => right.sequence - left.sequence)
+        .slice(0, 24)
+      return worldCommandReceipts.value
+    } catch (error: unknown) {
+      if (token === worldGeneration && activeWorldID.value === worldID) loadError.value = readableError(error)
+      throw error
+    }
+  }
+
+  async function addWorldMember(request: AddCityWorldMemberRequest): Promise<CityMember> {
+    const world = activeWorld.value
+    if (!world || world.member_role !== 'owner' || worldMemberMutationKey.value) {
+      throw new Error('City member management is unavailable')
+    }
+    worldMemberMutationKey.value = 'add'
+    loadError.value = null
+    try {
+      const member = await citySpatialAPI.addWorldMember(world.id, request)
+      worldMembers.value = [member, ...worldMembers.value.filter(item => item.user_id !== member.user_id)]
+      return member
+    } catch (error: unknown) {
+      loadError.value = readableError(error)
+      throw error
+    } finally {
+      worldMemberMutationKey.value = null
+    }
+  }
+
+  async function updateWorldMember(
+    userID: number,
+    request: UpdateCityWorldMemberRequest
+  ): Promise<CityMember> {
+    const world = activeWorld.value
+    if (!world || world.member_role !== 'owner' || worldMemberMutationKey.value || userID <= 0) {
+      throw new Error('City member management is unavailable')
+    }
+    worldMemberMutationKey.value = `member:${userID}`
+    loadError.value = null
+    try {
+      const member = await citySpatialAPI.updateWorldMember(world.id, userID, request)
+      worldMembers.value = member.status === 'active'
+        ? worldMembers.value.map(item => item.user_id === member.user_id ? member : item)
+        : worldMembers.value.filter(item => item.user_id !== member.user_id)
+      return member
+    } catch (error: unknown) {
+      loadError.value = readableError(error)
+      throw error
+    } finally {
+      worldMemberMutationKey.value = null
+    }
+  }
+
   async function loadDevelopmentState(force = false): Promise<CityDevelopmentState | null> {
     const worldID = activeWorldID.value
     if (!worldID || (developmentAvailability.value === 'unavailable' && !force)) return null
@@ -317,16 +707,309 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
     }
   }
 
+  function beginCityServiceLoad(): void {
+    activeCityServiceLoads++
+    cityServiceLoading.value = true
+  }
+
+  function endCityServiceLoad(): void {
+    activeCityServiceLoads = Math.max(0, activeCityServiceLoads - 1)
+    cityServiceLoading.value = activeCityServiceLoads > 0
+  }
+
+  async function loadCityServices(force = false): Promise<CityServiceCatalogView | null> {
+    const worldID = activeWorldID.value
+    if (!worldID || (cityServiceAvailability.value === 'unsupported' && !force)) return null
+    if (cityServiceCatalog.value && !force) return cityServiceCatalog.value
+    const worldToken = worldGeneration
+    const requestToken = ++cityServiceRequestGeneration
+    cityServiceSectionGeneration.facilities++
+    cityServiceSectionGeneration.demands++
+    cityServiceSectionGeneration.connections++
+    cityServiceSectionGeneration.settlements++
+    beginCityServiceLoad()
+    try {
+      const catalog = await citySpatialAPI.getServiceCatalog(worldID)
+      if (
+        worldToken !== worldGeneration || requestToken !== cityServiceRequestGeneration ||
+        activeWorldID.value !== worldID
+      ) return null
+      cityServiceCatalog.value = catalog
+      if (catalog.availability === 'unsupported') {
+        cityServiceFacilities.value = null
+        cityServiceDemands.value = null
+        cityServiceConnections.value = null
+        cityServiceSettlements.value = null
+        cityServiceAvailability.value = 'unsupported'
+        return catalog
+      }
+      const [facilities, demands, connections, settlements] = await Promise.all([
+        citySpatialAPI.listServiceFacilities(worldID),
+        citySpatialAPI.listServiceDemands(worldID),
+        citySpatialAPI.listServiceConnections(worldID),
+        citySpatialAPI.listServiceSettlements(worldID)
+      ])
+      if (
+        worldToken !== worldGeneration || requestToken !== cityServiceRequestGeneration ||
+        activeWorldID.value !== worldID
+      ) return null
+      if ([facilities, demands, connections, settlements].some(page => page.availability !== 'available')) {
+        throw new Error('City public-service API availability is inconsistent')
+      }
+      cityServiceFacilities.value = facilities
+      cityServiceDemands.value = demands
+      cityServiceConnections.value = connections
+      cityServiceSettlements.value = settlements
+      cityServiceAvailability.value = 'available'
+      return catalog
+    } catch (error: unknown) {
+      if (
+        worldToken === worldGeneration && requestToken === cityServiceRequestGeneration &&
+        activeWorldID.value === worldID
+      ) {
+        cityServiceAvailability.value = 'unknown'
+        loadError.value = readableError(error)
+      }
+      throw error
+    } finally {
+      endCityServiceLoad()
+    }
+  }
+
+  async function queryCityServiceSection(
+    section: keyof typeof cityServiceSectionGeneration,
+    query: CityServiceListQuery = {},
+    append = false
+  ): Promise<void> {
+    const worldID = activeWorldID.value
+    if (!worldID || cityServiceAvailability.value !== 'available') return
+    const worldToken = worldGeneration
+    const requestToken = ++cityServiceSectionGeneration[section]
+    beginCityServiceLoad()
+    try {
+      if (section === 'facilities') {
+        const page = await citySpatialAPI.listServiceFacilities(worldID, query)
+        if (worldToken !== worldGeneration || requestToken !== cityServiceSectionGeneration.facilities || activeWorldID.value !== worldID) return
+        cityServiceFacilities.value = append && cityServiceFacilities.value
+          ? { ...page, items: [...cityServiceFacilities.value.items, ...page.items] }
+          : page
+      } else if (section === 'demands') {
+        const page = await citySpatialAPI.listServiceDemands(worldID, query)
+        if (worldToken !== worldGeneration || requestToken !== cityServiceSectionGeneration.demands || activeWorldID.value !== worldID) return
+        cityServiceDemands.value = append && cityServiceDemands.value
+          ? { ...page, items: [...cityServiceDemands.value.items, ...page.items] }
+          : page
+      } else if (section === 'connections') {
+        const page = await citySpatialAPI.listServiceConnections(worldID, query)
+        if (worldToken !== worldGeneration || requestToken !== cityServiceSectionGeneration.connections || activeWorldID.value !== worldID) return
+        cityServiceConnections.value = append && cityServiceConnections.value
+          ? { ...page, items: [...cityServiceConnections.value.items, ...page.items] }
+          : page
+      } else {
+        const page = await citySpatialAPI.listServiceSettlements(worldID, query)
+        if (worldToken !== worldGeneration || requestToken !== cityServiceSectionGeneration.settlements || activeWorldID.value !== worldID) return
+        cityServiceSettlements.value = append && cityServiceSettlements.value
+          ? { ...page, items: [...cityServiceSettlements.value.items, ...page.items] }
+          : page
+      }
+    } catch (error: unknown) {
+      if (worldToken === worldGeneration && activeWorldID.value === worldID) {
+        loadError.value = readableError(error)
+      }
+      throw error
+    } finally {
+      endCityServiceLoad()
+    }
+  }
+
+  function beginCityPhysicalNetworkLoad(): void {
+    activeCityPhysicalNetworkLoads++
+    cityPhysicalNetworkLoading.value = true
+  }
+
+  function endCityPhysicalNetworkLoad(): void {
+    activeCityPhysicalNetworkLoads = Math.max(0, activeCityPhysicalNetworkLoads - 1)
+    cityPhysicalNetworkLoading.value = activeCityPhysicalNetworkLoads > 0
+  }
+
+  function clearCityPhysicalNetworkPages(): void {
+    cityPhysicalNetworks.value = null
+    cityPhysicalNetworkNodes.value = null
+    cityPhysicalNetworkEdges.value = null
+    cityPhysicalNetworkFlows.value = null
+    cityPhysicalNetworkFacts.value = null
+    cityPhysicalNetworkDiagnostics.value = null
+    lastCityPhysicalNetworkDiagnosticQuery = null
+  }
+
+  async function loadCityPhysicalNetworks(force = false): Promise<CityPhysicalNetworkCatalogView | null> {
+    const worldID = activeWorldID.value
+    if (!worldID || (cityPhysicalNetworkAvailability.value === 'unsupported' && !force)) return null
+    if (cityPhysicalNetworkCatalog.value && !force) return cityPhysicalNetworkCatalog.value
+    const worldToken = worldGeneration
+    const requestToken = ++cityPhysicalNetworkRequestGeneration
+    const diagnosticQuery = lastCityPhysicalNetworkDiagnosticQuery
+      ? { ...lastCityPhysicalNetworkDiagnosticQuery }
+      : null
+    ++cityPhysicalNetworkDiagnosticGeneration
+    cityPhysicalNetworkSectionGeneration.networks++
+    cityPhysicalNetworkSectionGeneration.nodes++
+    cityPhysicalNetworkSectionGeneration.edges++
+    cityPhysicalNetworkSectionGeneration.flows++
+    cityPhysicalNetworkSectionGeneration.facts++
+    beginCityPhysicalNetworkLoad()
+    try {
+      const catalog = await citySpatialAPI.getPhysicalNetworkCatalog(worldID)
+      if (
+        worldToken !== worldGeneration || requestToken !== cityPhysicalNetworkRequestGeneration ||
+        activeWorldID.value !== worldID
+      ) return null
+      cityPhysicalNetworkCatalog.value = catalog
+      if (catalog.availability === 'unsupported') {
+        clearCityPhysicalNetworkPages()
+        cityPhysicalNetworkAvailability.value = 'unsupported'
+        return catalog
+      }
+      const [networks, nodes, edges, flows, facts] = await Promise.all([
+        citySpatialAPI.listPhysicalNetworks(worldID),
+        citySpatialAPI.listPhysicalNetworkNodes(worldID),
+        citySpatialAPI.listPhysicalNetworkEdges(worldID),
+        citySpatialAPI.listPhysicalNetworkFlows(worldID),
+        citySpatialAPI.listPhysicalNetworkFacts(worldID)
+      ])
+      if (
+        worldToken !== worldGeneration || requestToken !== cityPhysicalNetworkRequestGeneration ||
+        activeWorldID.value !== worldID
+      ) return null
+      if ([networks, nodes, edges, flows, facts].some(page => page.availability !== 'available')) {
+        throw new Error('City physical-network API availability is inconsistent')
+      }
+      cityPhysicalNetworks.value = networks
+      cityPhysicalNetworkNodes.value = nodes
+      cityPhysicalNetworkEdges.value = edges
+      cityPhysicalNetworkFlows.value = flows
+      cityPhysicalNetworkFacts.value = facts
+      cityPhysicalNetworkAvailability.value = 'available'
+      if (diagnosticQuery) {
+        if (networks.items.some(item => item.code === diagnosticQuery.network)) {
+          try {
+            await queryCityPhysicalNetworkDiagnostics(diagnosticQuery)
+          } catch {
+            // Keep the last committed diagnostic projection; an explicit probe will surface the error.
+          }
+        } else {
+          cityPhysicalNetworkDiagnostics.value = null
+          lastCityPhysicalNetworkDiagnosticQuery = null
+        }
+      }
+      return catalog
+    } catch (error: unknown) {
+      if (
+        worldToken === worldGeneration && requestToken === cityPhysicalNetworkRequestGeneration &&
+        activeWorldID.value === worldID
+      ) {
+        if (!cityPhysicalNetworkCatalog.value) cityPhysicalNetworkAvailability.value = 'unknown'
+        loadError.value = readableError(error)
+      }
+      throw error
+    } finally {
+      endCityPhysicalNetworkLoad()
+    }
+  }
+
+  async function queryCityPhysicalNetworkSection(
+    section: keyof typeof cityPhysicalNetworkSectionGeneration,
+    query: CityPhysicalNetworkListQuery = {},
+    append = false
+  ): Promise<void> {
+    const worldID = activeWorldID.value
+    if (!worldID || cityPhysicalNetworkAvailability.value !== 'available') return
+    const worldToken = worldGeneration
+    const requestToken = ++cityPhysicalNetworkSectionGeneration[section]
+    beginCityPhysicalNetworkLoad()
+    try {
+      if (section === 'networks') {
+        const page = await citySpatialAPI.listPhysicalNetworks(worldID, query)
+        if (worldToken !== worldGeneration || requestToken !== cityPhysicalNetworkSectionGeneration.networks || activeWorldID.value !== worldID) return
+        cityPhysicalNetworks.value = append && cityPhysicalNetworks.value
+          ? { ...page, items: [...cityPhysicalNetworks.value.items, ...page.items] }
+          : page
+      } else if (section === 'nodes') {
+        const page = await citySpatialAPI.listPhysicalNetworkNodes(worldID, query)
+        if (worldToken !== worldGeneration || requestToken !== cityPhysicalNetworkSectionGeneration.nodes || activeWorldID.value !== worldID) return
+        cityPhysicalNetworkNodes.value = append && cityPhysicalNetworkNodes.value
+          ? { ...page, items: [...cityPhysicalNetworkNodes.value.items, ...page.items] }
+          : page
+      } else if (section === 'edges') {
+        const page = await citySpatialAPI.listPhysicalNetworkEdges(worldID, query)
+        if (worldToken !== worldGeneration || requestToken !== cityPhysicalNetworkSectionGeneration.edges || activeWorldID.value !== worldID) return
+        cityPhysicalNetworkEdges.value = append && cityPhysicalNetworkEdges.value
+          ? { ...page, items: [...cityPhysicalNetworkEdges.value.items, ...page.items] }
+          : page
+      } else if (section === 'flows') {
+        const page = await citySpatialAPI.listPhysicalNetworkFlows(worldID, query)
+        if (worldToken !== worldGeneration || requestToken !== cityPhysicalNetworkSectionGeneration.flows || activeWorldID.value !== worldID) return
+        cityPhysicalNetworkFlows.value = append && cityPhysicalNetworkFlows.value
+          ? { ...page, items: [...cityPhysicalNetworkFlows.value.items, ...page.items] }
+          : page
+      } else {
+        const page = await citySpatialAPI.listPhysicalNetworkFacts(worldID, query)
+        if (worldToken !== worldGeneration || requestToken !== cityPhysicalNetworkSectionGeneration.facts || activeWorldID.value !== worldID) return
+        cityPhysicalNetworkFacts.value = append && cityPhysicalNetworkFacts.value
+          ? { ...page, items: [...cityPhysicalNetworkFacts.value.items, ...page.items] }
+          : page
+      }
+    } catch (error: unknown) {
+      if (worldToken === worldGeneration && activeWorldID.value === worldID) {
+        loadError.value = readableError(error)
+      }
+      throw error
+    } finally {
+      endCityPhysicalNetworkLoad()
+    }
+  }
+
+  async function queryCityPhysicalNetworkDiagnostics(
+    query: CityPhysicalNetworkDiagnosticQuery
+  ): Promise<CityPhysicalNetworkDiagnosticsView | null> {
+    const worldID = activeWorldID.value
+    if (!worldID || cityPhysicalNetworkAvailability.value !== 'available' || !query.network) return null
+    lastCityPhysicalNetworkDiagnosticQuery = { ...query }
+    const worldToken = worldGeneration
+    const requestToken = ++cityPhysicalNetworkDiagnosticGeneration
+    beginCityPhysicalNetworkLoad()
+    try {
+      const diagnostics = await citySpatialAPI.getPhysicalNetworkDiagnostics(worldID, query)
+      if (
+        worldToken !== worldGeneration || requestToken !== cityPhysicalNetworkDiagnosticGeneration ||
+        activeWorldID.value !== worldID
+      ) return null
+      cityPhysicalNetworkDiagnostics.value = diagnostics
+      return diagnostics
+    } catch (error: unknown) {
+      if (
+        worldToken === worldGeneration && requestToken === cityPhysicalNetworkDiagnosticGeneration &&
+        activeWorldID.value === worldID
+      ) loadError.value = readableError(error)
+      throw error
+    } finally {
+      endCityPhysicalNetworkLoad()
+    }
+  }
+
   async function loadWorldActor(actorCode: string): Promise<WorldActorState | null> {
     const worldID = activeWorldID.value
     if (!worldID || !actorCode || worldRuntimeAvailability.value === 'unavailable') return null
     const token = worldGeneration
     worldRuntimeLoading.value = true
+    worldPortalLoading.value = true
     try {
-      const [state, options, cases] = await Promise.all([
+      const [state, options, cases, portals] = await Promise.all([
         citySpatialAPI.getWorldActorState(worldID, actorCode),
         citySpatialAPI.getWorldActorRoleOptions(worldID, actorCode),
-        citySpatialAPI.listWorldRuleCases(worldID, { actor_code: actorCode, limit: 100 })
+        citySpatialAPI.listWorldRuleCases(worldID, { actor_code: actorCode, limit: 100 }),
+        requestWorldPortalStates(worldID, actorCode, false),
+        loadWorldNavigationState(false)
       ])
       if (token !== worldGeneration || activeWorldID.value !== worldID || selectedActorCode.value !== actorCode) {
         return null
@@ -334,6 +1017,8 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
       worldActorState.value = state
       worldActorRoleOptions.value = options
       worldRuleCases.value = cases.items
+      worldPortalStates.value = portals.items
+      worldPortalAccessAvailability.value = portals.availability
       return state
     } catch (error: unknown) {
       if (token === worldGeneration && activeWorldID.value === worldID) {
@@ -342,15 +1027,88 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
       throw error
     } finally {
       if (token === worldGeneration) worldRuntimeLoading.value = false
+      if (token === worldGeneration) worldPortalLoading.value = false
     }
   }
 
   async function selectWorldActor(actorCode: string): Promise<void> {
     if (!worldActors.value.some(actor => actor.code === actorCode)) return
+    clearNavigationPath()
     selectedActorCode.value = actorCode
     worldActorState.value = null
     worldActorRoleOptions.value = []
+    worldPortalStates.value = []
     await loadWorldActor(actorCode)
+  }
+
+  async function focusWorldActor(actorCode: string): Promise<void> {
+    const actor = worldActors.value.find(item => item.code === actorCode)
+    if (!actor) return
+    await selectWorldActor(actorCode)
+    const location = worldActorState.value?.location ?? actor.location
+    if (!location) return
+    mapMode.value = 'local'
+    camera.value = clampCamera({
+      ...camera.value,
+      worldX: location.x,
+      worldY: location.y,
+      z: location.z
+    })
+    selectedCoordinate.value = {
+      worldX: location.x,
+      worldY: location.y,
+      z: location.z
+    }
+    selectedTile.value = overmap.value?.tiles.find(tile => (
+      tile.chunk_x === location.chunk_x && tile.chunk_y === location.chunk_y && tile.z === 0
+    )) ?? null
+    scheduleVisibleChunkLoad()
+    await loadLandLayer(location.z)
+  }
+
+  function clearNavigationPath(): void {
+    ++navigationRequestGeneration
+    navigationPath.value = null
+    navigationLoading.value = false
+    navigationError.value = null
+  }
+
+  async function previewWorldActorPath(
+    destination?: CityNavigationCoordinate,
+    maxSteps = 256
+  ): Promise<CityNavigationPath | null> {
+    const worldID = activeWorldID.value
+    const actorCode = selectedActorCode.value
+    const selected = selectedCoordinate.value
+    const target = destination ?? (selected
+      ? { x: selected.worldX, y: selected.worldY, z: selected.z }
+      : null)
+    if (!worldID || !actorCode || !target || !Number.isSafeInteger(maxSteps) || maxSteps < 1 || maxSteps > 1024) {
+      throw new Error('City actor navigation path is unavailable')
+    }
+    const requestToken = ++navigationRequestGeneration
+    const worldToken = worldGeneration
+    navigationLoading.value = true
+    navigationError.value = null
+    try {
+      const path = await citySpatialAPI.findWorldActorPath(worldID, actorCode, target, maxSteps)
+      if (
+        requestToken !== navigationRequestGeneration || worldToken !== worldGeneration ||
+        activeWorldID.value !== worldID || selectedActorCode.value !== actorCode
+      ) return null
+      navigationPath.value = path
+      return path
+    } catch (error: unknown) {
+      if (requestToken === navigationRequestGeneration && worldToken === worldGeneration) {
+        navigationPath.value = null
+        navigationError.value = readableError(error)
+      }
+      throw error
+    } finally {
+      if (requestToken === navigationRequestGeneration && worldToken === worldGeneration) {
+        navigationLoading.value = false
+      }
+    }
   }
 
   async function loadWorldRuntime(force = false): Promise<WorldRuntimeCatalog | null> {
@@ -359,11 +1117,13 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
     if (worldRuntimeCatalog.value && !force) return worldRuntimeCatalog.value
     const token = worldGeneration
     worldRuntimeLoading.value = true
+    worldPortalLoading.value = true
     try {
       const [catalog, actors, rules] = await Promise.all([
         citySpatialAPI.getWorldRuntimeCatalog(worldID),
         citySpatialAPI.listWorldActors(worldID),
-        citySpatialAPI.listWorldRuntimeRules(worldID)
+        citySpatialAPI.listWorldRuntimeRules(worldID),
+        loadWorldNavigationState(force)
       ])
       if (token !== worldGeneration || activeWorldID.value !== worldID) return null
       worldRuntimeCatalog.value = catalog
@@ -375,15 +1135,22 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
         : (actors[0]?.code ?? null)
       selectedActorCode.value = actorCode
       if (!actorCode) {
+        const portals = await requestWorldPortalStates(worldID, undefined, force)
+        if (token !== worldGeneration || activeWorldID.value !== worldID || selectedActorCode.value !== null) {
+          return null
+        }
         worldActorState.value = null
         worldActorRoleOptions.value = []
         worldRuleCases.value = []
+        worldPortalStates.value = portals.items
+        worldPortalAccessAvailability.value = portals.availability
         return catalog
       }
-      const [state, options, cases] = await Promise.all([
+      const [state, options, cases, portals] = await Promise.all([
         citySpatialAPI.getWorldActorState(worldID, actorCode),
         citySpatialAPI.getWorldActorRoleOptions(worldID, actorCode),
-        citySpatialAPI.listWorldRuleCases(worldID, { actor_code: actorCode, limit: 100 })
+        citySpatialAPI.listWorldRuleCases(worldID, { actor_code: actorCode, limit: 100 }),
+        requestWorldPortalStates(worldID, actorCode, force)
       ])
       if (token !== worldGeneration || activeWorldID.value !== worldID || selectedActorCode.value !== actorCode) {
         return null
@@ -391,6 +1158,8 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
       worldActorState.value = state
       worldActorRoleOptions.value = options
       worldRuleCases.value = cases.items
+      worldPortalStates.value = portals.items
+      worldPortalAccessAvailability.value = portals.availability
       return catalog
     } catch (error: unknown) {
       if (token !== worldGeneration || activeWorldID.value !== worldID) return null
@@ -402,6 +1171,14 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
         worldActorRoleOptions.value = []
         worldRuntimeRules.value = []
         worldRuleCases.value = []
+        worldPortalStates.value = []
+        worldPortalAccessAvailability.value = 'unavailable'
+        ++worldNavigationRequestGeneration
+        worldNavigationIntents.value = []
+        worldNavigationReservations.value = []
+        worldNavigationIntentAvailability.value = 'unavailable'
+        worldNavigationIntentLoading.value = false
+        worldNavigationIntentError.value = null
         worldRuntimeAvailability.value = 'unavailable'
         return null
       }
@@ -409,6 +1186,7 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
       throw error
     } finally {
       if (token === worldGeneration) worldRuntimeLoading.value = false
+      if (token === worldGeneration) worldPortalLoading.value = false
     }
   }
 
@@ -528,13 +1306,18 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
   }
 
   async function selectWorld(worldID: number): Promise<void> {
-    if (!worlds.value.some(world => world.id === worldID)) return
+    const targetWorld = worlds.value.find(world => world.id === worldID)
+    if (!targetWorld) return
     const token = ++worldGeneration
     activeWorldID.value = worldID
     loadError.value = null
     resetSpatialState()
     initialLoading.value = true
     try {
+      if (isOpenWorld(targetWorld)) {
+        await Promise.all([loadWorldMembers(), loadWorldCommandReceipts()])
+        return
+      }
       const [nextRuleBundle, nextOvermap, changes] = await Promise.all([
         citySpatialAPI.getWorldSpatialRuleSet(worldID),
         citySpatialAPI.getOvermap(worldID),
@@ -564,7 +1347,11 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
         loadLandLayer(0),
         loadDevelopmentState(),
         loadEnterpriseLocationState(),
-        loadWorldRuntime()
+        loadCityServices(),
+        loadCityPhysicalNetworks(),
+        loadWorldRuntime(),
+        loadWorldMembers(),
+        loadWorldCommandReceipts()
       ])
     } catch (error: unknown) {
       if (token === worldGeneration) loadError.value = readableError(error)
@@ -601,10 +1388,14 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
     if (!worldID || refreshing.value) return
     const token = worldGeneration
     refreshing.value = true
+    clearNavigationPath()
     loadError.value = null
     try {
-      const [nextWorlds, nextRuleBundle, nextOvermap, changes] = await Promise.all([
-        citySpatialAPI.listWorlds(),
+      const nextWorlds = await citySpatialAPI.listWorlds()
+      if (token !== worldGeneration || activeWorldID.value !== worldID) return
+      worlds.value = nextWorlds
+      if (isOpenWorld(nextWorlds.find(world => world.id === worldID))) return
+      const [nextRuleBundle, nextOvermap, changes] = await Promise.all([
         citySpatialAPI.getWorldSpatialRuleSet(worldID),
         citySpatialAPI.getOvermap(worldID),
         citySpatialAPI.listSpatialChanges(worldID, 200)
@@ -619,7 +1410,6 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
       ) {
         throw new Error('City spatial rule set binding changed unexpectedly')
       }
-      worlds.value = nextWorlds
       ruleBundle.value = nextRuleBundle
       overmap.value = nextOvermap
       spatialChanges.value = changes.items
@@ -629,7 +1419,11 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
         ...[...landLevels].map(z => loadLandLayer(z, true)),
         loadDevelopmentState(true),
         loadEnterpriseLocationState(true),
-        loadWorldRuntime(true)
+        loadCityServices(true),
+        loadCityPhysicalNetworks(true),
+        loadWorldRuntime(true),
+        loadWorldMembers(),
+        loadWorldCommandReceipts()
       ])
     } catch (error: unknown) {
       if (token === worldGeneration) loadError.value = readableError(error)
@@ -762,17 +1556,22 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
     }
   }
 
-  async function runWorldRuntimeCommand(
-    commandType: WorldRuntimeCommandType,
+  async function runCityServiceCommand(
+    commandType: CityServiceCommandType,
     payload: Record<string, unknown>,
     commandCode: string = commandType
   ): Promise<void> {
     const world = activeWorld.value
-    if (!world || worldRuntimeAvailability.value !== 'available' || worldRuntimeCommandCode.value) return
-    worldRuntimeCommandCode.value = commandCode
+    if (
+      !world || world.member_role !== 'owner' ||
+      cityServiceAvailability.value !== 'available' || cityServiceCommandCode.value
+    ) {
+      throw new Error('City public-service command is unavailable')
+    }
+    cityServiceCommandCode.value = commandCode
     loadError.value = null
     try {
-      const command = await citySpatialAPI.submitWorldRuntimeCommand(
+      const command = await citySpatialAPI.submitServiceCommand(
         world.id,
         commandType,
         payload,
@@ -781,10 +1580,51 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
       const result = await citySpatialAPI.stepWorld(world.id, world.current_tick)
       const processed = result.commands.find(item => item.id === command.id)
       if (!processed || processed.status !== 'applied') {
+        throw new Error(processed?.error_code ?? 'City public-service command was rejected')
+      }
+      updateWorldTick(result.tick.tick)
+      await Promise.all([loadCityServices(true), loadCityPhysicalNetworks(true)])
+    } catch (error: unknown) {
+      loadError.value = readableError(error)
+      throw error
+    } finally {
+      cityServiceCommandCode.value = null
+    }
+  }
+
+  async function runWorldRuntimeCommand(
+    commandType: WorldRuntimeCommandType,
+    payload: Record<string, unknown>,
+    commandCode: string = commandType
+  ): Promise<'applied' | 'queued'> {
+    const world = activeWorld.value
+    if (!world || worldRuntimeAvailability.value !== 'available' || worldRuntimeCommandCode.value) {
+      throw new Error('Open world runtime command is unavailable')
+    }
+    worldRuntimeCommandCode.value = commandCode
+    clearNavigationPath()
+    loadError.value = null
+    try {
+      const command = await citySpatialAPI.submitWorldRuntimeCommand(
+        world.id,
+        commandType,
+        payload,
+        world.current_tick
+      )
+      upsertWorldCommandReceipt(command)
+      if (world.member_role !== 'owner') {
+        void pollWorldCommandReceipt(world.id, command.id, worldGeneration)
+        return 'queued'
+      }
+      const result = await citySpatialAPI.stepWorld(world.id, world.current_tick)
+      const processed = result.commands.find(item => item.id === command.id)
+      if (processed) upsertWorldCommandReceipt(processed)
+      if (!processed || processed.status !== 'applied') {
         throw new Error(processed?.error_code ?? 'Open world runtime command was rejected')
       }
       updateWorldTick(result.tick.tick)
       await loadWorldRuntime(true)
+      return 'applied'
     } catch (error: unknown) {
       loadError.value = readableError(error)
       throw error
@@ -802,6 +1642,7 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
   }
 
   function panCamera(deltaX: number, deltaY: number): void {
+    clearNavigationPath()
     camera.value = clampCamera({
       ...camera.value,
       worldX: camera.value.worldX + Math.trunc(deltaX),
@@ -826,6 +1667,7 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
   function setZ(z: number): void {
     const next = clampCamera({ ...camera.value, z })
     if (next.z === camera.value.z) return
+    clearNavigationPath()
     camera.value = next
     selectedCoordinate.value = {
       worldX: next.worldX,
@@ -837,6 +1679,7 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
   }
 
   function selectOvermapTile(tile: CityOvermapTile | null): void {
+    clearNavigationPath()
     selectedTile.value = tile
     selectedCoordinate.value = null
   }
@@ -844,6 +1687,7 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
   function openOvermapTile(tile = selectedTile.value): void {
     const currentProfile = profile.value
     if (!tile || !currentProfile) return
+    clearNavigationPath()
     const center = Math.floor(currentProfile.chunk_size / 2)
     selectedTile.value = tile
     mapMode.value = 'local'
@@ -863,6 +1707,7 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
   }
 
   function showOvermap(): void {
+    clearNavigationPath()
     mapMode.value = 'overmap'
     selectedCoordinate.value = null
     void loadLandLayer(0).catch(() => undefined)
@@ -871,6 +1716,7 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
   function showLocalMap(): void {
     mapMode.value = 'local'
     if (!selectedCoordinate.value) {
+      clearNavigationPath()
       selectedCoordinate.value = {
         worldX: camera.value.worldX,
         worldY: camera.value.worldY,
@@ -883,6 +1729,7 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
 
   function selectCell(cell: ProjectedCityCell | null): void {
     if (!cell) return
+    clearNavigationPath()
     selectedCoordinate.value = { worldX: cell.worldX, worldY: cell.worldY, z: cell.z }
   }
 
@@ -898,6 +1745,7 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
     visibleLoadTimer = null
     activeWorldID.value = null
     worlds.value = []
+    inFlightCommandReceipts.clear()
     resetSpatialState()
     loadError.value = null
   }
@@ -917,13 +1765,39 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
     developmentAvailability,
     enterpriseLocationState,
     enterpriseLocationAvailability,
+    cityServiceCatalog,
+    cityServiceFacilities,
+    cityServiceDemands,
+    cityServiceConnections,
+    cityServiceSettlements,
+    cityServiceAvailability,
+    cityPhysicalNetworkCatalog,
+    cityPhysicalNetworks,
+    cityPhysicalNetworkNodes,
+    cityPhysicalNetworkEdges,
+    cityPhysicalNetworkFlows,
+    cityPhysicalNetworkFacts,
+    cityPhysicalNetworkDiagnostics,
+    cityPhysicalNetworkAvailability,
     worldRuntimeCatalog,
     worldActors,
     selectedActorCode,
     worldActorState,
+    navigationPath,
+    navigationLoading,
+    navigationError,
+    worldPortalStates,
+    worldPortalAccessAvailability,
+    worldNavigationIntents,
+    worldNavigationReservations,
+    worldNavigationIntentAvailability,
+    worldNavigationIntentLoading,
+    worldNavigationIntentError,
     worldActorRoleOptions,
     worldRuntimeRules,
     worldRuleCases,
+    worldMembers,
+    worldCommandReceipts,
     worldRuntimeAvailability,
     activeDevelopmentProjects,
     developmentProjectsByBuilding,
@@ -946,12 +1820,18 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
     landLoading,
     developmentLoading,
     enterpriseLocationLoading,
+    cityServiceLoading,
+    cityPhysicalNetworkLoading,
     worldRuntimeLoading,
+    worldPortalLoading,
+    worldMembersLoading,
     creatingWorld,
     generatingChunkKey,
     developmentCommandCode,
     enterpriseLocationCommandCode,
+    cityServiceCommandCode,
     worldRuntimeCommandCode,
+    worldMemberMutationKey,
     canGenerateSelectedTile,
     loadError,
     initialize,
@@ -963,12 +1843,27 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
     loadLandLayer,
     loadDevelopmentState,
     loadEnterpriseLocationState,
+    loadCityServices,
+    queryCityServiceSection,
+    loadCityPhysicalNetworks,
+    queryCityPhysicalNetworkSection,
+    queryCityPhysicalNetworkDiagnostics,
     loadWorldRuntime,
+    loadWorldPortalStates,
+    loadWorldNavigationState,
+    loadWorldMembers,
+    loadWorldCommandReceipts,
     loadWorldActor,
     selectWorldActor,
+    focusWorldActor,
+    previewWorldActorPath,
+    clearNavigationPath,
     runDevelopmentCommand,
     runEnterpriseLocationCommand,
+    runCityServiceCommand,
     runWorldRuntimeCommand,
+    addWorldMember,
+    updateWorldMember,
     setViewportSize,
     panCamera,
     changeZoom,

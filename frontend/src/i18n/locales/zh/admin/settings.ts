@@ -40,6 +40,12 @@ export default {
           cyberSessionBlockHint: '开启后,被上游网络安全策略(cyber_policy)拦截的会话将在 TTL 内被本地屏蔽,不再发往上游。仅屏蔽该会话,不影响同 Key 其他会话。',
           cyberSessionBlockTTL: '屏蔽时长(秒)',
         },
+        citySimulation: {
+          title: '城市模拟',
+          description: '启用开放世界城市模拟。仅平台管理员可创建和管理城市，已加入城市的普通用户仅能游玩角色内容。',
+          enabled: '启用城市模拟',
+          enabledHint: '关闭后入口和城市 API 均不可用，现有世界数据会保留，重新启用后可继续使用。',
+        },
         affiliate: {
           title: '邀请返利',
           description: '老用户邀请新用户注册，新用户充值后老用户按比例获得返利额度。默认关闭。',

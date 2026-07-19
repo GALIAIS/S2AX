@@ -342,6 +342,9 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	// 风控中心功能开关
 	updates[SettingKeyRiskControlEnabled] = strconv.FormatBool(settings.RiskControlEnabled)
 
+	// 城市模拟功能开关
+	updates[SettingKeyCitySimulationEnabled] = strconv.FormatBool(settings.CitySimulationEnabled)
+
 	// cyber 会话屏蔽开关 + TTL
 	updates[SettingKeyCyberSessionBlockEnabled] = strconv.FormatBool(settings.CyberSessionBlockEnabled)
 	if settings.CyberSessionBlockTTLSeconds > 0 {

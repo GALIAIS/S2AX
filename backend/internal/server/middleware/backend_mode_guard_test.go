@@ -393,3 +393,79 @@ func TestBackendModeAuthGuard(t *testing.T) {
 		})
 	}
 }
+
+func newCitySimulationSettingService(t *testing.T, enabled string) *service.SettingService {
+	t.Helper()
+	return service.NewSettingService(&bmSettingRepo{
+		values: map[string]string{
+			service.SettingKeyCitySimulationEnabled: enabled,
+		},
+	}, &config.Config{})
+}
+
+func TestCitySimulationGuard(t *testing.T) {
+	tests := []struct {
+		name            string
+		nilService      bool
+		enabled         string
+		role            *string
+		wantStatus      int
+		wantAdminMarker bool
+	}{
+		{
+			name:       "nil_service_fails_closed",
+			nilService: true,
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "disabled_fails_closed",
+			enabled:    "false",
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "enabled_member_can_play",
+			enabled:    "true",
+			role:       stringPtr(service.RoleUser),
+			wantStatus: http.StatusNoContent,
+		},
+		{
+			name:            "enabled_admin_is_marked_for_management",
+			enabled:         "true",
+			role:            stringPtr(service.RoleAdmin),
+			wantStatus:      http.StatusNoContent,
+			wantAdminMarker: true,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			r := gin.New()
+			if tc.role != nil {
+				role := *tc.role
+				r.Use(func(c *gin.Context) {
+					c.Set(string(ContextKeyUserRole), role)
+					c.Next()
+				})
+			}
+
+			var settingService *service.SettingService
+			if !tc.nilService {
+				settingService = newCitySimulationSettingService(t, tc.enabled)
+			}
+			r.Use(CitySimulationGuard(settingService))
+			r.GET("/city", func(c *gin.Context) {
+				if service.IsCitySystemAdministrator(c.Request.Context()) != tc.wantAdminMarker {
+					c.Status(http.StatusInternalServerError)
+					return
+				}
+				c.Status(http.StatusNoContent)
+			})
+
+			response := httptest.NewRecorder()
+			r.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/city", nil))
+			require.Equal(t, tc.wantStatus, response.Code)
+		})
+	}
+}

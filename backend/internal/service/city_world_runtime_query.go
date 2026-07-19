@@ -81,12 +81,36 @@ func (s *CityEconomyService) ListWorldActors(
 	if err := authorizeCityWorldRead(ctx, s.db, userID, worldID); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	query := `
 SELECT code, owner_user_id, actor_type_code, name, status, archetype_code,
        archetype_version, created_tick, updated_tick, version, metadata
 FROM world_actors
-WHERE world_id = $1 AND owner_user_id = $2
-ORDER BY status ASC, code ASC`, worldID, userID)
+WHERE world_id = $1 AND (
+    owner_user_id = $2 OR EXISTS (
+        SELECT 1
+        FROM world_actor_control_grants grant_value
+        JOIN city_members member
+          ON member.world_id = grant_value.world_id AND member.user_id = grant_value.user_id
+         AND member.status = 'active'
+        WHERE grant_value.world_id = world_actors.world_id
+          AND grant_value.actor_id = world_actors.id
+          AND grant_value.user_id = $2
+          AND grant_value.status = 'active'
+          AND grant_value.capability IN ('actor.command', 'actor.control.manage')
+    )
+)
+ORDER BY status ASC, code ASC`
+	args := []any{worldID, userID}
+	if IsCitySystemAdministrator(ctx) {
+		query = `
+SELECT code, owner_user_id, actor_type_code, name, status, archetype_code,
+       archetype_version, created_tick, updated_tick, version, metadata
+FROM world_actors
+WHERE world_id = $1
+ORDER BY status ASC, code ASC`
+		args = []any{worldID}
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list controlled world actors: %w", err)
 	}
@@ -101,6 +125,13 @@ ORDER BY status ASC, code ASC`, worldID, userID)
 	}
 	if err = closeCityRows(rows, "iterate controlled world actors"); err != nil {
 		return nil, err
+	}
+	for index := range items {
+		location, locationErr := loadWorldActorLocation(ctx, s.db, worldID, items[index].Code)
+		if locationErr != nil {
+			return nil, locationErr
+		}
+		items[index].Location = location
 	}
 	return items, nil
 }
@@ -117,11 +148,34 @@ func (s *CityEconomyService) GetWorldActorState(
 		return nil, err
 	}
 	var actorID int64
-	actor, err := scanWorldActor(s.db.QueryRowContext(ctx, `
+	query := `
 SELECT code, owner_user_id, actor_type_code, name, status, archetype_code,
        archetype_version, created_tick, updated_tick, version, metadata
 FROM world_actors
-WHERE world_id = $1 AND owner_user_id = $2 AND code = $3`, worldID, userID, actorCode))
+WHERE world_id = $1 AND code = $3 AND (
+    owner_user_id = $2 OR EXISTS (
+        SELECT 1
+        FROM world_actor_control_grants grant_value
+        JOIN city_members member
+          ON member.world_id = grant_value.world_id AND member.user_id = grant_value.user_id
+         AND member.status = 'active'
+        WHERE grant_value.world_id = world_actors.world_id
+          AND grant_value.actor_id = world_actors.id
+          AND grant_value.user_id = $2
+          AND grant_value.status = 'active'
+          AND grant_value.capability IN ('actor.command', 'actor.control.manage')
+    )
+)`
+	args := []any{worldID, userID, actorCode}
+	if IsCitySystemAdministrator(ctx) {
+		query = `
+SELECT code, owner_user_id, actor_type_code, name, status, archetype_code,
+       archetype_version, created_tick, updated_tick, version, metadata
+FROM world_actors
+WHERE world_id = $1 AND code = $2`
+		args = []any{worldID, actorCode}
+	}
+	actor, err := scanWorldActor(s.db.QueryRowContext(ctx, query, args...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrWorldActorNotFound
 	}
@@ -129,8 +183,8 @@ WHERE world_id = $1 AND owner_user_id = $2 AND code = $3`, worldID, userID, acto
 		return nil, fmt.Errorf("get controlled world actor: %w", err)
 	}
 	if err = s.db.QueryRowContext(ctx, `
-SELECT id FROM world_actors WHERE world_id = $1 AND owner_user_id = $2 AND code = $3`,
-		worldID, userID, actorCode).Scan(&actorID); err != nil {
+SELECT id FROM world_actors WHERE world_id = $1 AND code = $2`,
+		worldID, actorCode).Scan(&actorID); err != nil {
 		return nil, fmt.Errorf("resolve controlled world actor identity: %w", err)
 	}
 	attributes, err := loadWorldActorAttributes(ctx, s.db, worldID, actorID, actorCode)
@@ -149,8 +203,47 @@ SELECT id FROM world_actors WHERE world_id = $1 AND owner_user_id = $2 AND code 
 	if err != nil {
 		return nil, err
 	}
+	location, err := loadWorldActorLocation(ctx, s.db, worldID, actorCode)
+	if err != nil {
+		return nil, err
+	}
+	actor.Location = location
+	capabilities, err := loadWorldActorCapabilities(ctx, s.db, worldID, actorID, userID, actor.OwnerUserID)
+	if err != nil {
+		return nil, err
+	}
+	controlGrants := make([]WorldActorControlGrant, 0)
+	if IsCitySystemAdministrator(ctx) {
+		controlGrants, err = loadWorldActorControlGrants(ctx, s.db, worldID, &actorID, actorCode)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		for _, capability := range capabilities {
+			if capability != WorldActorCapabilityManageControl {
+				continue
+			}
+			controlGrants, err = loadWorldActorControlGrants(ctx, s.db, worldID, &actorID, actorCode)
+			if err != nil {
+				return nil, err
+			}
+			break
+		}
+	}
+	navigationIntentRecord, err := loadOptionalWorldNavigationIntentRecord(
+		ctx, s.db, worldID, actorCode, false,
+	)
+	if err != nil {
+		return nil, err
+	}
+	var navigationIntent *WorldActorNavigationIntent
+	if navigationIntentRecord != nil {
+		navigationIntent = &navigationIntentRecord.intent
+	}
 	return &WorldActorState{
-		Actor: *actor, Attributes: attributes, Roles: roles, Statuses: statuses, RecentFacts: facts,
+		Actor: *actor, Attributes: attributes, Roles: roles, Statuses: statuses,
+		RecentFacts: facts, Location: location, ControlGrants: controlGrants,
+		Capabilities: capabilities, NavigationIntent: navigationIntent,
 	}, nil
 }
 
@@ -163,13 +256,29 @@ func (s *CityEconomyService) GetWorldActorRoleOptions(
 		return nil, ErrCityInvalidInput
 	}
 	var actorID, currentTick int64
-	if err := s.db.QueryRowContext(ctx, `
+	query := `
 SELECT actor.id, world.current_tick
 FROM world_actors actor
 JOIN city_worlds world ON world.id = actor.world_id
 JOIN city_members member ON member.world_id = actor.world_id
-WHERE actor.world_id = $1 AND actor.code = $2 AND actor.owner_user_id = $3
-  AND member.user_id = $3 AND member.status = 'active'`, worldID, actorCode, userID).Scan(
+WHERE actor.world_id = $1 AND actor.code = $2
+  AND member.user_id = $3 AND member.status = 'active'
+  AND (actor.owner_user_id = $3 OR EXISTS (
+      SELECT 1 FROM world_actor_control_grants grant_value
+      WHERE grant_value.world_id = actor.world_id AND grant_value.actor_id = actor.id
+        AND grant_value.user_id = $3 AND grant_value.status = 'active'
+		AND grant_value.capability IN ('actor.command', 'actor.control.manage')
+	  ))`
+	args := []any{worldID, actorCode, userID}
+	if IsCitySystemAdministrator(ctx) {
+		query = `
+SELECT actor.id, world.current_tick
+FROM world_actors actor
+JOIN city_worlds world ON world.id = actor.world_id
+WHERE actor.world_id = $1 AND actor.code = $2`
+		args = []any{worldID, actorCode}
+	}
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(
 		&actorID, &currentTick,
 	); errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrWorldActorNotFound
@@ -266,6 +375,55 @@ ORDER BY category_code ASC`, worldID, actorID)
 	return items, nil
 }
 
+func loadWorldActorCapabilities(
+	ctx context.Context,
+	queryer citySQLQueryer,
+	worldID, actorID, userID int64,
+	ownerUserID *int64,
+) ([]string, error) {
+	var simulationVersion string
+	if err := queryer.QueryRowContext(ctx, `
+SELECT simulation_version
+FROM city_worlds
+WHERE id = $1`, worldID).Scan(&simulationVersion); err != nil {
+		return nil, fmt.Errorf("load world actor capability protocol: %w", err)
+	}
+	if !cityEngineSupportsWorldActorSpatialControl(simulationVersion) {
+		if ownerUserID != nil && *ownerUserID == userID {
+			return []string{WorldActorCapabilityCommand}, nil
+		}
+		return []string{}, nil
+	}
+	if ownerUserID != nil && *ownerUserID == userID {
+		return []string{WorldActorCapabilityCommand, WorldActorCapabilityManageControl}, nil
+	}
+	rows, err := queryer.QueryContext(ctx, `
+SELECT DISTINCT value.capability
+FROM world_actor_control_grants value
+JOIN city_members member
+  ON member.world_id = value.world_id AND member.user_id = value.user_id
+ AND member.status = 'active'
+WHERE value.world_id = $1 AND value.actor_id = $2 AND value.user_id = $3
+  AND value.status = 'active'
+ORDER BY value.capability ASC`, worldID, actorID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("load world actor capabilities: %w", err)
+	}
+	items := make([]string, 0, 2)
+	for rows.Next() {
+		var capability string
+		if err = rows.Scan(&capability); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan world actor capability: %w", err)
+		}
+		items = append(items, capability)
+	}
+	if err = closeCityRows(rows, "iterate world actor capabilities"); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 func (s *CityEconomyService) ListWorldRules(
 	ctx context.Context,
 	userID, worldID int64,
@@ -344,8 +502,23 @@ FROM world_rule_cases value
 JOIN world_runtime_facts source ON source.id = value.source_fact_id AND source.world_id = value.world_id
 LEFT JOIN world_runtime_facts consequence ON consequence.id = value.consequence_fact_id AND consequence.world_id = value.world_id
 JOIN world_actors actor ON actor.id = value.subject_actor_id AND actor.world_id = value.world_id
-WHERE value.world_id = $1 AND actor.owner_user_id = $2`
-	args := []any{input.WorldID, input.UserID}
+WHERE value.world_id = $1`
+	args := []any{input.WorldID}
+	if !IsCitySystemAdministrator(ctx) {
+		query += ` AND (
+    actor.owner_user_id = $2 OR EXISTS (
+        SELECT 1
+        FROM world_actor_control_grants grant_value
+        JOIN city_members member
+          ON member.world_id = grant_value.world_id AND member.user_id = grant_value.user_id
+         AND member.status = 'active'
+        WHERE grant_value.world_id = actor.world_id AND grant_value.actor_id = actor.id
+          AND grant_value.user_id = $2 AND grant_value.status = 'active'
+          AND grant_value.capability IN ('actor.command', 'actor.control.manage')
+    )
+)`
+		args = append(args, input.UserID)
+	}
 	if input.ActorCode != "" {
 		query += fmt.Sprintf(` AND actor.code = $%d`, len(args)+1)
 		args = append(args, input.ActorCode)
@@ -386,6 +559,11 @@ func loadWorldRuntimeHashState(
 	queryer citySQLQueryer,
 	worldID int64,
 ) (*worldRuntimeHashState, error) {
+	var simulationVersion string
+	if err := queryer.QueryRowContext(ctx, `
+SELECT simulation_version FROM city_worlds WHERE id = $1`, worldID).Scan(&simulationVersion); err != nil {
+		return nil, fmt.Errorf("load world runtime simulation version: %w", err)
+	}
 	state := &WorldRuntimeState{
 		Definitions: make([]WorldRuntimeDefinition, 0), Actors: make([]WorldActor, 0),
 		Attributes: make([]WorldActorAttribute, 0), Roles: make([]WorldActorRole, 0),
@@ -520,6 +698,38 @@ ORDER BY actor.code ASC, status.status_code ASC, status.instance_code ASC`, worl
 	if err = closeCityRows(statusRows, "iterate world actor statuses"); err != nil {
 		return nil, err
 	}
+	if cityEngineSupportsWorldActorSpatialControl(simulationVersion) {
+		locations, locationErr := loadWorldActorLocations(ctx, queryer, worldID)
+		if locationErr != nil {
+			return nil, locationErr
+		}
+		controlGrants, grantErr := loadWorldActorControlGrants(ctx, queryer, worldID, nil, "")
+		if grantErr != nil {
+			return nil, grantErr
+		}
+		state.Locations = &locations
+		state.ControlGrants = &controlGrants
+	}
+	if cityEngineSupportsWorldPortalAccess(simulationVersion) {
+		portalStates, portalErr := loadWorldPortalStates(ctx, queryer, worldID)
+		if portalErr != nil {
+			return nil, portalErr
+		}
+		state.PortalStates = &portalStates
+	}
+	if cityEngineSupportsWorldNavigationIntents(simulationVersion) {
+		navigationProfile, profileErr := loadWorldNavigationProfile(ctx, queryer, worldID)
+		if profileErr != nil {
+			return nil, profileErr
+		}
+		navigationIntents, intentErr := loadWorldNavigationIntents(ctx, queryer, worldID)
+		if intentErr != nil {
+			return nil, intentErr
+		}
+		sortWorldNavigationIntents(navigationIntents)
+		state.NavigationProfile = navigationProfile
+		state.NavigationIntents = &navigationIntents
+	}
 	state.Facts, err = loadWorldRuntimeFacts(ctx, queryer, worldID, nil, 0, 0)
 	if err != nil {
 		return nil, err
@@ -640,6 +850,122 @@ ORDER BY status.status_code ASC, status.instance_code ASC`, worldID, actorID)
 		items = append(items, item)
 	}
 	if err = closeCityRows(rows, "iterate world actor statuses"); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func loadWorldActorLocation(
+	ctx context.Context,
+	queryer citySQLQueryer,
+	worldID int64,
+	actorCode string,
+) (*WorldActorLocation, error) {
+	item, err := scanWorldActorLocation(queryer.QueryRowContext(ctx, `
+SELECT actor.code, location.space_kind, location.space_code, location.x, location.y,
+       location.z, location.chunk_x, location.chunk_y, location.local_x, location.local_y,
+       location.anchor_kind, location.anchor_code, location.jurisdiction_code,
+       location.moved_tick, fact.tick, fact.sequence, location.version, location.metadata
+FROM world_actor_locations location
+JOIN world_actors actor ON actor.id = location.actor_id AND actor.world_id = location.world_id
+LEFT JOIN world_runtime_facts fact ON fact.id = location.source_fact_id AND fact.world_id = location.world_id
+WHERE location.world_id = $1 AND actor.code = $2`, worldID, actorCode))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load world actor location: %w", err)
+	}
+	return item, nil
+}
+
+func loadWorldActorLocations(
+	ctx context.Context,
+	queryer citySQLQueryer,
+	worldID int64,
+) ([]WorldActorLocation, error) {
+	rows, err := queryer.QueryContext(ctx, `
+SELECT actor.code, location.space_kind, location.space_code, location.x, location.y,
+       location.z, location.chunk_x, location.chunk_y, location.local_x, location.local_y,
+       location.anchor_kind, location.anchor_code, location.jurisdiction_code,
+       location.moved_tick, fact.tick, fact.sequence, location.version, location.metadata
+FROM world_actor_locations location
+JOIN world_actors actor ON actor.id = location.actor_id AND actor.world_id = location.world_id
+LEFT JOIN world_runtime_facts fact ON fact.id = location.source_fact_id AND fact.world_id = location.world_id
+WHERE location.world_id = $1
+ORDER BY actor.code ASC`, worldID)
+	if err != nil {
+		return nil, fmt.Errorf("load world actor locations: %w", err)
+	}
+	items := make([]WorldActorLocation, 0)
+	for rows.Next() {
+		item, scanErr := scanWorldActorLocation(rows)
+		if scanErr != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan world actor location: %w", scanErr)
+		}
+		items = append(items, *item)
+	}
+	if err = closeCityRows(rows, "iterate world actor locations"); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func loadWorldActorControlGrants(
+	ctx context.Context,
+	queryer citySQLQueryer,
+	worldID int64,
+	actorID *int64,
+	actorCode string,
+) ([]WorldActorControlGrant, error) {
+	query := `
+SELECT value.code, actor.code, value.user_id, value.capability, value.status,
+       value.granted_by_user_id, value.granted_tick, value.revoked_tick,
+       grant_fact.tick, grant_fact.sequence, revoke_fact.tick, revoke_fact.sequence,
+       value.version, value.metadata
+FROM world_actor_control_grants value
+JOIN world_actors actor ON actor.id = value.actor_id AND actor.world_id = value.world_id
+LEFT JOIN world_runtime_facts grant_fact
+  ON grant_fact.id = value.grant_source_fact_id AND grant_fact.world_id = value.world_id
+LEFT JOIN world_runtime_facts revoke_fact
+  ON revoke_fact.id = value.revoke_source_fact_id AND revoke_fact.world_id = value.world_id
+WHERE value.world_id = $1`
+	args := []any{worldID}
+	if actorID != nil {
+		query += ` AND value.actor_id = $2`
+		args = append(args, *actorID)
+	}
+	query += ` ORDER BY actor.code ASC, value.capability ASC, value.granted_tick ASC, value.code ASC`
+	rows, err := queryer.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("load world actor control grants: %w", err)
+	}
+	items := make([]WorldActorControlGrant, 0)
+	for rows.Next() {
+		var item WorldActorControlGrant
+		var revoked, grantTick, grantSequence, revokeTick, revokeSequence sql.NullInt64
+		if err = rows.Scan(&item.Code, &item.ActorCode, &item.UserID, &item.Capability,
+			&item.Status, &item.GrantedByUserID, &item.GrantedTick, &revoked,
+			&grantTick, &grantSequence, &revokeTick, &revokeSequence,
+			&item.Version, &item.Metadata); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan world actor control grant: %w", err)
+		}
+		item.RevokedTick = nullInt64Pointer(revoked)
+		if grantTick.Valid {
+			item.GrantSourceFact = &WorldRuntimeFactRef{Tick: grantTick.Int64, Sequence: grantSequence.Int64}
+		}
+		if revokeTick.Valid {
+			item.RevokeSourceFact = &WorldRuntimeFactRef{Tick: revokeTick.Int64, Sequence: revokeSequence.Int64}
+		}
+		if actorCode != "" && item.ActorCode != actorCode {
+			_ = rows.Close()
+			return nil, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "world_actor_control_grant"})
+		}
+		items = append(items, item)
+	}
+	if err = closeCityRows(rows, "iterate world actor control grants"); err != nil {
 		return nil, err
 	}
 	return items, nil
@@ -778,7 +1104,12 @@ JOIN world_actors actor ON actor.id = value.subject_actor_id AND actor.world_id 
 WHERE value.world_id = $1`
 	args := []any{worldID}
 	if ownerUserID != nil {
-		query += fmt.Sprintf(` AND actor.owner_user_id = $%d`, len(args)+1)
+		query += fmt.Sprintf(` AND (actor.owner_user_id = $%d OR EXISTS (
+            SELECT 1 FROM world_actor_control_grants grant_value
+            WHERE grant_value.world_id = actor.world_id AND grant_value.actor_id = actor.id
+              AND grant_value.user_id = $%d AND grant_value.status = 'active'
+              AND grant_value.capability IN ('actor.command', 'actor.control.manage')
+        ))`, len(args)+1, len(args)+1)
 		args = append(args, *ownerUserID)
 	}
 	if tick > 0 {

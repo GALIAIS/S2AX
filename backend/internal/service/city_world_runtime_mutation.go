@@ -118,6 +118,57 @@ func (s *CityEconomyService) postWorldRuntimeCommand(
 			return worldRuntimeExecution{}, err
 		}
 		return s.transitionWorldActorRole(ctx, tx, worldID, targetTick, factSequence, effectSequence, caseSequence, command, payload)
+	case CityCommandTypeActorLocationMove:
+		payload, err := decodeStoredCityCommandPayload[worldActorLocationMovePayload](command)
+		if err != nil {
+			return worldRuntimeExecution{}, err
+		}
+		return s.moveWorldActor(ctx, tx, worldID, targetTick, factSequence, effectSequence, caseSequence, command, payload)
+	case CityCommandTypeActorControlGrant, CityCommandTypeActorControlRevoke:
+		payload, err := decodeStoredCityCommandPayload[worldActorControlPayload](command)
+		if err != nil {
+			return worldRuntimeExecution{}, err
+		}
+		return s.changeWorldActorControl(
+			ctx, tx, worldID, targetTick, factSequence, effectSequence, caseSequence,
+			command, payload, command.CommandType == CityCommandTypeActorControlGrant,
+		)
+	case CityCommandTypePortalStateTransition:
+		payload, err := decodeStoredCityCommandPayload[worldPortalStateTransitionPayload](command)
+		if err != nil {
+			return worldRuntimeExecution{}, err
+		}
+		return s.transitionWorldPortalState(
+			ctx, tx, worldID, targetTick, factSequence, effectSequence, caseSequence,
+			command, payload,
+		)
+	case CityCommandTypePortalAccessConfigure:
+		payload, err := decodeStoredCityCommandPayload[worldPortalAccessConfigurePayload](command)
+		if err != nil {
+			return worldRuntimeExecution{}, err
+		}
+		return s.configureWorldPortalAccess(
+			ctx, tx, worldID, targetTick, factSequence, effectSequence, caseSequence,
+			command, payload,
+		)
+	case CityCommandTypeActorNavigationIntentSet:
+		payload, err := decodeStoredCityCommandPayload[worldNavigationIntentSetPayload](command)
+		if err != nil {
+			return worldRuntimeExecution{}, err
+		}
+		return s.setWorldNavigationIntent(
+			ctx, tx, worldID, targetTick, factSequence, effectSequence, caseSequence,
+			command, payload,
+		)
+	case CityCommandTypeActorNavigationIntentCancel:
+		payload, err := decodeStoredCityCommandPayload[worldNavigationIntentCancelPayload](command)
+		if err != nil {
+			return worldRuntimeExecution{}, err
+		}
+		return s.cancelWorldNavigationIntent(
+			ctx, tx, worldID, targetTick, factSequence, effectSequence, caseSequence,
+			command, payload,
+		)
 	default:
 		return worldRuntimeExecution{}, ErrCitySimulationInvariant.WithMetadata(map[string]string{"command_type": command.CommandType})
 	}
@@ -210,7 +261,15 @@ RETURNING id`, worldID, actor.Code, command.UserID, actor.ActorTypeCode, actor.N
 	for _, roleCode := range archetype.InitialRoles {
 		effectSpecs = append(effectSpecs, worldRuntimeEffectSpec{Type: WorldRuntimeEffectRoleGrant, Key: roleCode})
 	}
-	if len(effectSpecs) > worldRuntimeMaximumEffects {
+	spatialControl, err := worldRuntimeUsesSpatialControl(ctx, tx, worldID)
+	if err != nil {
+		return worldRuntimeExecution{}, err
+	}
+	additionalEffects := 0
+	if spatialControl {
+		additionalEffects = 3
+	}
+	if len(effectSpecs)+additionalEffects > worldRuntimeMaximumEffects {
 		return worldRuntimeExecution{}, worldRuntimeReject(worldRuntimeRejectionEffectLimit)
 	}
 	effects, nextEffectSequence, err := applyWorldRuntimeEffects(
@@ -218,6 +277,32 @@ RETURNING id`, worldID, actor.Code, command.UserID, actor.ActorTypeCode, actor.N
 	)
 	if err != nil {
 		return worldRuntimeExecution{}, err
+	}
+	if spatialControl {
+		location, resolveErr := resolveInitialWorldActorLocation(ctx, tx, worldID, actor.Code)
+		if resolveErr != nil {
+			return worldRuntimeExecution{}, resolveErr
+		}
+		locationEffect, locationErr := applyWorldActorLocationEffect(
+			ctx, tx, worldID, targetTick, nextEffectSequence, len(effects)+1,
+			actorRef, root, location, nil,
+		)
+		if locationErr != nil {
+			return worldRuntimeExecution{}, locationErr
+		}
+		effects = append(effects, *locationEffect)
+		nextEffectSequence++
+		for _, capability := range []string{WorldActorCapabilityCommand, WorldActorCapabilityManageControl} {
+			controlEffect, controlErr := applyWorldActorControlEffect(
+				ctx, tx, worldID, targetTick, nextEffectSequence, len(effects)+1,
+				actorRef, root, command.UserID, command.UserID, capability, true,
+			)
+			if controlErr != nil {
+				return worldRuntimeExecution{}, controlErr
+			}
+			effects = append(effects, *controlEffect)
+			nextEffectSequence++
+		}
 	}
 	if err = updateWorldRuntimeProfile(ctx, tx, worldID, 1, 1, int64(len(effects)), 0); err != nil {
 		return worldRuntimeExecution{}, err
@@ -590,6 +675,17 @@ func loadControlledWorldActor(
 	worldID, userID int64,
 	actorCode string,
 ) (*worldRuntimeActorRef, error) {
+	return loadWorldActorWithCapability(
+		ctx, tx, worldID, userID, actorCode, WorldActorCapabilityCommand,
+	)
+}
+
+func loadWorldActorWithCapability(
+	ctx context.Context,
+	tx *sql.Tx,
+	worldID, userID int64,
+	actorCode, capability string,
+) (*worldRuntimeActorRef, error) {
 	item := &worldRuntimeActorRef{}
 	var ownerID sql.NullInt64
 	var archetypeCode, archetypeVersion sql.NullString
@@ -597,8 +693,20 @@ func loadControlledWorldActor(
 SELECT id, code, owner_user_id, actor_type_code, name, status,
        archetype_code, archetype_version, created_tick, updated_tick, version, metadata
 FROM world_actors
-WHERE world_id = $1 AND code = $2 AND owner_user_id = $3 AND status = 'active'
-FOR UPDATE`, worldID, actorCode, userID).Scan(
+WHERE world_id = $1 AND code = $2 AND status = 'active'
+  AND (owner_user_id = $3 OR EXISTS (
+      SELECT 1
+      FROM world_actor_control_grants grant_value
+      JOIN city_members member
+        ON member.world_id = grant_value.world_id AND member.user_id = grant_value.user_id
+       AND member.status = 'active'
+      WHERE grant_value.world_id = world_actors.world_id
+        AND grant_value.actor_id = world_actors.id
+        AND grant_value.user_id = $3
+        AND grant_value.capability = $4
+        AND grant_value.status = 'active'
+  ))
+FOR UPDATE`, worldID, actorCode, userID, capability).Scan(
 		&item.id, &item.actor.Code, &ownerID, &item.actor.ActorTypeCode, &item.actor.Name,
 		&item.actor.Status, &archetypeCode, &archetypeVersion, &item.actor.CreatedTick,
 		&item.actor.UpdatedTick, &item.actor.Version, &item.actor.Metadata,
@@ -607,7 +715,7 @@ FOR UPDATE`, worldID, actorCode, userID).Scan(
 		return nil, worldRuntimeReject(worldRuntimeRejectionActorNotFound)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("load controlled world actor: %w", err)
+		return nil, fmt.Errorf("load controllable world actor: %w", err)
 	}
 	item.actor.OwnerUserID = nullInt64Pointer(ownerID)
 	if archetypeCode.Valid {
@@ -630,8 +738,14 @@ WHERE world_id = $1 AND id = $2`, worldID, actorID, targetTick); err != nil {
 type worldRuntimeAutomaticExecution struct {
 	facts         []WorldRuntimeFact
 	effects       []WorldEffectOperation
+	events        []worldRuntimeAutomaticEvent
 	nextFactSeq   int64
 	nextEffectSeq int64
+}
+
+type worldRuntimeAutomaticEvent struct {
+	eventType string
+	payload   map[string]any
 }
 
 type expiringWorldRuntimeStatus struct {
@@ -1179,6 +1293,13 @@ ORDER BY code ASC`, worldID, trigger)
 		if decodeErr != nil {
 			return execution, decodeErr
 		}
+		scopeResolution, scopeErr := resolveWorldRuleScope(ctx, tx, worldID, actor.id, &rule)
+		if scopeErr != nil {
+			return execution, scopeErr
+		}
+		if !scopeResolution.Matched {
+			continue
+		}
 		evaluation, evaluateErr := evaluateWorldRequirement(
 			ctx, tx, worldID, actor.id, targetTick, rule.Requirements,
 		)
@@ -1238,7 +1359,7 @@ WHERE world_id = $1 AND subject_actor_id = $2 AND rule_code = $3
 		caseCode := fmt.Sprintf("case.%d.%d", sourceFact.fact.SourceCommandSequenceValue(), execution.nextCaseSeq)
 		casePayload, marshalErr := json.Marshal(map[string]any{
 			"schema_version": 1, "trigger": trigger, "requirements": evaluation,
-			"occurrences_in_window": occurrences,
+			"occurrences_in_window": occurrences, "resolved_scope": scopeResolution,
 		})
 		if marshalErr != nil {
 			return execution, fmt.Errorf("marshal world rule case: %w", marshalErr)

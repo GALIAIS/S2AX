@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Wei-Shaw/sub2api/internal/cityspatial"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/lib/pq"
 )
@@ -143,7 +144,11 @@ type CityWorldCreateInput struct {
 	// SimulationVersion is used by migrations and compatibility tests. User
 	// handlers intentionally leave it empty so new worlds always use current.
 	SimulationVersion string
-	MonetaryUnit      CityMonetaryUnitCreateInput
+	// StyleProfileID opts into the independent V2 open-world creation path.
+	// Legacy worlds leave both fields empty.
+	StyleProfileID string
+	SpawnPolicy    string
+	MonetaryUnit   CityMonetaryUnitCreateInput
 }
 
 type cityAccountTemplateSeed struct {
@@ -168,6 +173,8 @@ type normalizedCityWorldCreateInput struct {
 	name              string
 	timezone          string
 	simulationVersion string
+	styleProfileID    string
+	spawnPolicy       string
 	unitCode          string
 	unitName          string
 	unitSymbol        string
@@ -311,6 +318,14 @@ VALUES ($1, $2, $3, $4, $5, $6, 0, 0, 'active', '{}'::jsonb)`,
 	if _, err = tx.ExecContext(ctx, `SELECT assert_city_demography_projection($1)`, worldID); err != nil {
 		return nil, fmt.Errorf("validate city F6 foundation: %w", err)
 	}
+	if cityEngineSupportsOpenWorld(normalized.simulationVersion) {
+		if err = initializeCityOpenWorldFoundation(
+			ctx, tx, worldID, seed, normalized.simulationVersion,
+			normalized.styleProfileID, normalized.spawnPolicy,
+		); err != nil {
+			return nil, err
+		}
+	}
 	if cityEngineSupportsHouseholdLifecycle(normalized.simulationVersion) {
 		if _, err = tx.ExecContext(ctx, `SELECT initialize_city_f63_foundation($1)`, worldID); err != nil {
 			return nil, fmt.Errorf("initialize city F6.3 foundation: %w", err)
@@ -320,6 +335,13 @@ VALUES ($1, $2, $3, $4, $5, $6, 0, 0, 'active', '{}'::jsonb)`,
 		}
 	}
 	if cityEngineSupportsSpatial(normalized.simulationVersion) {
+		// The advanced foundation writes a coherent world graph in this one
+		// transaction. Its deferred row triggers otherwise repeat whole-world
+		// checks for every inserted projection row; each capability below is
+		// explicitly validated once before this transaction commits.
+		if _, err = tx.ExecContext(ctx, `SELECT set_config('sub2api.city_world_bootstrap', 'on', TRUE)`); err != nil {
+			return nil, fmt.Errorf("enable city world bootstrap validation mode: %w", err)
+		}
 		if err = initializeCityF7SpatialFoundation(
 			ctx, tx, worldID, seed, normalized.simulationVersion,
 		); err != nil {
@@ -359,8 +381,76 @@ VALUES ($1, $2, $3, $4, $5, $6, 0, 0, 'active', '{}'::jsonb)`,
 		if err = initializeWorldRuntimeFoundation(ctx, tx, worldID); err != nil {
 			return nil, err
 		}
+	}
+	if cityEngineSupportsWorldActorSpatialControl(normalized.simulationVersion) {
+		if err = initializeWorldActorSpatialControlFoundation(
+			ctx, tx, worldID, normalized.simulationVersion,
+		); err != nil {
+			return nil, err
+		}
+	}
+	if cityEngineSupportsWorldPortalAccess(normalized.simulationVersion) {
+		if err = initializeWorldPortalAccessFoundation(
+			ctx, tx, worldID, normalized.simulationVersion,
+		); err != nil {
+			return nil, err
+		}
+	}
+	if cityEngineSupportsWorldNavigationIntents(normalized.simulationVersion) {
+		if err = initializeWorldNavigationIntentFoundation(
+			ctx, tx, worldID, normalized.simulationVersion,
+		); err != nil {
+			return nil, err
+		}
+	}
+	if cityEngineSupportsPublicServices(normalized.simulationVersion) {
+		if err = initializeCityServiceFoundation(ctx, tx, worldID); err != nil {
+			return nil, err
+		}
+	}
+	if cityEngineSupportsFacilityLifecycle(normalized.simulationVersion) {
+		if err = initializeCityFacilityLifecycleFoundation(ctx, tx, worldID); err != nil {
+			return nil, err
+		}
+	}
+	if cityEngineSupportsPhysicalNetworks(normalized.simulationVersion) {
+		if err = initializeCityPhysicalNetworkFoundation(ctx, tx, worldID); err != nil {
+			return nil, err
+		}
+	}
+	if cityEngineSupportsWorldRuntime(normalized.simulationVersion) {
 		if _, err = tx.ExecContext(ctx, `SELECT assert_world_runtime_foundation($1)`, worldID); err != nil {
 			return nil, fmt.Errorf("validate open world runtime foundation: %w", err)
+		}
+	}
+	if cityEngineSupportsWorldActorSpatialControl(normalized.simulationVersion) {
+		if _, err = tx.ExecContext(ctx, `SELECT assert_world_actor_spatial_control_foundation($1)`, worldID); err != nil {
+			return nil, fmt.Errorf("validate world actor spatial-control foundation: %w", err)
+		}
+	}
+	if cityEngineSupportsWorldPortalAccess(normalized.simulationVersion) {
+		if _, err = tx.ExecContext(ctx, `SELECT assert_world_portal_access_foundation($1)`, worldID); err != nil {
+			return nil, fmt.Errorf("validate world portal-access foundation: %w", err)
+		}
+	}
+	if cityEngineSupportsWorldNavigationIntents(normalized.simulationVersion) {
+		if _, err = tx.ExecContext(ctx, `SELECT assert_world_navigation_intent_foundation($1)`, worldID); err != nil {
+			return nil, fmt.Errorf("validate world navigation-intent foundation: %w", err)
+		}
+	}
+	if cityEngineSupportsPublicServices(normalized.simulationVersion) {
+		if _, err = tx.ExecContext(ctx, `SELECT assert_city_service_foundation($1)`, worldID); err != nil {
+			return nil, fmt.Errorf("validate city public-service foundation: %w", err)
+		}
+	}
+	if cityEngineSupportsFacilityLifecycle(normalized.simulationVersion) {
+		if _, err = tx.ExecContext(ctx, `SELECT assert_city_facility_lifecycle_foundation($1)`, worldID); err != nil {
+			return nil, fmt.Errorf("validate city facility-lifecycle foundation: %w", err)
+		}
+	}
+	if cityEngineSupportsPhysicalNetworks(normalized.simulationVersion) {
+		if _, err = tx.ExecContext(ctx, `SELECT assert_city_physical_network_foundation($1)`, worldID); err != nil {
+			return nil, fmt.Errorf("validate city physical-network foundation: %w", err)
 		}
 	}
 	_, canonical, stateHash, err := canonicalCityWorldState(ctx, tx, worldID)
@@ -391,9 +481,16 @@ func (s *CityEconomyService) ListWorlds(ctx context.Context, userID int64) ([]*C
 	if userID <= 0 {
 		return nil, ErrCityInvalidInput
 	}
-	rows, err := s.db.QueryContext(ctx, cityWorldSelect+`
+	query := cityWorldSelect + `
 WHERE m.user_id = $1 AND m.status = 'active'
-ORDER BY w.created_at DESC, w.id DESC`, userID)
+ORDER BY w.created_at DESC, w.id DESC`
+	args := []any{userID}
+	if IsCitySystemAdministrator(ctx) {
+		query = citySystemAdministratorWorldSelect + `
+ORDER BY w.created_at DESC, w.id DESC`
+		args = nil
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list city worlds: %w", err)
 	}
@@ -427,9 +524,22 @@ SELECT w.id, w.name, w.owner_user_id, w.group_id, w.status, w.simulation_version
 FROM city_worlds w
 JOIN city_members m ON m.world_id = w.id `
 
+const citySystemAdministratorWorldSelect = `
+SELECT w.id, w.name, w.owner_user_id, w.group_id, w.status, w.simulation_version,
+       w.seed, w.current_tick, w.simulated_at, w.next_tick_at, w.speed_multiplier,
+       w.timezone, w.state_hash, w.settings, 'owner'::varchar(16) AS role, w.created_at, w.updated_at
+FROM city_worlds w `
+
 func loadCityWorldFoundation(ctx context.Context, queryer citySQLQueryer, userID, worldID int64) (*CityWorldFoundation, error) {
-	world, err := scanCityWorld(queryer.QueryRowContext(ctx, cityWorldSelect+`
-WHERE w.id = $1 AND m.user_id = $2 AND m.status = 'active'`, worldID, userID))
+	query := cityWorldSelect + `
+WHERE w.id = $1 AND m.user_id = $2 AND m.status = 'active'`
+	args := []any{worldID, userID}
+	if IsCitySystemAdministrator(ctx) {
+		query = citySystemAdministratorWorldSelect + `
+WHERE w.id = $1`
+		args = []any{worldID}
+	}
+	world, err := scanCityWorld(queryer.QueryRowContext(ctx, query, args...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrCityWorldNotFound
 	}
@@ -653,11 +763,28 @@ func normalizeCityWorldCreateInput(input CityWorldCreateInput) (*normalizedCityW
 		return nil, ErrCityInvalidInput
 	}
 	simulationVersion := strings.TrimSpace(input.SimulationVersion)
+	styleProfileID := strings.TrimSpace(input.StyleProfileID)
+	spawnPolicy := strings.TrimSpace(input.SpawnPolicy)
+	if styleProfileID != "" && simulationVersion == "" {
+		// New worlds always start on the latest immutable open-world contract.
+		// Existing V1/V2/V3 worlds retain their bound generator semantics.
+		simulationVersion = CitySimulationVersionOpenWorldV5
+	}
 	if simulationVersion == "" {
 		simulationVersion = CurrentCitySimulationVersion
 	}
 	if _, err := cityEngineForVersion(simulationVersion); err != nil {
 		return nil, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "simulation_version"})
+	}
+	if cityEngineSupportsOpenWorld(simulationVersion) {
+		if styleProfileID == "" || spawnPolicy != cityOpenWorldSpawnPolicy {
+			return nil, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "open_world_bootstrap"})
+		}
+		if _, err := cityspatial.WorldgenProfileByID(styleProfileID); err != nil {
+			return nil, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "style_profile_id"})
+		}
+	} else if styleProfileID != "" || spawnPolicy != "" {
+		return nil, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "style_profile_id"})
 	}
 
 	code := strings.ToLower(strings.TrimSpace(input.MonetaryUnit.Code))
@@ -700,6 +827,8 @@ func normalizeCityWorldCreateInput(input CityWorldCreateInput) (*normalizedCityW
 		name:              name,
 		timezone:          timezone,
 		simulationVersion: simulationVersion,
+		styleProfileID:    styleProfileID,
+		spawnPolicy:       spawnPolicy,
 		unitCode:          code,
 		unitName:          unitName,
 		unitSymbol:        unitSymbol,

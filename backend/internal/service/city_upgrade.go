@@ -374,6 +374,33 @@ WHERE calendar.world_id = $1 AND world.id = calendar.world_id`, worldID); err !=
 		if err := initializeWorldRuntimeFoundation(ctx, tx, worldID); err != nil {
 			return nil, "", err
 		}
+	} else if fromVersion == CitySimulationVersionF7V5 && toVersion == CitySimulationVersionF7V6 {
+		if err := initializeWorldActorSpatialControlFoundation(ctx, tx, worldID, toVersion); err != nil {
+			return nil, "", err
+		}
+	} else if fromVersion == CitySimulationVersionF7V6 && toVersion == CitySimulationVersionF7V7 {
+		// F7.9 binds deterministic navigation semantics to the existing spatial
+		// and actor projections. It intentionally adds no mutable baseline rows.
+	} else if fromVersion == CitySimulationVersionF7V7 && toVersion == CitySimulationVersionF7V8 {
+		if err := initializeWorldPortalAccessFoundation(ctx, tx, worldID, toVersion); err != nil {
+			return nil, "", err
+		}
+	} else if fromVersion == CitySimulationVersionF7V8 && toVersion == CitySimulationVersionF7V9 {
+		if err := initializeWorldNavigationIntentFoundation(ctx, tx, worldID, toVersion); err != nil {
+			return nil, "", err
+		}
+	} else if fromVersion == CitySimulationVersionF7V9 && toVersion == CitySimulationVersionF8 {
+		if err := initializeCityServiceFoundation(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+	} else if fromVersion == CitySimulationVersionF8 && toVersion == CitySimulationVersionF8V2 {
+		if err := initializeCityFacilityLifecycleFoundation(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+	} else if fromVersion == CitySimulationVersionF8V2 && toVersion == CitySimulationVersionF8V3 {
+		if err := initializeCityPhysicalNetworkFoundation(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
 	} else if fromVersion != CitySimulationVersionF6 || toVersion != CitySimulationVersionF6V2 {
 		return nil, "", ErrCityUpgradePath
 	}
@@ -394,6 +421,12 @@ WHERE id = $1`, worldID, toVersion); err != nil {
 		"assert_city_development_foundation",
 		"assert_city_enterprise_location_foundation",
 		"assert_world_runtime_foundation",
+		"assert_world_actor_spatial_control_foundation",
+		"assert_world_portal_access_foundation",
+		"assert_world_navigation_intent_foundation",
+		"assert_city_service_foundation",
+		"assert_city_facility_lifecycle_foundation",
+		"assert_city_physical_network_foundation",
 	} {
 		if _, err := tx.ExecContext(ctx, `SELECT `+assertion+`($1)`, worldID); err != nil {
 			return nil, "", fmt.Errorf("validate target city engine with %s: %w", assertion, err)

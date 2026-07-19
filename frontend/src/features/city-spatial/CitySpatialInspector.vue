@@ -13,6 +13,26 @@
         <span>{{ t('citySpatial.inspector.chunk') }}</span>
         <strong>{{ tile.chunk_x }}, {{ tile.chunk_y }}, {{ tile.z }}</strong>
       </section>
+      <section v-if="tileActors.length" class="city-actor-section">
+        <div class="city-section-label">
+          <span>{{ t('citySpatial.inspector.actorsHere') }}</span>
+          <span>{{ tileActors.length }}</span>
+        </div>
+        <button
+          v-for="actor in tileActors"
+          :key="actor.code"
+          type="button"
+          class="city-actor-card"
+          @click="emit('selectActor', actor.code)"
+        >
+          <span class="city-actor-glyph">@</span>
+          <span>
+            <strong>{{ actor.name }}</strong>
+            <small>{{ actor.code }} · {{ actor.location?.x }}, {{ actor.location?.y }}, {{ actor.location?.z }}</small>
+          </span>
+          <span class="city-actor-focus">{{ t('citySpatial.inspector.focusActor') }}</span>
+        </button>
+      </section>
       <dl class="city-data-list">
         <div>
           <dt>{{ t('citySpatial.inspector.district') }}</dt>
@@ -135,6 +155,27 @@
           <dd>{{ chunk.generatedTick }}</dd>
         </div>
       </dl>
+
+      <section v-if="coordinateActors.length" class="city-actor-section">
+        <div class="city-section-label">
+          <span>{{ t('citySpatial.inspector.actorsHere') }}</span>
+          <span>{{ coordinateActors.length }}</span>
+        </div>
+        <button
+          v-for="actor in coordinateActors"
+          :key="actor.code"
+          type="button"
+          class="city-actor-card"
+          @click="emit('selectActor', actor.code)"
+        >
+          <span class="city-actor-glyph">@</span>
+          <span>
+            <strong>{{ actor.name }}</strong>
+            <small>{{ actor.code }} · {{ actor.location?.jurisdiction_code }}</small>
+          </span>
+          <span class="city-actor-focus">{{ t('citySpatial.inspector.focusActor') }}</span>
+        </button>
+      </section>
 
       <section v-if="landContext" class="city-land-section">
         <div class="city-section-label">
@@ -276,7 +317,8 @@ import type {
   CityEnterpriseLocationState,
   CityLandState,
   CityOvermapTile,
-  CitySpatialRuleSet
+  CitySpatialRuleSet,
+  WorldActor
 } from '@/api/citySpatial'
 import Icon from '@/components/icons/Icon.vue'
 import {
@@ -300,18 +342,38 @@ const props = withDefaults(defineProps<{
   landState: CityLandState | null
   developmentState?: CityDevelopmentState | null
   enterpriseLocationState?: CityEnterpriseLocationState | null
+  actors?: WorldActor[]
   chunkSize: number
   generated: boolean
 }>(), {
   developmentState: null,
-  enterpriseLocationState: null
+  enterpriseLocationState: null,
+  actors: () => []
 })
+
+const emit = defineEmits<{
+  selectActor: [actorCode: string]
+}>()
 
 const { t, locale } = useI18n()
 
 const tileDefinition = computed(() => (
   props.ruleSet?.definitions.find(definition => definition.id === props.tile?.terrain_definition_id) ?? null
 ))
+
+const tileActors = computed(() => props.tile
+  ? props.actors.filter(actor => actor.location &&
+      actor.location.chunk_x === props.tile?.chunk_x &&
+      actor.location.chunk_y === props.tile?.chunk_y &&
+      actor.location.z === props.tile?.z)
+  : [])
+
+const coordinateActors = computed(() => props.coordinate
+  ? props.actors.filter(actor => actor.location &&
+      actor.location.x === props.coordinate?.worldX &&
+      actor.location.y === props.coordinate?.worldY &&
+      actor.location.z === props.coordinate?.z)
+  : [])
 
 const chunkCoordinate = computed(() => {
   if (!props.coordinate || props.chunkSize <= 0) return '—'
@@ -502,6 +564,7 @@ function maskLabel(mask: number): string {
 
 .city-stack-section { margin-top: 1.2rem; }
 .city-land-section { margin-top: 1.2rem; }
+.city-actor-section { margin-top: 1.2rem; }
 
 .city-section-label {
   display: flex;
@@ -509,6 +572,33 @@ function maskLabel(mask: number): string {
   margin-bottom: 0.5rem;
   color: var(--ui-label-secondary);
 }
+
+.city-actor-card {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 2rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem;
+  border: 1px solid var(--ui-separator);
+  padding: 0.6rem 0.65rem;
+  text-align: left;
+}
+
+.city-actor-card + .city-actor-card { border-top: 0; }
+.city-actor-card:hover, .city-actor-card:focus-visible { background: var(--ui-control); }
+.city-actor-card > span:nth-child(2) { min-width: 0; }
+.city-actor-card strong, .city-actor-card small { display: block; overflow-wrap: anywhere; }
+.city-actor-card strong { font-size: 0.7rem; }
+.city-actor-card small { margin-top: 0.12rem; color: var(--ui-label-secondary); font: 0.58rem ui-monospace, monospace; }
+.city-actor-glyph {
+  display: grid;
+  height: 2rem;
+  place-items: center;
+  border: 1px solid var(--ui-separator);
+  color: var(--ui-accent);
+  font: 0.9rem ui-monospace, monospace;
+}
+.city-actor-focus { color: var(--ui-accent); font: 0.58rem ui-monospace, monospace; text-transform: uppercase; }
 
 .city-layer-card {
   display: grid;

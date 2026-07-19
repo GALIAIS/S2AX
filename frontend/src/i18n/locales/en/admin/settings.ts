@@ -40,6 +40,12 @@ export default {
           cyberSessionBlockHint: 'When enabled, sessions hit by upstream cyber_policy are blocked locally for the TTL and no longer forwarded. Only the offending session is blocked; other sessions on the same key are unaffected.',
           cyberSessionBlockTTL: 'Block TTL (seconds)',
         },
+        citySimulation: {
+          title: 'City Simulation',
+          description: 'Enable the open-world city simulation. Only platform administrators can create and manage cities; members can only play their characters.',
+          enabled: 'Enable city simulation',
+          enabledHint: 'When disabled, the entry point and city API are unavailable. Existing world data is preserved and can be used again after re-enabling.',
+        },
         affiliate: {
           title: 'Affiliate (Invite Rebate)',
           description: 'Existing users invite new ones; the inviter earns a percentage rebate on the invitee’s recharges. Disabled by default.',

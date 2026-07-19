@@ -1,5 +1,6 @@
 import type {
   CityBuilding,
+  CityBuildingLayoutCell,
   CityBuildingPortal,
   CityBuildingUnitPool,
   CityDevelopmentProject,
@@ -10,11 +11,15 @@ import type {
   CityLandState,
   CityLandUse,
   CityMapChunk,
+  CityOpenWorldBuildingInterior,
+  CityOpenWorldChunk,
   CityOvermapTile,
+  CityParcelLayoutCell,
   CityParcel,
   CitySpatialDefinition,
   CitySpatialRuleKind,
-  CitySpatialRuleSet
+  CitySpatialRuleSet,
+  WorldActor
 } from '@/api/citySpatial'
 
 export interface ClassicVisual {
@@ -107,6 +112,8 @@ export interface ClassicOvermapCell {
   activeEnterpriseSiteCount: number
   enterpriseFirmCount: number
   enterpriseOccupiedUnits: number
+  actorCount: number
+  actorCodes: string[]
   x: number
   y: number
   size: number
@@ -135,6 +142,10 @@ export interface ChunkViewportBounds {
 export interface CityLandCellContext {
   parcel: CityParcel | null
   building: CityBuilding | null
+  layoutCell: CityBuildingLayoutCell | null
+  layoutArchetype: string | null
+  parcelLayoutCell: CityParcelLayoutCell | null
+  parcelLayoutStyle: string | null
   unitPools: CityBuildingUnitPool[]
   housingAllocations: CityHousingAllocation[]
   portals: CityBuildingPortal[]
@@ -169,6 +180,11 @@ interface LandProjectionIndex {
   parcelsByCell: Map<string, CityParcel>
   buildingsByCode: Map<string, CityBuilding>
   buildingsByCell: Map<string, CityBuilding>
+  layoutCellsByCell: Map<string, CityBuildingLayoutCell>
+  layoutBuildingCodes: Set<string>
+  layoutArchetypesByBuilding: Map<string, string>
+  parcelLayoutCellsByCell: Map<string, CityParcelLayoutCell>
+  parcelLayoutStylesByParcel: Map<string, string>
   poolsByBuilding: Map<string, CityBuildingUnitPool[]>
   allocationsByPool: Map<string, CityHousingAllocation[]>
   portalsByCell: Map<string, CityBuildingPortal[]>
@@ -219,6 +235,11 @@ function createLandProjectionIndex(
     parcelsByCell: new Map(),
     buildingsByCode: new Map(land.buildings.map(building => [building.code, building])),
     buildingsByCell: new Map(),
+    layoutCellsByCell: new Map(),
+    layoutBuildingCodes: new Set(),
+    layoutArchetypesByBuilding: new Map(),
+    parcelLayoutCellsByCell: new Map(),
+    parcelLayoutStylesByParcel: new Map(),
     poolsByBuilding: new Map(),
     allocationsByPool: new Map(),
     portalsByCell: new Map()
@@ -236,8 +257,28 @@ function createLandProjectionIndex(
       }
     }
   }
+  for (const layout of land.building_layouts ?? []) {
+    const building = index.buildingsByCode.get(layout.building_code)
+    if (!building) continue
+    index.layoutBuildingCodes.add(building.code)
+    index.layoutArchetypesByBuilding.set(building.code, layout.archetype)
+    for (const layoutCell of layout.cells) {
+      if (layoutCell.z !== z) continue
+      const key = coordinateKey(layoutCell.x, layoutCell.y, z)
+      index.layoutCellsByCell.set(key, layoutCell)
+      index.buildingsByCell.set(key, building)
+    }
+  }
+  for (const layout of land.parcel_layouts ?? []) {
+    index.parcelLayoutStylesByParcel.set(layout.parcel_code, layout.style)
+    for (const layoutCell of layout.cells) {
+      if (layoutCell.z !== z) continue
+      index.parcelLayoutCellsByCell.set(coordinateKey(layoutCell.x, layoutCell.y, z), layoutCell)
+    }
+  }
   for (const building of land.buildings) {
     if (z < building.base_z || z > building.top_z) continue
+    if (index.layoutBuildingCodes.has(building.code)) continue
     const bounds = rectangleWorldBounds(building.footprint, chunkSize)
     for (let worldY = bounds.minY; worldY <= bounds.maxY; worldY += 1) {
       for (let worldX = bounds.minX; worldX <= bounds.maxX; worldX += 1) {
@@ -271,16 +312,30 @@ export function getCityLandCellContext(
   const index = createLandProjectionIndex(land, chunkSize, z)
   const key = coordinateKey(worldX, worldY, z)
   const portals = [...(index.portalsByCell.get(key) ?? [])]
+  const layoutCell = index.layoutCellsByCell.get(key) ?? null
+  const parcelLayoutCell = index.parcelLayoutCellsByCell.get(key) ?? null
   const building = index.buildingsByCell.get(key)
     ?? (portals[0] ? index.buildingsByCode.get(portals[0].building_code) : undefined)
     ?? null
   const parcel = index.parcelsByCell.get(key)
     ?? (building ? index.parcelsByCode.get(building.parcel_code) : undefined)
     ?? null
-  if (!parcel && !building && portals.length === 0) return null
+  if (!parcel && !building && portals.length === 0 && !parcelLayoutCell) return null
   const unitPools = building ? [...(index.poolsByBuilding.get(building.code) ?? [])] : []
   const housingAllocations = unitPools.flatMap(pool => index.allocationsByPool.get(pool.code) ?? [])
-  return { parcel, building, unitPools, housingAllocations, portals }
+  const layoutArchetype = building ? index.layoutArchetypesByBuilding.get(building.code) ?? null : null
+  const parcelLayoutStyle = parcel ? index.parcelLayoutStylesByParcel.get(parcel.code) ?? null : null
+  return {
+    parcel,
+    building,
+    layoutCell,
+    layoutArchetype,
+    parcelLayoutCell,
+    parcelLayoutStyle,
+    unitPools,
+    housingAllocations,
+    portals
+  }
 }
 
 export function getCityLandTileSummary(
@@ -310,13 +365,109 @@ export function getCityLandTileSummary(
 }
 
 function landOverlayLayer(
-  kind: 'structure' | 'portal' | 'overlay' | 'entity',
+  kind: CitySpatialRuleKind,
   definitionID: string,
   name: string,
   glyph: string,
   flags: string[]
 ): ProjectedCellLayer {
   return { kind, definitionID, name, glyph, movementCost: 0, flags }
+}
+
+interface BuildingLayoutVisual {
+  kind: CitySpatialRuleKind
+  definitionID: string
+  glyph: string
+  foreground: string
+  background?: string
+}
+
+interface ParcelLayoutVisual {
+  kind: CitySpatialRuleKind
+  definitionID: string
+  glyph: string
+  foreground: string
+  background?: string
+}
+
+const BUILDING_LAYOUT_FURNITURE_GLYPHS: Record<string, string> = {
+  bed: 'H',
+  table: 'T',
+  chair: 'h',
+  counter: '=',
+  shelf: 's',
+  machine: 'M',
+  crate: 'B'
+}
+
+function resolveBuildingLayoutVisual(
+  layoutCell: CityBuildingLayoutCell,
+  building: CityBuilding
+): BuildingLayoutVisual {
+  const structure = LAND_USE_COLORS[building.primary_use]
+  switch (layoutCell.kind) {
+    case 'wall':
+      return {
+        kind: 'structure', definitionID: 'structure.wall', glyph: '#',
+        foreground: structure, background: '#26282d'
+      }
+    case 'window':
+      return {
+        kind: 'structure', definitionID: 'structure.window', glyph: '□',
+        foreground: '#9cc4d5', background: '#26282d'
+      }
+    case 'door':
+      return {
+        kind: 'portal', definitionID: 'portal.door_open', glyph: '+',
+        foreground: '#f0c674', background: '#25272c'
+      }
+    case 'furniture':
+      return {
+        kind: 'furniture', definitionID: 'furniture.table',
+        glyph: BUILDING_LAYOUT_FURNITURE_GLYPHS[layoutCell.feature ?? ''] ?? '*',
+        foreground: '#c8af82', background: '#25272c'
+      }
+    default:
+      if (layoutCell.feature === 'stairs') {
+        return {
+          kind: 'portal', definitionID: 'portal.stairs', glyph: '↕',
+          foreground: '#89c5e9', background: '#25272c'
+        }
+      }
+      return {
+        kind: 'terrain', definitionID: 'terrain.floor', glyph: '·',
+        foreground: '#d3d7dc', background: '#25272c'
+      }
+  }
+}
+
+function resolveParcelLayoutVisual(layoutCell: CityParcelLayoutCell): ParcelLayoutVisual {
+  switch (layoutCell.kind) {
+    case 'tree':
+      return {
+        kind: 'furniture', definitionID: 'furniture.tree', glyph: '♣', foreground: '#78a56d'
+      }
+    case 'garden':
+      return {
+        kind: 'terrain', definitionID: 'terrain.grass', glyph: '"', foreground: '#91b879', background: '#20241e'
+      }
+    case 'sidewalk':
+      return {
+        kind: 'terrain', definitionID: 'terrain.sidewalk', glyph: ':', foreground: '#c5c7ca', background: '#2b2d31'
+      }
+    case 'parking':
+      return {
+        kind: 'terrain', definitionID: 'terrain.road', glyph: '=', foreground: '#acb0b8', background: '#303238'
+      }
+    case 'loading':
+      return {
+        kind: 'overlay', definitionID: 'site.loading', glyph: '▤', foreground: '#d6a36c', background: '#302a24'
+      }
+    default:
+      return {
+        kind: 'terrain', definitionID: 'terrain.sidewalk', glyph: '·', foreground: '#d8d2be', background: '#292a28'
+      }
+  }
 }
 
 function enterpriseSitesByBuilding(
@@ -384,28 +535,77 @@ export function applyCityLandOverlay(
   const building = context.building
   let projected = cell
   if (building) {
-    const bounds = rectangleWorldBounds(building.footprint, chunkSize)
-    const inside = cell.worldX >= bounds.minX && cell.worldX <= bounds.maxX &&
-      cell.worldY >= bounds.minY && cell.worldY <= bounds.maxY
-    if (inside) {
-      const edge = cell.worldX === bounds.minX || cell.worldX === bounds.maxX ||
-        cell.worldY === bounds.minY || cell.worldY === bounds.maxY
-      const glyph = edge ? '#' : '·'
+    if (context.layoutCell) {
+      const visual = resolveBuildingLayoutVisual(context.layoutCell, building)
+      const feature = context.layoutCell.feature
       projected = {
         ...projected,
-        glyph,
-        foreground: LAND_USE_COLORS[building.primary_use],
+        glyph: visual.glyph,
+        foreground: visual.foreground,
+        background: visual.background ?? projected.background,
         stack: [
           ...projected.stack,
           landOverlayLayer(
-            'structure',
-            `building:${building.code}`,
-            building.code,
-            glyph,
-            edge ? ['building', 'edge', building.primary_use] : ['building', 'floor', building.primary_use]
+            visual.kind,
+            visual.definitionID,
+            building.code + ' · ' + context.layoutCell.kind,
+            visual.glyph,
+            [
+              'building', 'layout', 'kind:' + context.layoutCell.kind,
+              'archetype:' + (context.layoutArchetype ?? 'legacy'),
+              building.primary_use,
+              ...(feature ? ['feature:' + feature] : [])
+            ]
           )
         ]
       }
+    } else {
+      const bounds = rectangleWorldBounds(building.footprint, chunkSize)
+      const inside = cell.worldX >= bounds.minX && cell.worldX <= bounds.maxX &&
+        cell.worldY >= bounds.minY && cell.worldY <= bounds.maxY
+      if (inside) {
+        const edge = cell.worldX === bounds.minX || cell.worldX === bounds.maxX ||
+          cell.worldY === bounds.minY || cell.worldY === bounds.maxY
+        const glyph = edge ? '#' : '·'
+        projected = {
+          ...projected,
+          glyph,
+          foreground: LAND_USE_COLORS[building.primary_use],
+          stack: [
+            ...projected.stack,
+            landOverlayLayer(
+              'structure',
+              'building:' + building.code,
+              building.code,
+              glyph,
+              edge ? ['building', 'edge', building.primary_use] : ['building', 'floor', building.primary_use]
+            )
+          ]
+        }
+      }
+    }
+  } else if (context.parcelLayoutCell) {
+    const visual = resolveParcelLayoutVisual(context.parcelLayoutCell)
+    projected = {
+      ...projected,
+      glyph: visual.glyph,
+      foreground: visual.foreground,
+      background: visual.background ?? projected.background,
+      stack: [
+        ...projected.stack,
+        landOverlayLayer(
+          visual.kind,
+          visual.definitionID,
+          (context.parcel?.code ?? 'site') + ' · ' + context.parcelLayoutCell.kind,
+          visual.glyph,
+          [
+            'parcel',
+            'site_layout',
+            'kind:' + context.parcelLayoutCell.kind,
+            ...(context.parcelLayoutStyle ? ['style:' + context.parcelLayoutStyle] : [])
+          ]
+        )
+      ]
     }
   }
   if (context.portals.length > 0) {
@@ -473,6 +673,33 @@ export function applyCityDevelopmentOverlay(
         project.name || project.code,
         glyph,
         ['development', 'under_construction', `progress:${project.progress_milli}`]
+      )
+    ]
+  }
+}
+
+export function applyWorldActorOverlay(
+  cell: ProjectedCityCell,
+  actors: readonly WorldActor[]
+): ProjectedCityCell {
+  const present = actors.filter(actor => actor.location &&
+    actor.location.x === cell.worldX &&
+    actor.location.y === cell.worldY &&
+    actor.location.z === cell.z)
+  if (present.length === 0) return cell
+  const glyph = present.length === 1 ? '@' : '&'
+  return {
+    ...cell,
+    glyph,
+    foreground: '#f4f7fb',
+    stack: [
+      ...cell.stack,
+      landOverlayLayer(
+        'entity',
+        `actor:${present.map(actor => actor.code).join('+')}`,
+        present.map(actor => actor.name).join(' / '),
+        glyph,
+        ['actor', `count:${present.length}`, ...present.map(actor => `actor:${actor.code}`)]
       )
     ]
   }
@@ -666,6 +893,224 @@ export function projectCityChunk(chunk: CityMapChunk, ruleSet: CitySpatialRuleSe
   }
 }
 
+function openWorldLayerDisplayRank(kind: CitySpatialRuleKind): number {
+  switch (kind) {
+    case 'structure': return 1
+    case 'furniture': return 2
+    case 'portal': return 3
+    case 'item': return 4
+    case 'entity': return 5
+    case 'field': return 6
+    case 'overlay': return 7
+    default: return -1
+  }
+}
+
+// projectOpenWorldChunk uses only persisted V2 layers. It does not infer a
+// building outline in the browser: walls, doors, and later entities remain
+// separate server facts with an explicit display order.
+export function projectOpenWorldChunk(
+  chunk: CityOpenWorldChunk,
+  ruleSet: CitySpatialRuleSet
+): ProjectedCityChunk {
+  const { payload } = chunk
+  if (
+    payload.format !== 'city-openworld-chunk-v1' ||
+    payload.width !== ruleSet.chunk_size || payload.height !== ruleSet.chunk_size ||
+    payload.width <= 0
+  ) {
+    throw new Error('Unsupported open-world chunk payload')
+  }
+
+  const expectedCellCount = payload.width * payload.height
+  const terrainIDs: string[] = []
+  for (const run of payload.terrain_runs) {
+    if (!Number.isInteger(run.length) || run.length <= 0 || terrainIDs.length + run.length > expectedCellCount) {
+      throw new Error('Invalid open-world chunk terrain run')
+    }
+    for (let index = 0; index < run.length; index += 1) terrainIDs.push(run.definition_id)
+  }
+  if (terrainIDs.length !== expectedCellCount) throw new Error('Incomplete open-world chunk terrain payload')
+
+  const layersByCell = new Map<number, Array<{ kind: CitySpatialRuleKind; definitionID: string }>>()
+  let lastX = -1
+  let lastY = -1
+  let lastRank = -1
+  for (const layer of payload.layers) {
+    const rank = openWorldLayerDisplayRank(layer.kind)
+    if (
+      !Number.isInteger(layer.x) || !Number.isInteger(layer.y) || layer.x < 0 || layer.x >= payload.width ||
+      layer.y < 0 || layer.y >= payload.height || !layer.definition_id || rank < 0 ||
+      layer.y < lastY || (layer.y === lastY && (layer.x < lastX || (layer.x === lastX && rank <= lastRank)))
+    ) {
+      throw new Error('Invalid open-world chunk layer')
+    }
+    const index = layer.y * payload.width + layer.x
+    const stack = layersByCell.get(index) ?? []
+    stack.push({ kind: layer.kind, definitionID: layer.definition_id })
+    layersByCell.set(index, stack)
+    lastX = layer.x
+    lastY = layer.y
+    lastRank = rank
+  }
+
+  const resolveVisual = createClassicVisualResolver(ruleSet)
+  const cells = terrainIDs.map((terrainDefinitionID, index): ProjectedCityCell => {
+    const localX = index % payload.width
+    const localY = Math.floor(index / payload.width)
+    const terrain = resolveVisual('terrain', terrainDefinitionID)
+    const layers = (layersByCell.get(index) ?? []).map(layer => resolveVisual(layer.kind, layer.definitionID))
+    const top = layers.length > 0 ? layers[layers.length - 1] : terrain
+    let furnitureDefinitionID: string | undefined
+    for (const layer of layers) {
+      if (layer.definition.kind === 'furniture') furnitureDefinitionID = layer.definition.id
+    }
+    return {
+      worldX: chunk.chunk_x * payload.width + localX,
+      worldY: chunk.chunk_y * payload.height + localY,
+      z: chunk.z,
+      chunkX: chunk.chunk_x,
+      chunkY: chunk.chunk_y,
+      localX,
+      localY,
+      glyph: top.glyph,
+      foreground: top.foreground,
+      background: top.background ?? terrain.background ?? DEFAULT_MAP_BACKGROUND,
+      terrainDefinitionID: terrain.definition.id,
+      furnitureDefinitionID,
+      stack: [cellLayer(terrain), ...layers.map(cellLayer)]
+    }
+  })
+
+  return {
+    key: chunkKey(chunk.chunk_x, chunk.chunk_y, chunk.z),
+    chunkX: chunk.chunk_x,
+    chunkY: chunk.chunk_y,
+    z: chunk.z,
+    width: payload.width,
+    height: payload.height,
+    revision: chunk.revision,
+    payloadHash: chunk.payload_hash,
+    districtCode: '',
+    generatedTick: 0,
+    cells
+  }
+}
+
+interface OpenWorldInteriorLayer {
+  kind: CitySpatialRuleKind
+  definitionID: string
+}
+
+// openWorldInteriorLayer deliberately maps only the immutable cell facts that
+// the V2 generator sealed. It does not draw a rectangle around a building or
+// infer rooms in the browser: absent cells remain absent, which preserves
+// courtyard cuts, arcades, and other irregular footprints in the CLASSIC view.
+function openWorldInteriorLayer(cell: CityOpenWorldBuildingInterior['cells'][number]): OpenWorldInteriorLayer | null {
+  const feature = cell.feature ?? ''
+  switch (cell.kind) {
+    case 'wall':
+      return { kind: 'structure', definitionID: 'structure.wall' }
+    case 'window':
+      return { kind: 'structure', definitionID: 'structure.window' }
+    case 'door':
+      return { kind: 'portal', definitionID: 'portal.door_open' }
+    case 'furniture':
+      switch (feature) {
+        case 'bed': return { kind: 'furniture', definitionID: 'furniture.bed' }
+        case 'chair': return { kind: 'furniture', definitionID: 'furniture.chair' }
+        case 'crate': return { kind: 'item', definitionID: 'item.crate' }
+        case 'table':
+        case 'counter':
+        case 'shelf':
+        case 'machine':
+          return { kind: 'furniture', definitionID: 'furniture.table' }
+        default:
+          throw new Error(`Unsupported open-world interior furnishing: ${feature || 'empty'}`)
+      }
+    case 'floor':
+      if (!feature) return null
+      if (feature === 'stairs') return { kind: 'portal', definitionID: 'portal.stairs_up' }
+      throw new Error(`Unsupported open-world interior floor feature: ${feature}`)
+    default:
+      throw new Error(`Unsupported open-world interior cell kind: ${String(cell.kind)}`)
+  }
+}
+
+function projectOpenWorldInteriorCell(
+  cell: CityOpenWorldBuildingInterior['cells'][number],
+  ruleSet: CitySpatialRuleSet,
+  resolveVisual: ReturnType<typeof createClassicVisualResolver>
+): ProjectedCityCell {
+  if (!Number.isSafeInteger(cell.x) || !Number.isSafeInteger(cell.y) || cell.z < ruleSet.min_z || cell.z > ruleSet.max_z) {
+    throw new Error('Invalid open-world interior cell coordinate')
+  }
+  const terrain = resolveVisual('terrain', 'terrain.floor')
+  const layer = openWorldInteriorLayer(cell)
+  const overlay = layer ? resolveVisual(layer.kind, layer.definitionID) : null
+  const chunkX = floorDiv(cell.x, ruleSet.chunk_size)
+  const chunkY = floorDiv(cell.y, ruleSet.chunk_size)
+  return {
+    worldX: cell.x,
+    worldY: cell.y,
+    z: cell.z,
+    chunkX,
+    chunkY,
+    localX: cell.x - chunkX * ruleSet.chunk_size,
+    localY: cell.y - chunkY * ruleSet.chunk_size,
+    glyph: overlay?.glyph ?? terrain.glyph,
+    foreground: overlay?.foreground ?? terrain.foreground,
+    background: overlay?.background ?? terrain.background ?? DEFAULT_MAP_BACKGROUND,
+    terrainDefinitionID: terrain.definition.id,
+    furnitureDefinitionID: overlay?.definition.kind === 'furniture' ? overlay.definition.id : undefined,
+    stack: overlay ? [cellLayer(terrain), cellLayer(overlay)] : [cellLayer(terrain)]
+  }
+}
+
+// buildOpenWorldInteriorScene renders the exact persisted floor record in a
+// C:DDA-style viewport. Unlike the surface map this scene is intentionally
+// sparse: it only contains cells returned by the interior endpoint, so large
+// rooms, furniture density, cut corners, and void/courtyard cells are all
+// shown as authored server facts rather than a front-end reconstruction.
+export function buildOpenWorldInteriorScene(
+  interior: CityOpenWorldBuildingInterior,
+  ruleSet: CitySpatialRuleSet,
+  camera: CameraState,
+  viewport: ViewportSize
+): ClassicLocalScene {
+  if (!interior || interior.cells.length === 0 || !Number.isInteger(interior.z)) {
+    throw new Error('Open-world interior has no materialized cells')
+  }
+  const resolveVisual = createClassicVisualResolver(ruleSet)
+  const projectedByCoordinate = new Map<string, ProjectedCityCell>()
+  for (const cell of interior.cells) {
+    if (cell.z !== interior.z) throw new Error('Open-world interior contains multiple z layers')
+    const projected = projectOpenWorldInteriorCell(cell, ruleSet, resolveVisual)
+    const key = coordinateKey(projected.worldX, projected.worldY, projected.z)
+    if (projectedByCoordinate.has(key)) throw new Error('Duplicate open-world interior cell')
+    projectedByCoordinate.set(key, projected)
+  }
+
+  const cellSize = Math.max(8, Math.trunc(camera.cellSize))
+  const width = Math.max(cellSize, Math.trunc(viewport.width))
+  const height = Math.max(cellSize, Math.trunc(viewport.height))
+  const columns = Math.max(1, Math.ceil(width / cellSize))
+  const rows = Math.max(1, Math.ceil(height / cellSize))
+  const startWorldX = Math.trunc(camera.worldX) - Math.floor(columns / 2)
+  const startWorldY = Math.trunc(camera.worldY) - Math.floor(rows / 2)
+  const cells: Array<ClassicSceneCell | null> = new Array(columns * rows).fill(null)
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const cell = projectedByCoordinate.get(coordinateKey(startWorldX + column, startWorldY + row, interior.z))
+      if (cell) cells[row * columns + column] = { ...cell, column, row }
+    }
+  }
+  return {
+    mode: 'local', width, height, cellSize, columns, rows,
+    startWorldX, startWorldY, cells
+  }
+}
+
 export function getProjectedCell(
   chunks: ReadonlyMap<string, ProjectedCityChunk>,
   worldX: number,
@@ -689,7 +1134,8 @@ export function buildLocalScene(
   chunkSize: number,
   land?: CityLandState | null,
   development?: CityDevelopmentState | null,
-  enterprise?: CityEnterpriseLocationState | null
+  enterprise?: CityEnterpriseLocationState | null,
+  actors: readonly WorldActor[] = []
 ): ClassicLocalScene {
   const cellSize = Math.max(8, Math.trunc(camera.cellSize))
   const width = Math.max(cellSize, Math.trunc(viewport.width))
@@ -715,7 +1161,10 @@ export function buildLocalScene(
       const landCell = applyCityLandOverlay(cell, land, chunkSize)
       const enterpriseCell = applyCityEnterpriseOverlay(landCell, land, enterprise, chunkSize)
       cells[row * columns + column] = {
-        ...applyCityDevelopmentOverlay(enterpriseCell, land, development, chunkSize),
+        ...applyWorldActorOverlay(
+          applyCityDevelopmentOverlay(enterpriseCell, land, development, chunkSize),
+          actors
+        ),
         column,
         row
       }
@@ -742,7 +1191,8 @@ export function buildOvermapScene(
   viewport: ViewportSize,
   land?: CityLandState | null,
   development?: CityDevelopmentState | null,
-  enterprise?: CityEnterpriseLocationState | null
+  enterprise?: CityEnterpriseLocationState | null,
+  actors: readonly WorldActor[] = []
 ): ClassicOvermapScene {
   const width = Math.max(240, Math.trunc(viewport.width))
   const height = Math.max(240, Math.trunc(viewport.height))
@@ -770,10 +1220,14 @@ export function buildOvermapScene(
     const enterpriseSites = enterprise?.sites.filter(site => (
       site.status === 'active' && buildingCodes.has(site.building_code)
     )) ?? []
+    const tileActors = actors.filter(actor => actor.location &&
+      actor.location.chunk_x === tile.chunk_x && actor.location.chunk_y === tile.chunk_y)
     return {
       tile,
-      glyph: tile.river_mask ? '≈' : tile.road_mask ? overmapRoadGlyph(tile.road_mask) : visual.glyph,
-      foreground: visual.foreground,
+      glyph: tileActors.length > 0
+        ? (tileActors.length === 1 ? '@' : '&')
+        : tile.river_mask ? '≈' : tile.road_mask ? overmapRoadGlyph(tile.road_mask) : visual.glyph,
+      foreground: tileActors.length > 0 ? '#f4f7fb' : visual.foreground,
       background: terrain.background ?? DEFAULT_MAP_BACKGROUND,
       landUses: landSummary.landUses,
       parcelCount: landSummary.parcels.length,
@@ -785,6 +1239,8 @@ export function buildOvermapScene(
       activeEnterpriseSiteCount: enterpriseSites.length,
       enterpriseFirmCount: new Set(enterpriseSites.map(site => site.firm_entity_code)).size,
       enterpriseOccupiedUnits: enterpriseSites.reduce((sum, site) => sum + site.occupied_units, 0),
+      actorCount: tileActors.length,
+      actorCodes: tileActors.map(actor => actor.code),
       x: offsetX + (tile.chunk_x - minX) * cellSize,
       y: offsetY + (tile.chunk_y - minY) * cellSize,
       size: cellSize

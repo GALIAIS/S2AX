@@ -93,6 +93,11 @@ func TestUpdateServiceUsesCurrentProjectRepository(t *testing.T) {
 	require.Equal(t, githubRepo, client.recentRepo)
 }
 
+func TestCompareVersionsHandlesForkSuffix(t *testing.T) {
+	require.Equal(t, 0, compareVersions("0.1.161-SAX", "0.1.161-SAX"))
+	require.Less(t, compareVersions("0.1.161-SAX", "0.1.162-SAX"), 0)
+}
+
 func newRollbackTestService(current string, releases []*GitHubRelease) *UpdateService {
 	return NewUpdateService(
 		&updateServiceCacheStub{},

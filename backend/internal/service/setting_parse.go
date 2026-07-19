@@ -187,6 +187,9 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		// 风控中心功能（默认关闭，显式启用）
 		SettingKeyRiskControlEnabled: "false",
 
+		// 城市模拟（默认关闭，显式启用）
+		SettingKeyCitySimulationEnabled: "false",
+
 		// cyber 会话屏蔽（默认关闭，TTL 默认 3600s）
 		SettingKeyCyberSessionBlockEnabled:    "false",
 		SettingKeyCyberSessionBlockTTLSeconds: "3600",
@@ -727,6 +730,9 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 
 	// 风控中心功能（默认关闭，严格 true 才启用）
 	result.RiskControlEnabled = settings[SettingKeyRiskControlEnabled] == "true"
+
+	// 城市模拟（默认关闭，严格 true 才启用）
+	result.CitySimulationEnabled = settings[SettingKeyCitySimulationEnabled] == "true"
 
 	// cyber 会话屏蔽（默认关闭，TTL 默认 3600s）
 	result.CyberSessionBlockEnabled = settings[SettingKeyCyberSessionBlockEnabled] == "true"

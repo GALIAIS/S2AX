@@ -10,7 +10,7 @@
           <h1>{{ t('citySpatial.title') }}</h1>
           <p>{{ t('citySpatial.description') }}</p>
         </div>
-        <button type="button" class="btn btn-secondary btn-sm" @click="showCreateDialog = true">
+        <button v-if="isCityAdministrator" type="button" class="btn btn-secondary btn-sm" @click="showCreateDialog = true">
           <Icon name="plus" size="sm" />
           {{ t('citySpatial.createWorld.action') }}
         </button>
@@ -39,13 +39,21 @@
         <div>
           <p class="city-panel-eyebrow">{{ t('citySpatial.empty.eyebrow') }}</p>
           <h2>{{ t('citySpatial.empty.title') }}</h2>
-          <p>{{ t('citySpatial.empty.description') }}</p>
-          <button type="button" class="btn btn-primary" @click="showCreateDialog = true">
+          <p>{{ t(isCityAdministrator ? 'citySpatial.empty.description' : 'citySpatial.empty.waitingForWorld') }}</p>
+          <button v-if="isCityAdministrator" type="button" class="btn btn-primary" @click="showCreateDialog = true">
             <Icon name="plus" size="sm" />
             {{ t('citySpatial.createWorld.action') }}
           </button>
         </div>
       </section>
+
+      <CityOpenWorldWorkspace
+        v-else-if="activeWorld?.simulation_version === 'city-openworld-v1' || activeWorld?.simulation_version === 'city-openworld-v2' || activeWorld?.simulation_version === 'city-openworld-v3'"
+        :world="activeWorld"
+        :worlds="store.worlds"
+        :system-admin="isCityAdministrator"
+        @select-world="worldID => void store.selectWorld(worldID)"
+      />
 
       <template v-else-if="store.ruleSet && store.overmap && store.profile">
         <section class="city-command-deck" aria-label="Map controls">
@@ -148,6 +156,7 @@
               :selected-tile="store.selectedTile"
               :generated-chunk-keys="store.generatedChunkKeys"
               :glyph-characters="glyphCharacters"
+              :navigation-path="store.navigationPath"
               :busy="store.chunkLoading || store.landLoading || store.refreshing"
               :viewport-label="t('citySpatial.viewportAria')"
               @resize="store.setViewportSize"
@@ -183,8 +192,10 @@
             :land-state="store.activeLandState"
             :development-state="store.developmentState"
             :enterprise-location-state="store.enterpriseLocationState"
+            :actors="store.worldActors"
             :chunk-size="store.profile.chunk_size"
             :generated="selectedTileGenerated"
+            @select-actor="actorCode => void store.focusWorldActor(actorCode)"
           />
         </section>
 
@@ -199,7 +210,7 @@
               {{ t('citySpatial.context.inspect') }}
             </button>
             <button
-              v-else
+              v-else-if="isCityAdministrator"
               type="button"
               class="btn btn-primary btn-sm"
               :disabled="!store.canGenerateSelectedTile || Boolean(store.generatingChunkKey)"
@@ -212,23 +223,54 @@
         </section>
 
         <CityDevelopmentPanel
+          v-if="isCityAdministrator"
           :state="store.developmentState"
           :land-state="store.activeLandState"
           :selected-building-code="selectedBuildingCode"
-          :owner="activeWorld?.member_role === 'owner'"
+          :owner="isCityAdministrator"
           :busy-project-code="store.developmentCommandCode"
           @command="runDevelopmentCommand"
         />
 
         <CityEnterpriseLocationPanel
+          v-if="isCityAdministrator"
           :state="store.enterpriseLocationState"
-          :owner="activeWorld?.member_role === 'owner'"
+          :owner="isCityAdministrator"
           :busy-command-code="store.enterpriseLocationCommandCode"
           @command="runEnterpriseLocationCommand"
         />
 
+        <CityPublicServicePanel
+          v-if="isCityAdministrator"
+          :catalog="store.cityServiceCatalog"
+          :facilities="store.cityServiceFacilities"
+          :demands="store.cityServiceDemands"
+          :connections="store.cityServiceConnections"
+          :settlements="store.cityServiceSettlements"
+          :physical-network-catalog="store.cityPhysicalNetworkCatalog"
+          :physical-networks="store.cityPhysicalNetworks"
+          :physical-network-nodes="store.cityPhysicalNetworkNodes"
+          :physical-network-edges="store.cityPhysicalNetworkEdges"
+          :physical-network-flows="store.cityPhysicalNetworkFlows"
+          :physical-network-facts="store.cityPhysicalNetworkFacts"
+          :physical-network-diagnostics="store.cityPhysicalNetworkDiagnostics"
+          :physical-network-availability="store.cityPhysicalNetworkAvailability"
+          :physical-network-loading="store.cityPhysicalNetworkLoading"
+          :availability="store.cityServiceAvailability"
+          :land-state="store.activeLandState"
+          :enterprise-state="store.enterpriseLocationState"
+          :actors="store.worldActors"
+          :owner="isCityAdministrator"
+          :loading="store.cityServiceLoading"
+          :busy-command-code="store.cityServiceCommandCode"
+          @refresh="refreshCityServices"
+          @query="queryCityServiceSection"
+          @network-query="queryCityPhysicalNetworkSection"
+          @network-diagnose="queryCityPhysicalNetworkDiagnostics"
+          @command="runCityServiceCommand"
+        />
+
         <CityWorldRuntimePanel
-          v-if="store.worldRuntimeAvailability !== 'unavailable'"
           :catalog="store.worldRuntimeCatalog"
           :actors="store.worldActors"
           :selected-actor-code="store.selectedActorCode"
@@ -236,13 +278,35 @@
           :role-options="store.worldActorRoleOptions"
           :rules="store.worldRuntimeRules"
           :cases="store.worldRuleCases"
+          :members="store.worldMembers"
+          :command-receipts="store.worldCommandReceipts"
+          :member-role="activeWorld?.member_role ?? 'viewer'"
+          :system-admin="isCityAdministrator"
           :loading="store.worldRuntimeLoading"
           :busy-command-code="store.worldRuntimeCommandCode"
+          :member-busy-key="store.worldMemberMutationKey"
+          :navigation-path="store.navigationPath"
+          :navigation-loading="store.navigationLoading"
+          :navigation-error="store.navigationError"
+          :navigation-destination="navigationDestination"
+          :navigation-intents="store.worldNavigationIntents"
+          :navigation-reservations="store.worldNavigationReservations"
+          :navigation-intent-availability="store.worldNavigationIntentAvailability"
+          :navigation-intent-loading="store.worldNavigationIntentLoading"
+          :navigation-intent-error="store.worldNavigationIntentError"
+          :portals="store.worldPortalStates"
+          :portal-access-availability="store.worldPortalAccessAvailability"
+          :portal-loading="store.worldPortalLoading"
           @select-actor="actorCode => void store.selectWorldActor(actorCode)"
+          @focus-actor="actorCode => void store.focusWorldActor(actorCode)"
+          @preview-path="previewNavigationPath"
+          @clear-path="store.clearNavigationPath"
           @command="runWorldRuntimeCommand"
+          @member-add="addWorldMember"
+          @member-update="updateWorldMember"
         />
 
-        <section class="city-change-log">
+        <section v-if="isCityAdministrator" class="city-change-log">
           <header>
             <div>
               <p class="city-panel-eyebrow">{{ t('citySpatial.changes.eyebrow') }}</p>
@@ -275,7 +339,7 @@
       </template>
     </div>
 
-    <BaseDialog :show="showCreateDialog" :title="t('citySpatial.createWorld.title')" width="narrow" @close="showCreateDialog = false">
+    <BaseDialog v-if="isCityAdministrator" :show="showCreateDialog" :title="t('citySpatial.createWorld.title')" width="narrow" @close="showCreateDialog = false">
       <form class="city-create-form" @submit.prevent="createWorld">
         <div>
           <label class="input-label" for="city-world-name">{{ t('citySpatial.createWorld.name') }}</label>
@@ -286,10 +350,21 @@
           <input id="city-world-timezone" v-model.trim="createForm.timezone" class="input font-mono" maxlength="64" required />
           <p class="input-hint">{{ t('citySpatial.createWorld.timezoneHint') }}</p>
         </div>
+        <div>
+          <label class="input-label">{{ t('citySpatial.createWorld.style') }}</label>
+          <Select
+            :model-value="createForm.styleProfileID"
+            :options="openWorldStyleOptions"
+            :searchable="false"
+            :placeholder="t('citySpatial.createWorld.stylePlaceholder')"
+            @update:model-value="value => createForm.styleProfileID = String(value ?? '')"
+          />
+          <p class="input-hint">{{ t('citySpatial.createWorld.styleHint') }}</p>
+        </div>
       </form>
       <template #footer>
         <button type="button" class="btn btn-secondary" @click="showCreateDialog = false">{{ t('common.cancel') }}</button>
-        <button type="button" class="btn btn-primary" :disabled="!createForm.name || store.creatingWorld" @click="createWorld">
+        <button type="button" class="btn btn-primary" :disabled="!createForm.name || !createForm.styleProfileID || styleProfilesLoading || store.creatingWorld" @click="createWorld">
           {{ store.creatingWorld ? t('citySpatial.createWorld.creating') : t('citySpatial.createWorld.confirm') }}
         </button>
       </template>
@@ -312,10 +387,18 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import type {
+  AddCityWorldMemberRequest,
   CityEnterpriseLocationCommandType,
+  CityPhysicalNetworkDiagnosticQuery,
+  CityPhysicalNetworkListQuery,
+  CityServiceCommandType,
+  CityServiceListQuery,
+  CityOpenWorldStyleProfile,
   CitySpatialMutationLine,
+  UpdateCityWorldMemberRequest,
   WorldRuntimeCommandType
 } from '@/api/citySpatial'
+import { listOpenWorldStyleProfiles } from '@/api/citySpatial'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
@@ -323,6 +406,8 @@ import Icon from '@/components/icons/Icon.vue'
 import CityClassicViewport from '@/features/city-spatial/CityClassicViewport.vue'
 import CityDevelopmentPanel from '@/features/city-spatial/CityDevelopmentPanel.vue'
 import CityEnterpriseLocationPanel from '@/features/city-spatial/CityEnterpriseLocationPanel.vue'
+import CityOpenWorldWorkspace from '@/features/city-spatial/CityOpenWorldWorkspace.vue'
+import CityPublicServicePanel from '@/features/city-spatial/CityPublicServicePanel.vue'
 import CitySpatialInspector from '@/features/city-spatial/CitySpatialInspector.vue'
 import CityWorldRuntimePanel from '@/features/city-spatial/CityWorldRuntimePanel.vue'
 import {
@@ -334,27 +419,37 @@ import {
   type ClassicScene
 } from '@/features/city-spatial/projection'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import { useCitySpatialStore } from '@/stores/citySpatial'
 
 const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
+const authStore = useAuthStore()
 const store = useCitySpatialStore()
 
 const showCreateDialog = ref(false)
 const showHelpDialog = ref(false)
 const createForm = reactive({
   name: '',
-  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+  styleProfileID: ''
 })
+const styleProfiles = ref<CityOpenWorldStyleProfile[]>([])
+const styleProfilesLoading = ref(false)
 
 const activeWorld = computed(() => store.activeWorld)
+const isCityAdministrator = computed(() => authStore.isAdmin)
 const worldOptions = computed<SelectOption[]>(() => store.worlds.map(world => ({
   value: world.id,
   label: world.name
 })))
-const glyphCharacters = computed(() => `${store.ruleSet?.definitions.map(definition => definition.glyph ?? '').join('') ?? ''}#+↕%&`)
+const openWorldStyleOptions = computed<SelectOption[]>(() => styleProfiles.value.map(profile => ({
+  value: profile.id,
+  label: profile.name
+})))
+const glyphCharacters = computed(() => `${store.ruleSet?.definitions.map(definition => definition.glyph ?? '').join('') ?? ''}#+↕%&@`)
 const scene = computed<ClassicScene>(() => {
   if (!store.ruleSet || !store.overmap || !store.profile) {
     return { mode: 'overmap', width: store.viewport.width, height: store.viewport.height, cellSize: 40, offsetX: 0, offsetY: 0, cells: [] }
@@ -366,7 +461,8 @@ const scene = computed<ClassicScene>(() => {
         store.viewport,
         store.activeLandState,
         store.developmentState,
-        store.enterpriseLocationState
+        store.enterpriseLocationState,
+        store.worldActors
       )
     : buildLocalScene(
         store.projectedChunks,
@@ -375,7 +471,8 @@ const scene = computed<ClassicScene>(() => {
         store.profile.chunk_size,
         store.activeLandState,
         store.developmentState,
-        store.enterpriseLocationState
+        store.enterpriseLocationState,
+        store.worldActors
       )
 })
 const selectedTileGenerated = computed(() => {
@@ -392,6 +489,12 @@ const selectedBuildingCode = computed(() => {
     coordinate.z,
     store.profile.chunk_size
   )?.building?.code ?? null
+})
+const navigationDestination = computed(() => {
+  const coordinate = store.mapMode === 'local' ? store.selectedCoordinate : null
+  return coordinate
+    ? { x: coordinate.worldX, y: coordinate.worldY, z: coordinate.z }
+    : null
 })
 const signedZ = computed(() => store.camera.z > 0 ? `+${store.camera.z}` : String(store.camera.z))
 const coordinateReadout = computed(() => {
@@ -452,6 +555,7 @@ function activateSelection(): void {
 }
 
 async function generateSelectedChunk(): Promise<void> {
+	if (!isCityAdministrator.value) return
   try {
     await store.generateSelectedChunk()
     store.openOvermapTile()
@@ -466,6 +570,7 @@ async function runDevelopmentCommand(input: {
   payload: Record<string, unknown>
   projectCode: string
 }): Promise<void> {
+	if (!isCityAdministrator.value) return
   try {
     await store.runDevelopmentCommand(input.commandType, input.payload, input.projectCode)
     appStore.showSuccess(t('citySpatial.development.commandSuccess'))
@@ -479,11 +584,70 @@ async function runEnterpriseLocationCommand(input: {
   payload: Record<string, unknown>
   commandCode: string
 }): Promise<void> {
+	if (!isCityAdministrator.value) return
   try {
     await store.runEnterpriseLocationCommand(input.commandType, input.payload, input.commandCode)
     appStore.showSuccess(t('citySpatial.enterprise.commandSuccess'))
   } catch {
     appStore.showError(store.loadError ?? t('citySpatial.enterprise.commandFailed'))
+  }
+}
+
+async function refreshCityServices(): Promise<void> {
+	if (!isCityAdministrator.value) return
+  try {
+    await Promise.all([store.loadCityServices(true), store.loadCityPhysicalNetworks(true)])
+  } catch {
+    appStore.showError(store.loadError ?? t('citySpatial.services.commandFailed'))
+  }
+}
+
+async function queryCityPhysicalNetworkSection(input: {
+  section: 'networks' | 'nodes' | 'edges' | 'flows' | 'facts'
+  query: CityPhysicalNetworkListQuery
+  append: boolean
+}): Promise<void> {
+	if (!isCityAdministrator.value) return
+  try {
+    await store.queryCityPhysicalNetworkSection(input.section, input.query, input.append)
+  } catch {
+    appStore.showError(store.loadError ?? t('citySpatial.services.network.queryFailed'))
+  }
+}
+
+async function queryCityPhysicalNetworkDiagnostics(query: CityPhysicalNetworkDiagnosticQuery): Promise<void> {
+	if (!isCityAdministrator.value) return
+  try {
+    await store.queryCityPhysicalNetworkDiagnostics(query)
+  } catch {
+    appStore.showError(store.loadError ?? t('citySpatial.services.network.queryFailed'))
+  }
+}
+
+async function queryCityServiceSection(input: {
+  section: 'facilities' | 'demands' | 'connections' | 'settlements'
+  query: CityServiceListQuery
+  append: boolean
+}): Promise<void> {
+	if (!isCityAdministrator.value) return
+  try {
+    await store.queryCityServiceSection(input.section, input.query, input.append)
+  } catch {
+    appStore.showError(store.loadError ?? t('citySpatial.services.queryFailed'))
+  }
+}
+
+async function runCityServiceCommand(input: {
+  commandType: CityServiceCommandType
+  payload: Record<string, unknown>
+  commandCode: string
+}): Promise<void> {
+	if (!isCityAdministrator.value) return
+  try {
+    await store.runCityServiceCommand(input.commandType, input.payload, input.commandCode)
+    appStore.showSuccess(t('citySpatial.services.commandSuccess'))
+  } catch {
+    appStore.showError(store.loadError ?? t('citySpatial.services.commandFailed'))
   }
 }
 
@@ -493,10 +657,44 @@ async function runWorldRuntimeCommand(
   commandCode: string
 ): Promise<void> {
   try {
-    await store.runWorldRuntimeCommand(commandType, payload, commandCode)
-    appStore.showSuccess(t('citySpatial.runtime.commandSuccess'))
+    const status = await store.runWorldRuntimeCommand(commandType, payload, commandCode)
+    appStore.showSuccess(t(status === 'queued'
+      ? 'citySpatial.runtime.commandQueued'
+      : 'citySpatial.runtime.commandSuccess'))
+    if (status === 'applied' && commandCode === 'move:navigation' && navigationDestination.value) {
+      await store.previewWorldActorPath(navigationDestination.value)
+    }
   } catch {
     appStore.showError(store.loadError ?? t('citySpatial.runtime.commandFailed'))
+  }
+}
+
+async function previewNavigationPath(): Promise<void> {
+  if (!navigationDestination.value) return
+  try {
+    await store.previewWorldActorPath(navigationDestination.value)
+  } catch {
+    appStore.showError(store.navigationError ?? t('citySpatial.runtime.navigation.failed'))
+  }
+}
+
+async function addWorldMember(request: AddCityWorldMemberRequest): Promise<void> {
+	if (!isCityAdministrator.value) return
+  try {
+    await store.addWorldMember(request)
+    appStore.showSuccess(t('citySpatial.runtime.members.addSuccess'))
+  } catch {
+    appStore.showError(store.loadError ?? t('citySpatial.runtime.members.mutationFailed'))
+  }
+}
+
+async function updateWorldMember(userID: number, request: UpdateCityWorldMemberRequest): Promise<void> {
+	if (!isCityAdministrator.value) return
+  try {
+    await store.updateWorldMember(userID, request)
+    appStore.showSuccess(t('citySpatial.runtime.members.updateSuccess'))
+  } catch {
+    appStore.showError(store.loadError ?? t('citySpatial.runtime.members.mutationFailed'))
   }
 }
 
@@ -521,14 +719,35 @@ function exportSelectedChunk(): void {
 }
 
 async function createWorld(): Promise<void> {
-  if (!createForm.name || store.creatingWorld) return
+  if (!isCityAdministrator.value || !createForm.name || store.creatingWorld) return
   try {
-    await store.createWorld({ name: createForm.name, timezone: createForm.timezone })
+    await store.createWorld({
+      name: createForm.name,
+      timezone: createForm.timezone,
+      style_profile_id: createForm.styleProfileID,
+      spawn_policy: 'city_center'
+    })
     showCreateDialog.value = false
     createForm.name = ''
     appStore.showSuccess(t('citySpatial.createWorld.success'))
   } catch {
     appStore.showError(store.loadError ?? t('citySpatial.createWorld.failed'))
+  }
+}
+
+async function loadOpenWorldStyles(): Promise<void> {
+	if (!isCityAdministrator.value) return
+  styleProfilesLoading.value = true
+  try {
+    const profiles = await listOpenWorldStyleProfiles()
+    styleProfiles.value = profiles
+    if (!createForm.styleProfileID || !profiles.some(profile => profile.id === createForm.styleProfileID)) {
+      createForm.styleProfileID = profiles[0]?.id ?? ''
+    }
+  } catch {
+    appStore.showError(t('citySpatial.createWorld.styleLoadFailed'))
+  } finally {
+    styleProfilesLoading.value = false
   }
 }
 
@@ -554,6 +773,7 @@ watch(() => store.activeWorldID, worldID => {
 })
 
 onMounted(() => {
+  if (isCityAdministrator.value) void loadOpenWorldStyles()
   void store.initialize(preferredWorldID())
 })
 </script>

@@ -15,6 +15,7 @@ func ProvideAdminHandlers(
 	userHandler *admin.UserHandler,
 	groupHandler *admin.GroupHandler,
 	accountHandler *admin.AccountHandler,
+	accountAllocationHandler *admin.AccountAllocationHandler,
 	announcementHandler *admin.AnnouncementHandler,
 	dataManagementHandler *admin.DataManagementHandler,
 	backupHandler *admin.BackupHandler,
@@ -55,6 +56,7 @@ func ProvideAdminHandlers(
 		User:                       userHandler,
 		Group:                      groupHandler,
 		Account:                    accountHandler,
+		AccountAllocation:          accountAllocationHandler,
 		Announcement:               announcementHandler,
 		DataManagement:             dataManagementHandler,
 		Backup:                     backupHandler,
@@ -94,6 +96,7 @@ func ProvideGatewayHandler(
 	gatewayService *service.GatewayService,
 	openAIGatewayService *service.OpenAIGatewayService,
 	geminiCompatService *service.GeminiMessagesCompatService,
+	accountAllocationService *service.AccountAllocationService,
 	antigravityGatewayService *service.AntigravityGatewayService,
 	userService *service.UserService,
 	concurrencyService *service.ConcurrencyService,
@@ -108,6 +111,9 @@ func ProvideGatewayHandler(
 	settingService *service.SettingService,
 	coordinator *securityaudit.Coordinator,
 ) *GatewayHandler {
+	gatewayService.SetAccountAllocationService(accountAllocationService)
+	openAIGatewayService.SetAccountAllocationService(accountAllocationService)
+	geminiCompatService.SetAccountAllocationService(accountAllocationService)
 	h := NewGatewayHandler(gatewayService, openAIGatewayService, geminiCompatService, antigravityGatewayService,
 		userService, concurrencyService, billingCacheService, usageService, apiKeyService, usageRecordWorkerPool,
 		errorPassthroughService, contentModerationService, userMsgQueueService, cfg, settingService)
@@ -189,6 +195,8 @@ func ProvideHandlers(
 	availableChannelHandler *AvailableChannelHandler,
 	asyncImageHandler *AsyncImageHandler,
 	batchImageHandler *BatchImageHandler,
+	ipGeolocationHandler *IPGeolocationHandler,
+	accountAllocationHandler *AccountAllocationHandler,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
 ) *Handlers {
@@ -214,6 +222,8 @@ func ProvideHandlers(
 		AvailableChannel:           availableChannelHandler,
 		AsyncImage:                 asyncImageHandler,
 		BatchImage:                 batchImageHandler,
+		IPGeolocation:              ipGeolocationHandler,
+		AccountAllocation:          accountAllocationHandler,
 	}
 }
 
@@ -240,12 +250,15 @@ var ProviderSet = wire.NewSet(
 	NewAvailableChannelHandler,
 	NewAsyncImageHandler,
 	ProvideBatchImageHandler,
+	NewIPGeolocationHandler,
+	NewAccountAllocationHandler,
 
 	// Admin handlers
 	admin.NewDashboardHandler,
 	admin.NewUserHandler,
 	admin.NewGroupHandler,
 	admin.ProvideAccountHandler,
+	admin.NewAccountAllocationHandler,
 	admin.NewAnnouncementHandler,
 	admin.NewDataManagementHandler,
 	admin.NewBackupHandler,

@@ -286,6 +286,9 @@ type SystemSettings struct {
 	// 风控中心功能开关
 	RiskControlEnabled bool `json:"risk_control_enabled"`
 
+	// 城市模拟功能开关
+	CitySimulationEnabled bool `json:"city_simulation_enabled"`
+
 	// cyber 会话屏蔽开关 + TTL
 	CyberSessionBlockEnabled    bool `json:"cyber_session_block_enabled"`
 	CyberSessionBlockTTLSeconds int  `json:"cyber_session_block_ttl_seconds"`
@@ -369,6 +372,8 @@ type PublicSettings struct {
 	AffiliateEnabled bool `json:"affiliate_enabled"`
 
 	RiskControlEnabled bool `json:"risk_control_enabled"`
+
+	CitySimulationEnabled bool `json:"city_simulation_enabled"`
 
 	AllowUserViewErrorRequests bool `json:"allow_user_view_error_requests"`
 }

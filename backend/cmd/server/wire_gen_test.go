@@ -70,6 +70,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		&service.UsageCleanupService{},
 		idempotencyCleanupSvc,
 		nil, // virtualCurrencyHoldCleanup
+		nil, // cityTickScheduler
 		&service.BatchImageCleanupService{},
 		nil, // batchImageWorker
 		pricingSvc,
@@ -91,6 +92,8 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil, // upstreamBillingProbe
 		nil, // auditLog
 		nil, // promptAudit
+		nil, // ipGeolocation
+		nil, // accountAllocation
 	)
 
 	require.NotPanics(t, func() {

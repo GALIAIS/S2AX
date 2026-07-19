@@ -33,6 +33,18 @@ func RegisterUserRoutes(
 	// 用户管理面变更类操作入审计（含 TOTP 启用/禁用、step-up 验证、密码修改等安全事件）
 	authenticated.Use(gin.HandlerFunc(auditLog))
 	{
+		// 服务端优先的 IP 归属解析；浏览器仅在本地数据不可用时回退兼容查询。
+		ipGeolocation := authenticated.Group("/ip-geolocation")
+		{
+			ipGeolocation.POST("/lookup", h.IPGeolocation.Lookup)
+		}
+
+		// 用户仅可查看由管理员分配给自己的安全账号摘要，不能操作租约。
+		accountAllocations := authenticated.Group("/account-allocations")
+		{
+			accountAllocations.GET("", h.AccountAllocation.ListMine)
+		}
+
 		// 用户接口
 		user := authenticated.Group("/user")
 		{
@@ -102,23 +114,57 @@ func RegisterUserRoutes(
 
 		// 城市模拟基础域
 		citySpatial := authenticated.Group("/city/spatial")
+		citySpatial.Use(middleware.CitySimulationGuard(settingService))
 		{
 			citySpatial.GET("/rule-sets", h.CityEconomy.ListSpatialRuleSets)
 			citySpatial.GET("/rule-sets/:rule_set_id", h.CityEconomy.GetSpatialRuleSet)
 		}
+		cityOpenWorld := authenticated.Group("/city/open-world")
+		cityOpenWorld.Use(middleware.CitySimulationGuard(settingService))
+		{
+			cityOpenWorld.GET("/styles", h.CityEconomy.ListOpenWorldStyleProfiles)
+			cityOpenWorld.GET("/styles/:profile_id", h.CityEconomy.GetOpenWorldStyleProfile)
+		}
 
 		cityWorlds := authenticated.Group("/city/worlds")
-		cityWorlds.Use(middleware.RequestBodyLimit(16 << 10))
+		cityWorlds.Use(middleware.CitySimulationGuard(settingService), middleware.RequestBodyLimit(16<<10))
 		{
 			cityWorlds.GET("", h.CityEconomy.ListWorlds)
-			cityWorlds.POST("", h.CityEconomy.CreateWorld)
+			cityWorlds.POST("", middleware.AdminOnly(), h.CityEconomy.CreateWorld)
 			cityWorlds.GET("/:world_id", h.CityEconomy.GetWorld)
+			cityWorlds.GET("/:world_id/members", h.CityEconomy.ListWorldMembers)
+			cityWorlds.POST("/:world_id/members", middleware.AdminOnly(), h.CityEconomy.AddWorldMember)
+			cityWorlds.PATCH("/:world_id/members/:user_id", middleware.AdminOnly(), h.CityEconomy.UpdateWorldMember)
 			cityWorlds.GET("/:world_id/state", h.CityEconomy.GetPhysicalState)
 			cityWorlds.GET("/:world_id/calendar", h.CityEconomy.GetCalendarState)
 			cityWorlds.GET("/:world_id/population", h.CityEconomy.GetPopulationState)
 			cityWorlds.GET("/:world_id/markets", h.CityEconomy.GetMarketOverview)
+			cityWorlds.GET("/:world_id/services/catalog", h.CityEconomy.GetCityServiceCatalog)
+			cityWorlds.GET("/:world_id/services/facilities", h.CityEconomy.ListCityServiceFacilities)
+			cityWorlds.GET("/:world_id/services/demands", h.CityEconomy.ListCityServiceDemands)
+			cityWorlds.GET("/:world_id/services/connections", h.CityEconomy.ListCityServiceConnections)
+			cityWorlds.GET("/:world_id/services/settlements", h.CityEconomy.ListCityServiceSettlements)
+			cityWorlds.GET("/:world_id/services/lifecycle/catalog", h.CityEconomy.GetCityFacilityLifecycleCatalog)
+			cityWorlds.GET("/:world_id/services/lifecycle/facilities", h.CityEconomy.ListCityFacilityLifecycleStates)
+			cityWorlds.GET("/:world_id/services/lifecycle/operations", h.CityEconomy.ListCityFacilityOperations)
+			cityWorlds.GET("/:world_id/services/lifecycle/staffing", h.CityEconomy.ListCityFacilityStaffAssignments)
+			cityWorlds.GET("/:world_id/services/lifecycle/incidents", h.CityEconomy.ListCityFacilityIncidents)
+			cityWorlds.GET("/:world_id/services/lifecycle/budget-movements", h.CityEconomy.ListCityFacilityBudgetMovements)
+			cityWorlds.GET("/:world_id/services/lifecycle/facts", h.CityEconomy.ListCityFacilityLifecycleFacts)
+			cityWorlds.GET("/:world_id/services/networks/catalog", h.CityEconomy.GetCityPhysicalNetworkCatalog)
+			cityWorlds.GET("/:world_id/services/networks", h.CityEconomy.ListCityPhysicalNetworks)
+			cityWorlds.GET("/:world_id/services/networks/nodes", h.CityEconomy.ListCityPhysicalNetworkNodes)
+			cityWorlds.GET("/:world_id/services/networks/edges", h.CityEconomy.ListCityPhysicalNetworkEdges)
+			cityWorlds.GET("/:world_id/services/networks/flows", h.CityEconomy.ListCityPhysicalNetworkFlows)
+			cityWorlds.GET("/:world_id/services/networks/facts", h.CityEconomy.ListCityPhysicalNetworkFacts)
+			cityWorlds.GET("/:world_id/services/networks/diagnostics", h.CityEconomy.GetCityPhysicalNetworkDiagnostics)
 			cityWorlds.GET("/:world_id/spatial/ruleset", h.CityEconomy.GetWorldSpatialRuleSet)
 			cityWorlds.GET("/:world_id/spatial/overmap", h.CityEconomy.GetOvermap)
+			cityWorlds.GET("/:world_id/open-world/generation", h.CityEconomy.GetOpenWorldGeneration)
+			cityWorlds.GET("/:world_id/open-world/verification", h.CityEconomy.GetOpenWorldVerification)
+			cityWorlds.GET("/:world_id/open-world/map", h.CityEconomy.GetOpenWorldMap)
+			cityWorlds.GET("/:world_id/open-world/buildings/:building_code/portals", h.CityEconomy.ListOpenWorldBuildingPortals)
+			cityWorlds.GET("/:world_id/open-world/buildings/:building_code/interiors/:floor_index", h.CityEconomy.GetOpenWorldBuildingInterior)
 			cityWorlds.GET("/:world_id/land", h.CityEconomy.GetLandState)
 			cityWorlds.GET("/:world_id/development", h.CityEconomy.GetDevelopmentState)
 			cityWorlds.GET("/:world_id/enterprise-locations", h.CityEconomy.GetEnterpriseLocationState)
@@ -131,9 +177,15 @@ func RegisterUserRoutes(
 			cityWorlds.GET("/:world_id/spatial/chunks", h.CityEconomy.ListMapChunks)
 			cityWorlds.GET("/:world_id/spatial/chunks/:chunk_x/:chunk_y/:z", h.CityEconomy.GetMapChunk)
 			cityWorlds.GET("/:world_id/spatial/changes", h.CityEconomy.ListSpatialMutations)
+			cityWorlds.GET("/:world_id/navigation/portals", h.CityEconomy.ListWorldPortalStates)
+			cityWorlds.POST("/:world_id/navigation/path", h.CityEconomy.FindWorldActorPath)
+			cityWorlds.GET("/:world_id/navigation/intents", h.CityEconomy.ListWorldNavigationIntents)
+			cityWorlds.GET("/:world_id/navigation/intents/:actor_code", h.CityEconomy.GetWorldNavigationIntent)
+			cityWorlds.GET("/:world_id/navigation/reservations", h.CityEconomy.ListWorldNavigationReservations)
+			cityWorlds.GET("/:world_id/commands", h.CityEconomy.ListCommands)
 			cityWorlds.POST("/:world_id/commands", h.CityEconomy.SubmitCommand)
 			cityWorlds.GET("/:world_id/commands/:command_id", h.CityEconomy.GetCommand)
-			cityWorlds.POST("/:world_id/step", h.CityEconomy.StepWorld)
+			cityWorlds.POST("/:world_id/step", middleware.AdminOnly(), h.CityEconomy.StepWorld)
 			cityWorlds.GET("/:world_id/events", h.CityEconomy.ListEvents)
 			cityWorlds.GET("/:world_id/journals", h.CityEconomy.ListJournals)
 			cityWorlds.GET("/:world_id/journals/:tick/:sequence", h.CityEconomy.GetJournal)
@@ -152,13 +204,13 @@ func RegisterUserRoutes(
 			cityWorlds.GET("/:world_id/snapshots/:tick", h.CityEconomy.GetSnapshot)
 			cityWorlds.GET("/:world_id/engine", h.CityEconomy.GetEngineInfo)
 			cityWorlds.GET("/:world_id/upgrade-runs", h.CityEconomy.ListUpgrades)
-			cityWorlds.POST("/:world_id/upgrade-runs", h.CityEconomy.StartUpgrade)
+			cityWorlds.POST("/:world_id/upgrade-runs", middleware.AdminOnly(), h.CityEconomy.StartUpgrade)
 			cityWorlds.GET("/:world_id/upgrade-runs/:run_id", h.CityEconomy.GetUpgrade)
 			cityWorlds.GET("/:world_id/replay-runs", h.CityEconomy.ListReplays)
-			cityWorlds.POST("/:world_id/replay-runs", h.CityEconomy.StartReplay)
+			cityWorlds.POST("/:world_id/replay-runs", middleware.AdminOnly(), h.CityEconomy.StartReplay)
 			cityWorlds.GET("/:world_id/replay-runs/:run_id", h.CityEconomy.GetReplay)
 			cityWorlds.GET("/:world_id/recovery-runs", h.CityEconomy.ListRecoveries)
-			cityWorlds.POST("/:world_id/recovery-runs", h.CityEconomy.StartRecovery)
+			cityWorlds.POST("/:world_id/recovery-runs", middleware.AdminOnly(), h.CityEconomy.StartRecovery)
 			cityWorlds.GET("/:world_id/recovery-runs/:run_id", h.CityEconomy.GetRecovery)
 		}
 

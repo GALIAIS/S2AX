@@ -30,8 +30,39 @@ the application's responsibility.
 ## Trusted client IPs
 
 `server.trusted_proxies` must contain only the CIDR/IP addresses that connect
-directly to Sub2API, normally the local Nginx/Caddy address or the private load
-balancer subnet. An empty list disables forwarded-IP trust.
+directly to Sub2API, normally the local Nginx/Caddy address or the exact private
+load-balancer subnet. The default trusts only `127.0.0.1/32` and `::1/128` for a
+same-host proxy. An empty list disables forwarded-IP trust.
+
+For a Docker bridge, do not add an entire RFC1918 range merely to make IP
+display work. Restrict origin access and add only the configured direct proxy
+address or the dedicated bridge CIDR that can reach the backend.
+
+`SERVER_TRUSTED_PROXIES` is the environment-variable form of this setting. It
+accepts comma, semicolon, whitespace, or newline-separated exact IP/CIDR
+entries, for example:
+
+```text
+SERVER_TRUSTED_PROXIES=127.0.0.1/32,::1/128,172.30.5.0/24
+```
+
+Use this only when a Caddy/Nginx/load-balancer container on that dedicated
+network is the direct TCP peer of Sub2API. Confirm the peer subnet from the
+deployed compose/network configuration first; do not set `10.0.0.0/8`,
+`172.16.0.0/12`, or `192.168.0.0/16` just because the application runs in
+Docker. Broad trust lets any reachable host spoof forwarded client-IP headers.
+
+If every address in the console is still shown as private after configuring a
+local geolocation provider, inspect this chain before changing providers:
+
+```text
+browser → CDN (optional) → Caddy/Nginx → Sub2API
+```
+
+The component immediately to the left of Sub2API must be trusted by
+`server.trusted_proxies`, and it must overwrite `X-Forwarded-For` / `X-Real-IP`
+with its validated client address. IP lookup databases can locate a public IP;
+they cannot reconstruct one from an untrusted proxy/Docker bridge address.
 
 Never trust `CF-Connecting-IP`, `X-Real-IP`, or `X-Forwarded-For` merely because
 the header exists. A CDN deployment must firewall the origin so only the CDN or

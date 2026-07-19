@@ -11,6 +11,7 @@ type AdminHandlers struct {
 	User                       *admin.UserHandler
 	Group                      *admin.GroupHandler
 	Account                    *admin.AccountHandler
+	AccountAllocation          *admin.AccountAllocationHandler
 	Announcement               *admin.AnnouncementHandler
 	DataManagement             *admin.DataManagementHandler
 	Backup                     *admin.BackupHandler
@@ -68,6 +69,8 @@ type Handlers struct {
 	AvailableChannel           *AvailableChannelHandler
 	AsyncImage                 *AsyncImageHandler
 	BatchImage                 *BatchImageHandler
+	IPGeolocation              *IPGeolocationHandler
+	AccountAllocation          *AccountAllocationHandler
 }
 
 // BuildInfo contains build-time information

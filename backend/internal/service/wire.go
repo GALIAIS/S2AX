@@ -490,6 +490,13 @@ func ProvideVirtualCurrencyHoldCleanupService(virtualCurrency *VirtualCurrencySe
 	return svc
 }
 
+func ProvideCityTickScheduler(db *sql.DB, cityEconomy *CityEconomyService, settingService *SettingService) *CityTickScheduler {
+	svc := NewCityTickScheduler(db, cityEconomy, defaultCityTickSchedulerInterval, defaultCityTickSchedulerBatch)
+	svc.SetCitySimulationEnabledChecker(settingService)
+	svc.Start()
+	return svc
+}
+
 // ProvideScheduledTestService creates ScheduledTestService.
 func ProvideScheduledTestService(
 	planRepo ScheduledTestPlanRepository,
@@ -760,6 +767,8 @@ var ProviderSet = wire.NewSet(
 	NewBillingService,
 	ProvideBillingCacheService,
 	NewAnnouncementService,
+	NewIPGeolocationService,
+	ProvideAccountAllocationService,
 	ProvideAdminService,
 	NewGatewayService,
 	NewOpenAIGatewayService,
@@ -831,6 +840,7 @@ var ProviderSet = wire.NewSet(
 	NewGrokQuotaFetcher,
 	NewUserAttributeService,
 	NewCityEconomyService,
+	ProvideCityTickScheduler,
 	NewVirtualCurrencyService,
 	NewVirtualCurrencyIntegrationService,
 	NewUsageCache,

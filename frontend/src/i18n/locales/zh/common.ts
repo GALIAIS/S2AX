@@ -51,6 +51,8 @@ export default {
     info: '提示',
     active: '启用',
     inactive: '禁用',
+    enable: '启用',
+    disable: '停用',
     more: '更多',
     menu: '菜单',
     userMenu: '用户菜单',
@@ -178,6 +180,7 @@ export default {
     availableChannels: '可用渠道',
     subscriptions: '订阅管理',
     virtualCurrency: '资产',
+    accountAllocations: '账号分配',
     citySimulation: '城市模拟',
     virtualCurrencies: '虚拟货币',
     virtualCurrencyIntegrations: '货币接入',
@@ -211,6 +214,31 @@ export default {
     contentModeration: '内容审核',
     promptAudit: '提示词审计',
     auditLogs: '操作日志',
+  },
+
+  accountAllocations: {
+    title: '分配账号',
+    description: '查看管理员分配给您的账号容量、状态和本人用量。',
+    readOnlyTitle: '受管账号摘要',
+    readOnlyDescription: '此页面仅展示安全的使用摘要。账号名称、凭据、代理、IP 和其他敏感配置不会显示，也不能在此操作分配。',
+    emptyTitle: '暂无分配账号',
+    emptyDescription: '管理员尚未向您分配上游账号；可继续使用当前已授权的其他分组。',
+    capacity: '并发容量',
+    concurrentRequests: '并发请求',
+    requestUsage: '本人请求',
+    tokenUsage: '本人 Token',
+    requests: '请求',
+    tokens: 'Token',
+    assignedAt: '分配时间',
+    coolingUntil: '当前冷却，预计于 {time} 恢复。',
+    unavailableHint: '当前不可调度；管理员策略可能会自动补齐。',
+    readyHint: '当前可调度。',
+    loadFailed: '加载分配账号失败',
+    status: {
+      ready: '可用',
+      cooling: '冷却中',
+      unavailable: '暂不可用'
+    }
   },
 
   virtualCurrency: {
@@ -251,7 +279,8 @@ export default {
     empty: {
       eyebrow: '尚未建立世界',
       title: '创建第一座可验证城市',
-      description: '城市世界会绑定固定规则集、生成器和世界种子。地图只展示服务端已经生成并封账的空间事实。'
+      description: '城市世界会绑定固定规则集、生成器和世界种子。地图只展示服务端已经生成并封账的空间事实。',
+      waitingForWorld: '管理员尚未将你加入可游玩的城市。加入后，你可以在这里创建角色、探索并推进自己的角色进程。'
     },
     controls: {
       world: '城市世界', selectWorld: '选择城市世界', viewMode: '视图模式',
@@ -282,7 +311,7 @@ export default {
       floorSummary: '{count} 层 · 容量 {capacity}', landStack: '土地与建筑事实',
       parcel: '地块', building: '建筑', area: '法定面积', version: '事实版本',
       floors: '高度层', floorArea: '总建筑面积', occupancy: '占用 / 容量', quality: '质量',
-      allocations: '{count} 条住宅分配',
+      allocations: '{count} 条住宅分配', actorsHere: '当前位置角色', focusActor: '定位',
       unavailableTitle: '此 Cell 尚无可用事实',
       unavailableDescription: '目标 Chunk 尚未生成、尚未装载，或当前 Z 层没有空间数据。',
       emptyTitle: '选择地图位置', emptyDescription: '点击区域 Tile 或局部 Cell 查看服务端返回的完整空间信息。'
@@ -345,6 +374,124 @@ export default {
       commandSuccess: '企业空间事实已通过城市 Tick 封账。',
       commandFailed: '企业空间操作失败'
     },
+    services: {
+      eyebrow: '城市服务事实', title: '公共设施与城市服务',
+      description: '以真实建筑、服务容量、主体需求、连接和逐 Tick 结算构成可追溯的城市服务网络。',
+      loading: '正在读取公共服务投影…', queryFailed: '公共服务数据查询失败',
+      commandSuccess: '公共服务事实已通过城市 Tick 封账。', commandFailed: '公共服务操作失败',
+      unsupported: { title: '当前世界尚未启用公共服务底座', description: '暂停世界并升级至 {version} 后，才可创建设施、需求和连接。升级不会生成虚假数据。' },
+      tabs: { catalog: '目录', facilities: '设施', demands: '需求', connections: '连接', networks: '物理网络', settlements: '结算' },
+      metrics: {
+        facilities: '设施', operational: '{count} 个运行中', capacity: '有效容量', capacityLines: '{count} 条有效容量',
+        demand: '每 Tick 需求', activeDemands: '{count} 条有效需求', delivered: '最近交付', shortage: '最近短缺',
+        quality: '加权质量', requested: '请求 {value}', requestedLabel: '请求量', noTick: '尚无结算'
+      },
+      catalog: {
+        services: '服务定义', servicesDescription: '单位、方向和语义均由版本化目录约束。',
+        facilityTypes: '设施类型', facilityTypesDescription: '设施类型限定可提供服务与最低建筑面积。',
+        category: '类别', unit: '计量单位', immutable: '版本内不可变', minimumArea: '最低建筑面积 {value} m²'
+      },
+      filters: { service: '服务', status: '状态', district: '行政区', facility: '设施', demand: '需求', apply: '应用筛选' },
+      columns: {
+        facility: '设施', location: '空间锚点', status: '状态', capacities: '服务容量', demand: '需求', subject: '服务主体',
+        request: '请求与优先级', latestSettlement: '最近结算', connection: '连接', route: '供给路径', flowLimit: '流量上限', policy: '损耗与偏好'
+      },
+      actions: {
+        operations: '公共服务操作', registerFacility: '注册设施', capacity: '配置容量', transition: '转换状态',
+        configureDemand: '配置需求', configureConnection: '配置连接', confirm: '确认并封账', processing: '正在封账…'
+      },
+      form: {
+        code: '稳定编码', name: '设施名称', facilityType: '设施类型', building: '所在建筑', ownerEntity: '所有者经济主体（可选）',
+        reliability: '可靠度（千分比）', facility: '设施', service: '服务', installedCapacity: '装机容量', availability: '可用率（千分比）',
+        effectiveCapacity: '计算可用容量', targetStatus: '目标状态', currentStatus: '当前状态', subjectKind: '主体类型', subject: '真实主体',
+        requestedUnits: '每 Tick 请求量', priority: '优先级（0–1000）', status: '状态', version: '当前版本', demand: '需求',
+        flowLimit: '每 Tick 最大流量', loss: '损耗（千分比）', preference: '连接偏好（0–1000）',
+        registerNote: '新设施固定以离线状态创建；配置容量并显式转换为运行中后才会形成供给。',
+        casNote: '提交携带当前版本，服务端拒绝并发覆盖并重新计算有效容量。',
+        statusNote: '状态转换只影响本次事实发布后的结算，既有结算保持不可变。',
+        demandNote: '需求必须绑定当前世界中的真实主体；主体与服务在创建后不可更换。',
+        connectionNote: '连接只能关联同一服务的设施容量和需求；流量、损耗与偏好参与确定性分配。'
+      },
+      status: { offline: '离线', operational: '运行中', degraded: '降级', retired: '已退役', active: '有效', suspended: '暂停' },
+      subjectKind: { district: '行政区', building: '建筑', household: '家庭群体', enterprise: '企业', actor: '角色' },
+      empty: { facilities: '当前筛选条件下没有设施。', demands: '当前筛选条件下没有服务需求。', connections: '当前筛选条件下没有服务连接。', settlements: '当前筛选条件下没有结算事实。' },
+      pagination: { loaded: '已载入 {count} 条', more: '继续载入' },
+      reliability: '可靠度 {value}', priority: '优先级 {value}', preference: '偏好 {value}', loss: '损耗 {value}',
+      shortage: '短缺 {value}', lossUnits: '损耗量 {value}', allocations: '{count} 条分配明细', noCapacity: '尚未配置服务容量', noSettlement: '尚无结算',
+      network: {
+        title: '城市服务物理网络', loading: '正在读取物理网络投影…', queryFailed: '物理网络数据查询失败',
+        unsupported: {
+          title: '当前世界尚未启用物理网络协议',
+          description: '暂停世界并升级至 {version} 后，才可管理节点、边、容量、故障隔离和逐段流量事实。'
+        },
+        tabs: { topology: '拓扑与容量', flows: '路径流量', diagnostics: '网络诊断', facts: '网络事实' },
+        metrics: {
+          networks: '运行网络', nodes: '{count} 个有效节点', edges: '有效边',
+          edgeExceptions: '隔离 {isolated} · 故障 {failed}', capacity: '可用边容量', installed: '装机 {value}',
+          dispatched: '最近发出', received: '网络到达', lossUnits: '网络损耗 {value}', deliveryRatio: '网络送达率'
+        },
+        filters: { network: '物理网络', allNetworks: '全部网络', edgeStatus: '边状态', phase: '事实阶段' },
+        actions: { network: '配置网络', node: '配置节点', edge: '配置边', transition: '转换状态' },
+        topology: {
+          graphLabel: '物理网络节点、边、容量与运行状态拓扑图', selectedNode: '已选节点',
+          selectedEdge: '已选边', edgeInventory: '边资产清单'
+        },
+        diagnostics: {
+          summary: '{components} 个连通分量 · {bottlenecks} 条瓶颈边',
+          selectNetwork: '请选择一个物理网络以读取实时拓扑诊断。',
+          loading: '正在计算连通性、孤岛、边利用率与路由探针…',
+          routeProbe: '容量约束路由探针',
+          routeProbeHint: '只读复用正式确定性路由器，不写入流量、事实或剩余容量。',
+          source: '源节点', sink: '汇节点', probeUnits: '探测量', runProbe: '执行探针',
+          components: '弱连通分量', activeAssets: '{nodes} 个有效节点 · {edges} 条有效边',
+          isolatedNodes: '孤立节点', serviceIslands: '{count} 个服务孤岛',
+          bottlenecks: '瓶颈边', saturated: '{count} 条已饱和', latestFlow: '利用率样本 Tick',
+          componentAssets: '{nodes} 个节点 · {edges} 条边', island: '供需孤岛', edgeLoad: '最近边利用率',
+          truncated: '另有 {count} 条低优先级边未展示。', routeResult: '路由探针结果',
+          reasons: {
+            reachable: '可达', no_capacity_path: '无剩余容量路径',
+            source_not_active: '源节点未生效', sink_not_active: '汇节点未生效'
+          }
+        },
+        columns: {
+          role: '节点角色', status: '状态', binding: '业务绑定', version: '事实版本', route: '路径',
+          available: '可用 / 装机', loss: '损耗', condition: '健康度', paths: '路径 / 分段',
+          tick: 'Tick', fact: '事实', subject: '主体', source: '来源'
+        },
+        empty: { networks: '当前筛选条件下没有物理网络。', nodes: '当前网络尚无可显示节点。', flows: '当前筛选条件下没有路径流量事实。', facts: '当前筛选条件下没有网络事实。' },
+        pagination: {
+          topology: '{networks} 个网络 · {nodes} 个节点 · {edges} 条边',
+          networks: '继续载入网络', nodes: '继续载入节点', edges: '继续载入边'
+        },
+        operations: { network: '物理网络配置', node: '网络节点配置', edge: '网络边配置', edgeStatus: '网络边状态转换' },
+        form: {
+          topologyRevision: '拓扑修订', networkNote: '每个网络绑定一种城市服务；修改会推进拓扑修订和乐观锁版本。',
+          capacityBinding: '设施服务容量', demandBinding: '服务需求', anchorCoordinates: '绑定权威 XYZ 坐标',
+          nodeNote: '供给节点必须绑定设施容量，需求节点必须绑定服务需求；中继、存储和网关节点不绑定二者。',
+          fromNode: '起点节点', toNode: '终点节点', direction: '方向', installedCapacity: '装机边容量', baseCost: '基础路由成本',
+          edgeNote: '可用容量由装机容量与可用率整除计算；双向边的两个方向共享同一份 Tick 容量。',
+          transitionNote: '隔离、故障和恢复均形成不可变事实；恢复为有效状态前服务端会重新校验网络与端点。'
+        },
+        direction: { directed: '单向', bidirectional: '双向共享容量' },
+        role: { supply: '供给', demand: '需求', junction: '中继', storage: '存储', gateway: '网关' },
+        status: { active: '有效', suspended: '暂停', retired: '已退役', isolated: '已隔离', failed: '故障', offline: '离线' },
+        phase: { command: '命令', pre_network: '网络前置', settlement: '结算' },
+        factType: {
+          'network.configured': '网络已配置', 'node.configured': '节点已配置',
+          'edge.configured': '边已配置', 'edge.state_changed': '边状态已转换',
+          'network.topology_synchronized': '拓扑已同步', 'network.flow_settled': '网络流量已结算'
+        },
+        facts: { automatic: '自动阶段' }
+      },
+      serviceNames: {
+        electric_power: '电力', potable_water: '饮用水', wastewater: '污水处理', solid_waste: '固体废弃物',
+        education: '教育', healthcare: '医疗', fire_response: '消防响应', police_response: '治安响应'
+      },
+      facilityTypeNames: {
+        service_hub: '综合服务枢纽', power_plant: '发电设施', water_works: '供水设施', wastewater_plant: '污水处理设施',
+        waste_processing: '废弃物处理设施', school: '学校', hospital: '医院', fire_station: '消防站', police_station: '警务站'
+      }
+    },
     runtime: {
       eyebrow: '开放世界运行时', title: '角色、成长与规则',
       description: '角色状态、行为、职业迁移、规则案件与处罚均由服务端事实链确定。',
@@ -356,8 +503,19 @@ export default {
       rolesHint: '满足属性、经历和身份条件后方可迁移',
       statusSummary: '{stacks} 层 · 强度 {intensity}', noStatuses: '当前角色没有状态或处罚记录。',
       noCases: '当前角色没有规则案件。', commandSuccess: '角色事实已通过城市 Tick 封账。',
+      commandQueued: '角色命令已进入世界队列，将由世界调度 Tick 统一封账。',
       commandFailed: '开放世界操作失败',
       counters: { actors: '角色', facts: '事实', cases: '案件' },
+      members: {
+        title: '世界成员与职责', count: '{count} 名生效成员', identity: '邮箱或用户名',
+        identityPlaceholder: '精确输入邮箱或用户名', role: '世界职责', add: '添加成员', remove: '移出世界',
+        addSuccess: '世界成员已添加', updateSuccess: '世界成员已更新', mutationFailed: '世界成员操作失败',
+        roles: { owner: '所有者', planner: '规划者', treasurer: '财务员', trader: '交易员', viewer: '观察者' }
+      },
+      receipts: {
+        title: '命令处理回执', awaitingTick: '等待调度 Tick',
+        status: { pending: '等待处理', applied: '已封账', rejected: '已拒绝' }
+      },
       creation: {
         eyebrow: '角色初始化', title: '选择基础角色并进入世界', archetype: '基础角色',
         capacity: '角色槽位 {current} / {maximum}', name: '角色名称',
@@ -366,6 +524,82 @@ export default {
       roleState: {
         active: '当前生效', eligible: '已满足迁移条件', requirements: '尚未满足条件',
         cooldown: '还需等待 {count} Tick'
+      },
+      location: {
+        title: '位置与移动', showOnMap: '在地图中定位', jurisdiction: '管辖区', space: '空间', anchor: '空间锚点',
+        noAnchor: '无锚点', movement: '八方向移动控制', levelUp: '上一层', levelDown: '下一层',
+        movementHint: '平面移动限制为相邻 Cell；跨层必须经过服务端登记的双向入口。',
+        unavailable: '该角色尚无权威位置事实。',
+        direction: {
+          northWest: '向西北移动', north: '向北移动', northEast: '向东北移动', west: '向西移动',
+          east: '向东移动', southWest: '向西南移动', south: '向南移动', southEast: '向东南移动'
+        }
+      },
+      navigation: {
+        title: '确定性路径规划', preview: '规划到选中 Cell', planning: '正在规划…', clear: '清除路径',
+        noTarget: '尚未选择目标', hint: '在局部地图选择目标 Cell，再由服务端根据地形、建筑入口、楼梯和角色占位计算可复现路径。',
+        status: '判定', steps: '步数', cost: '总代价', expanded: '展开节点', route: '规划路径',
+        reachable: '可到达', arrived: '已在目标位置', unreachable: '不可到达', moveNext: '执行下一步',
+        failed: '路径规划失败',
+        reasons: {
+          outside_world: '目标超出世界边界', chunk_not_generated: '必经 Chunk 尚未生成',
+          terrain_blocked: '目标地形不可通行', furniture_blocked: '目标被设施阻挡',
+          building_wall: '建筑边界不可穿越', void: '该 Z 层没有可用空间',
+          actor_occupied: '目标 Cell 已被其他角色占用', portal_required: '必须通过登记入口或楼梯',
+          portal_closed: '必经入口当前关闭', portal_locked: '必经入口当前锁定',
+          portal_access_denied: '当前角色不满足必经入口的访问策略',
+          corner_blocked: '禁止从障碍夹角斜向穿越', search_limit: '路径超出搜索步数或节点上限',
+          unreachable: '当前空间拓扑中不存在可达路径'
+        }
+      },
+      navigationIntent: {
+        title: '持续移动意图', loading: '正在同步移动调度状态…', reservationCount: '当前 Tick {count} 条移动预留',
+        empty: '当前角色没有移动意图。可将地图选中 Cell 设为目标，交由后续世界 Tick 持续推进。',
+        destination: '目的地 XYZ', nextAttempt: '下次尝试', priority: '优先级', blockedAttempts: '连续阻塞',
+        maxSteps: '搜索上限', onBlocked: '阻塞策略', budget: '行动预算', useSelectedCell: '使用地图选中 Cell',
+        create: '建立移动意图', replace: '替换移动意图', cancel: '取消移动意图', stepCost: '本步成本 {cost}',
+        statuses: { active: '执行中', blocked: '阻塞等待', arrived: '已到达', cancelled: '已取消', failed: '执行失败' },
+        onBlockedOptions: { retry: '确定性退避后重试', cancel: '首次阻塞即取消' },
+        reasons: {
+          budget_insufficient: '行动预算不足，等待后续 Tick 归集', target_reached: '角色已到达目的地',
+          user_cancelled: '移动意图已由用户取消', target_invalid: '目的地不再有效',
+          reservation_target_conflict: '目标 Cell 已被本 Tick 的其他 Actor 预留',
+          reservation_edge_conflict: '移动边已被本 Tick 的其他 Actor 预留',
+          outside_world: '目标超出世界边界', chunk_not_generated: '必经 Chunk 尚未生成',
+          terrain_blocked: '目标地形不可通行', furniture_blocked: '目标被设施阻挡',
+          building_wall: '建筑边界不可穿越', void: '该 Z 层没有可用空间',
+          actor_occupied: '目标 Cell 已被其他角色占用', portal_required: '必须通过登记入口或楼梯',
+          portal_closed: '必经入口当前关闭', portal_locked: '必经入口当前锁定',
+          portal_access_denied: '角色不满足必经入口访问策略', corner_blocked: '禁止从障碍夹角斜向穿越',
+          search_limit: '路径超出搜索步数或节点上限', unreachable: '当前空间拓扑中不存在可达路径'
+        }
+      },
+      portals: {
+        title: '入口状态与访问控制', loading: '正在读取入口投影…', count: '{count} 个入口', empty: '当前世界没有生效入口。',
+        direction: '方向', version: '版本', policy: '访问策略', actorAccess: '当前角色', fixedOpen: '楼梯保持开放',
+        outOfRange: '角色需到达入口相邻 Cell', editPolicy: '编辑策略', policyEditor: '入口访问策略编辑器',
+        policyHint: '策略由服务端校验并作为事实封账；保存会替换该入口的完整访问条件。', portal: '目标入口',
+        policyMode: '策略条件', noDefinitions: '没有可用定义', minimumStacks: '最低状态层数', factType: '事实类型',
+        windowTicks: '统计窗口（Tick）', scaledThreshold: '属性阈值', integerThreshold: '整数阈值', savePolicy: '保存访问策略',
+        requirementFailure: '{condition}：当前 {actual}，要求 {required}',
+        states: { open: '开放', closed: '关闭', locked: '锁定' },
+        actions: { open: '开启', close: '关闭', lock: '上锁', unlock: '解锁' },
+        access: { allowed: '允许通过', denied: '策略拒绝', closed: '入口关闭', locked: '入口锁定', notEvaluated: '未选择角色' },
+        policyModes: {
+          unchanged: '保留当前复杂策略', public: '公开通行', roleActive: '要求生效职业', roleInactive: '要求职业未生效',
+          attributeGte: '属性不低于阈值', attributeLte: '属性不高于阈值', experienceGte: '属性经验不低于阈值',
+          statusPresent: '要求存在状态', statusAbsent: '要求不存在状态', factCountGte: '时间窗内事实次数', worldTickGte: '世界 Tick 门槛'
+        },
+        definitionKinds: { attribute: '角色属性', role: '身份或职业', status: '角色状态' },
+        requirements: { and: '且', or: '或', not: '非', public: '公开通行', active: '生效', inactive: '未生效', absent: '不存在' }
+      },
+      control: {
+        title: '角色控制委托', memberUserID: '城市成员', memberUserIDPlaceholder: '选择生效成员',
+        memberSearchPlaceholder: '搜索用户名、邮箱或 ID', noEligibleMembers: '没有可委托的生效成员',
+        capabilities: '委托能力', actorCommand: '执行角色命令', manageControl: '管理控制权', grant: '授予',
+        owner: '角色所有者', delegate: '受托成员', readOnly: '当前成员只能查看，未获得角色命令或控制权管理能力。',
+        noDelegations: '暂无可见的生效控制权。',
+        revokeCapability: '撤销用户 {user} 的“{capability}”能力'
       }
     },
     landUse: { residential: '住宅', commercial: '商业', industrial: '工业' },
@@ -383,7 +617,41 @@ export default {
       action: '新建城市', title: '创建城市世界', name: '城市名称',
       namePlaceholder: '例如：港湾实验城', timezone: 'IANA 时区',
       timezoneHint: '用于城市日历边界，例如 Asia/Shanghai。', creating: '正在创建…',
-      confirm: '创建并绑定规则集', success: '城市世界已创建', failed: '创建城市世界失败'
+      style: '世界生成风格', stylePlaceholder: '选择风格',
+      styleHint: '创建后会冻结生成器、国家/地区风格与字符规则集，不复用旧版 F7 固定地图。',
+      styleLoadFailed: '无法读取开放世界风格目录',
+      confirm: '创建并生成开放世界', success: '城市世界已创建', failed: '创建城市世界失败'
+    },
+    openWorld: {
+      world: '开放世界', profile: '世界风格', generator: '生成器 {version}',
+      refresh: '重新读取服务端世界事实', returnToSpawn: '返回出生地', nearestInterior: '定位最近的已物化室内',
+      materializeSector: '按当前视野生成并封存相邻分区', materializeFailed: '分区生成命令未成功应用',
+	  verifyCurrentRegion: '验证当前 Region 的已封存地图事实', regionVerified: '当前 Region 的地图事实已验证',
+	  worldVerified: '完整世界状态与规范哈希已验证', verificationSummary: '{sectors} 个分区 · {chunks} 个 Chunk',
+	  verificationFailed: '地图事实验证返回了不匹配的范围',
+      mapTitle: 'OPEN WORLD / 局部字符地图',
+      mapSubtitle: '{chunks} 个已物化 Chunk · {buildings} 栋带室内事实的建筑',
+      viewportAria: '开放世界字符地图，可使用方向键移动和滚轮缩放。',
+      dragHint: '拖动地图或使用方向键移动视野', panHint: '平移', zoomHint: '缩放',
+      loadFailed: '开放世界数据读取失败',
+      hovered: '悬停坐标 {x} / {y} / {z}',
+      inspector: {
+        eyebrow: '已物化世界事实', title: 'Cell 检查器', coordinate: '世界坐标',
+        chunk: 'Chunk', terrain: '基础地形', stack: '层叠内容', building: '建筑与室内',
+        floors: '{count} 层', interiorReady: '已封存 {count} 个可见室内楼层事实。',
+        interiorUnavailable: '此建筑没有可读取的地面室内事实。', openInterior: '查看室内字符图', focusInterior: '定位室内入口',
+        emptyTitle: '选择地图 Cell', emptyDescription: '点击地图查看服务端封存的地形、墙体、门和建筑事实。',
+        seed: '世界种子', hash: '创世哈希'
+      },
+      interior: {
+        title: '建筑室内 / 字符地图', floor: '楼层 {floor} · Z {z}', layout: '布局版本',
+        openFloor: '查看第 {floor} 层', connections: '可用连接',
+        cells: '{count} 个封存 Cell', loading: '正在读取服务端封存的室内事实…',
+        loadFailed: '室内事实读取失败', verificationFailed: '室内事实哈希与建筑清单不一致',
+        viewportAria: '建筑室内字符地图。可拖动、使用方向键移动，并用滚轮缩放。',
+        dragHint: '仅显示服务端封存的房间、门、楼梯与家具',
+        serverFacts: '服务端封存事实', selectCell: '点击字符查看该 Cell 的完整事实堆栈。'
+      }
     },
     help: {
       action: '查看快捷键', title: 'CLASSIC 地图操作', pan: '按 Cell 平移地图', zoom: '缩放字符尺寸',
@@ -425,7 +693,9 @@ export default {
     facts: {
       actor_created: '角色创建', actor_activity_performed: '行为完成',
       actor_role_transitioned: '职业迁移', actor_status_expired: '状态到期',
-      rule_consequence_applied: '规则后果执行'
+      rule_consequence_applied: '规则后果执行', actor_location_moved: '角色位置移动',
+      actor_control_granted: '角色控制权授予', actor_control_revoked: '角色控制权撤销',
+      portal_state_changed: '入口状态变更', portal_access_changed: '入口访问策略变更'
     }
   },
 

@@ -51,6 +51,8 @@ export default {
     info: 'Info',
     active: 'Active',
     inactive: 'Inactive',
+    enable: 'Enable',
+    disable: 'Disable',
     more: 'More',
     menu: 'Menu',
     userMenu: 'User menu',
@@ -178,6 +180,7 @@ export default {
     availableChannels: 'Available Channels',
     subscriptions: 'Subscriptions',
     virtualCurrency: 'Assets',
+    accountAllocations: 'Assigned Accounts',
     citySimulation: 'City Simulation',
     virtualCurrencies: 'Virtual Currencies',
     virtualCurrencyIntegrations: 'Currency Integrations',
@@ -211,6 +214,31 @@ export default {
     contentModeration: 'Content Moderation',
     promptAudit: 'Prompt Audit',
     auditLogs: 'Audit Logs',
+  },
+
+  accountAllocations: {
+    title: 'Assigned Accounts',
+    description: 'Review administrator-assigned capacity, status, and your own usage.',
+    readOnlyTitle: 'Managed account summary',
+    readOnlyDescription: 'This page exposes only safe usage summaries. Account names, credentials, proxies, IPs, and other sensitive settings are never shown or controllable here.',
+    emptyTitle: 'No assigned accounts',
+    emptyDescription: 'An administrator has not assigned an upstream account to you yet. You can still use other groups you are authorized to access.',
+    capacity: 'Concurrency',
+    concurrentRequests: 'concurrent requests',
+    requestUsage: 'Your requests',
+    tokenUsage: 'Your tokens',
+    requests: 'requests',
+    tokens: 'tokens',
+    assignedAt: 'Assigned',
+    coolingUntil: 'Cooling down until {time}.',
+    unavailableHint: 'Currently not schedulable; the administrator policy may replenish it automatically.',
+    readyHint: 'Currently schedulable.',
+    loadFailed: 'Failed to load assigned accounts',
+    status: {
+      ready: 'Ready',
+      cooling: 'Cooling',
+      unavailable: 'Unavailable'
+    }
   },
 
   virtualCurrency: {
@@ -251,7 +279,8 @@ export default {
     empty: {
       eyebrow: 'No world established',
       title: 'Create the first verifiable city',
-      description: 'A city world binds a fixed rule set, generator, and seed. The map displays only spatial facts generated and posted by the server.'
+      description: 'A city world binds a fixed rule set, generator, and seed. The map displays only spatial facts generated and posted by the server.',
+      waitingForWorld: 'An administrator has not added you to a playable city yet. Once assigned, you can create a character, explore, and progress it here.'
     },
     controls: {
       world: 'City world', selectWorld: 'Select a city world', viewMode: 'View mode',
@@ -282,7 +311,7 @@ export default {
       floorSummary: '{count} floors · {capacity} capacity', landStack: 'Land and building facts',
       parcel: 'Parcel', building: 'Building', area: 'Statutory area', version: 'Fact version',
       floors: 'Z range', floorArea: 'Gross floor area', occupancy: 'Occupied / capacity', quality: 'Quality',
-      allocations: '{count} housing allocations',
+      allocations: '{count} housing allocations', actorsHere: 'Actors at this location', focusActor: 'Locate',
       unavailableTitle: 'No facts are available for this Cell',
       unavailableDescription: 'The target Chunk is not generated, is not loaded, or has no data on this Z level.',
       emptyTitle: 'Select a map position', emptyDescription: 'Select a regional Tile or local Cell to inspect the full server response.'
@@ -345,6 +374,124 @@ export default {
       commandSuccess: 'The enterprise-location fact was posted through a city tick.',
       commandFailed: 'Enterprise-location command failed'
     },
+    services: {
+      eyebrow: 'City service facts', title: 'Public facilities and city services',
+      description: 'Build an auditable service network from real buildings, capacities, subjects, connections, and per-tick settlements.',
+      loading: 'Loading public-service projections…', queryFailed: 'Public-service query failed',
+      commandSuccess: 'The public-service fact was posted through a city tick.', commandFailed: 'Public-service command failed',
+      unsupported: { title: 'This world does not enable the public-service foundation', description: 'Pause and upgrade the world to {version} before creating facilities, demands, and connections. The upgrade creates no synthetic business data.' },
+      tabs: { catalog: 'Catalog', facilities: 'Facilities', demands: 'Demands', connections: 'Connections', networks: 'Physical networks', settlements: 'Settlements' },
+      metrics: {
+        facilities: 'Facilities', operational: '{count} operational', capacity: 'Dispatch capacity', capacityLines: '{count} active capacity lines',
+        demand: 'Demand per tick', activeDemands: '{count} active demands', delivered: 'Latest delivered', shortage: 'Latest shortage',
+        quality: 'Weighted quality', requested: 'Requested {value}', requestedLabel: 'Requested', noTick: 'No settlements yet'
+      },
+      catalog: {
+        services: 'Service definitions', servicesDescription: 'Units, directions, and semantics are constrained by a versioned catalog.',
+        facilityTypes: 'Facility types', facilityTypesDescription: 'A facility type constrains allowed services and minimum building area.',
+        category: 'Category', unit: 'Unit', immutable: 'Immutable within version', minimumArea: 'Minimum floor area {value} m²'
+      },
+      filters: { service: 'Service', status: 'Status', district: 'District', facility: 'Facility', demand: 'Demand', apply: 'Apply filters' },
+      columns: {
+        facility: 'Facility', location: 'Spatial anchor', status: 'Status', capacities: 'Service capacities', demand: 'Demand', subject: 'Service subject',
+        request: 'Request and priority', latestSettlement: 'Latest settlement', connection: 'Connection', route: 'Supply route', flowLimit: 'Flow limit', policy: 'Loss and preference'
+      },
+      actions: {
+        operations: 'Public-service operations', registerFacility: 'Register facility', capacity: 'Configure capacity', transition: 'Transition status',
+        configureDemand: 'Configure demand', configureConnection: 'Configure connection', confirm: 'Confirm and post', processing: 'Posting…'
+      },
+      form: {
+        code: 'Stable code', name: 'Facility name', facilityType: 'Facility type', building: 'Building', ownerEntity: 'Owner economic entity (optional)',
+        reliability: 'Reliability (milli)', facility: 'Facility', service: 'Service', installedCapacity: 'Installed capacity', availability: 'Availability (milli)',
+        effectiveCapacity: 'Computed available capacity', targetStatus: 'Target status', currentStatus: 'Current status', subjectKind: 'Subject kind', subject: 'Real subject',
+        requestedUnits: 'Requested units per tick', priority: 'Priority (0–1000)', status: 'Status', version: 'Current version', demand: 'Demand',
+        flowLimit: 'Maximum flow per tick', loss: 'Loss (milli)', preference: 'Connection preference (0–1000)',
+        registerNote: 'A new facility starts offline. It supplies nothing until capacity is configured and its status is explicitly transitioned to operational.',
+        casNote: 'The command carries the current version. The server rejects concurrent overwrites and recalculates available capacity.',
+        statusNote: 'A status transition affects only settlements posted after this fact; existing settlements remain immutable.',
+        demandNote: 'A demand must bind a real subject in this world. Its subject and service cannot be changed after creation.',
+        connectionNote: 'A connection can only join capacity and demand for the same service. Flow, loss, and preference drive deterministic allocation.'
+      },
+      status: { offline: 'Offline', operational: 'Operational', degraded: 'Degraded', retired: 'Retired', active: 'Active', suspended: 'Suspended' },
+      subjectKind: { district: 'District', building: 'Building', household: 'Household cohort', enterprise: 'Enterprise', actor: 'Actor' },
+      empty: { facilities: 'No facilities match these filters.', demands: 'No service demands match these filters.', connections: 'No service connections match these filters.', settlements: 'No settlement facts match these filters.' },
+      pagination: { loaded: '{count} records loaded', more: 'Load more' },
+      reliability: 'Reliability {value}', priority: 'Priority {value}', preference: 'Preference {value}', loss: 'Loss {value}',
+      shortage: 'Shortage {value}', lossUnits: 'Loss units {value}', allocations: '{count} allocation lines', noCapacity: 'No service capacity configured', noSettlement: 'No settlement yet',
+      network: {
+        title: 'City-service physical networks', loading: 'Loading physical-network projections…', queryFailed: 'Physical-network query failed',
+        unsupported: {
+          title: 'This world does not enable the physical-network protocol',
+          description: 'Pause and upgrade the world to {version} before managing nodes, edges, capacity, fault isolation, and segment-level flow facts.'
+        },
+        tabs: { topology: 'Topology and capacity', flows: 'Path flows', diagnostics: 'Network diagnostics', facts: 'Network facts' },
+        metrics: {
+          networks: 'Active networks', nodes: '{count} active nodes', edges: 'Active edges',
+          edgeExceptions: 'Isolated {isolated} · failed {failed}', capacity: 'Available edge capacity', installed: 'Installed {value}',
+          dispatched: 'Latest dispatched', received: 'Network received', lossUnits: 'Network loss {value}', deliveryRatio: 'Network delivery ratio'
+        },
+        filters: { network: 'Physical network', allNetworks: 'All networks', edgeStatus: 'Edge status', phase: 'Fact phase' },
+        actions: { network: 'Configure network', node: 'Configure node', edge: 'Configure edge', transition: 'Transition status' },
+        topology: {
+          graphLabel: 'Physical-network topology showing nodes, edges, capacities, and operating states', selectedNode: 'Selected node',
+          selectedEdge: 'Selected edge', edgeInventory: 'Edge asset inventory'
+        },
+        diagnostics: {
+          summary: '{components} components · {bottlenecks} bottleneck edges',
+          selectNetwork: 'Select one physical network to load live topology diagnostics.',
+          loading: 'Computing connectivity, islands, edge utilization, and route probes…',
+          routeProbe: 'Capacity-constrained route probe',
+          routeProbeHint: 'Read-only reuse of the production deterministic router; it writes no flow, fact, or residual capacity.',
+          source: 'Source node', sink: 'Sink node', probeUnits: 'Probe units', runProbe: 'Run probe',
+          components: 'Weak components', activeAssets: '{nodes} active nodes · {edges} active edges',
+          isolatedNodes: 'Isolated nodes', serviceIslands: '{count} service islands',
+          bottlenecks: 'Bottleneck edges', saturated: '{count} saturated', latestFlow: 'Utilization sample tick',
+          componentAssets: '{nodes} nodes · {edges} edges', island: 'Supply/demand island', edgeLoad: 'Latest edge utilization',
+          truncated: '{count} lower-priority edges are not shown.', routeResult: 'Route-probe result',
+          reasons: {
+            reachable: 'Reachable', no_capacity_path: 'No residual-capacity path',
+            source_not_active: 'Source node is inactive', sink_not_active: 'Sink node is inactive'
+          }
+        },
+        columns: {
+          role: 'Node role', status: 'Status', binding: 'Business binding', version: 'Fact version', route: 'Route',
+          available: 'Available / installed', loss: 'Loss', condition: 'Condition', paths: 'Paths / segments',
+          tick: 'Tick', fact: 'Fact', subject: 'Subject', source: 'Source'
+        },
+        empty: { networks: 'No physical networks match these filters.', nodes: 'This network has no displayable nodes.', flows: 'No path-flow facts match these filters.', facts: 'No network facts match these filters.' },
+        pagination: {
+          topology: '{networks} networks · {nodes} nodes · {edges} edges',
+          networks: 'Load more networks', nodes: 'Load more nodes', edges: 'Load more edges'
+        },
+        operations: { network: 'Physical-network configuration', node: 'Network-node configuration', edge: 'Network-edge configuration', edgeStatus: 'Network-edge status transition' },
+        form: {
+          topologyRevision: 'Topology revision', networkNote: 'Each network binds one city service. Every change advances its topology revision and optimistic-lock version.',
+          capacityBinding: 'Facility service capacity', demandBinding: 'Service demand', anchorCoordinates: 'Bind authoritative XYZ coordinates',
+          nodeNote: 'Supply nodes require a facility capacity and demand nodes require a service demand. Junction, storage, and gateway nodes bind neither.',
+          fromNode: 'From node', toNode: 'To node', direction: 'Direction', installedCapacity: 'Installed edge capacity', baseCost: 'Base route cost',
+          edgeNote: 'Available capacity is integer-derived from installed capacity and availability. Both directions of a bidirectional edge share one tick capacity.',
+          transitionNote: 'Isolation, failure, and recovery post immutable facts. The server revalidates the network and endpoints before activation.'
+        },
+        direction: { directed: 'Directed', bidirectional: 'Bidirectional shared capacity' },
+        role: { supply: 'Supply', demand: 'Demand', junction: 'Junction', storage: 'Storage', gateway: 'Gateway' },
+        status: { active: 'Active', suspended: 'Suspended', retired: 'Retired', isolated: 'Isolated', failed: 'Failed', offline: 'Offline' },
+        phase: { command: 'Command', pre_network: 'Pre-network', settlement: 'Settlement' },
+        factType: {
+          'network.configured': 'Network configured', 'node.configured': 'Node configured',
+          'edge.configured': 'Edge configured', 'edge.state_changed': 'Edge status transitioned',
+          'network.topology_synchronized': 'Topology synchronized', 'network.flow_settled': 'Network flow settled'
+        },
+        facts: { automatic: 'Automatic phase' }
+      },
+      serviceNames: {
+        electric_power: 'Electric power', potable_water: 'Potable water', wastewater: 'Wastewater treatment', solid_waste: 'Solid waste',
+        education: 'Education', healthcare: 'Healthcare', fire_response: 'Fire response', police_response: 'Police response'
+      },
+      facilityTypeNames: {
+        service_hub: 'Service hub', power_plant: 'Power plant', water_works: 'Water works', wastewater_plant: 'Wastewater plant',
+        waste_processing: 'Waste processing', school: 'School', hospital: 'Hospital', fire_station: 'Fire station', police_station: 'Police station'
+      }
+    },
     runtime: {
       eyebrow: 'Open-world runtime', title: 'Characters, progression, and rules',
       description: 'Server-posted facts determine character state, actions, role transitions, rule cases, and sanctions.',
@@ -356,8 +503,19 @@ export default {
       rolesHint: 'Transitions require the necessary attributes, history, and identity',
       statusSummary: '{stacks} stacks · intensity {intensity}', noStatuses: 'This character has no status or sanction records.',
       noCases: 'This character has no rule cases.', commandSuccess: 'The character fact was posted through the city tick.',
+      commandQueued: 'The character command is queued for the world scheduler to post in a tick.',
       commandFailed: 'Open-world operation failed',
       counters: { actors: 'Actors', facts: 'Facts', cases: 'Cases' },
+      members: {
+        title: 'World members and duties', count: '{count} active members', identity: 'Email or username',
+        identityPlaceholder: 'Enter an exact email or username', role: 'World duty', add: 'Add member', remove: 'Remove',
+        addSuccess: 'World member added', updateSuccess: 'World member updated', mutationFailed: 'World member operation failed',
+        roles: { owner: 'Owner', planner: 'Planner', treasurer: 'Treasurer', trader: 'Trader', viewer: 'Viewer' }
+      },
+      receipts: {
+        title: 'Command processing receipts', awaitingTick: 'Awaiting scheduler tick',
+        status: { pending: 'Pending', applied: 'Applied', rejected: 'Rejected' }
+      },
       creation: {
         eyebrow: 'Character initialization', title: 'Choose a starter character and enter the world', archetype: 'Starter character',
         capacity: 'Character slots {current} / {maximum}', name: 'Character name',
@@ -366,6 +524,82 @@ export default {
       roleState: {
         active: 'Currently active', eligible: 'Transition requirements satisfied', requirements: 'Requirements not yet satisfied',
         cooldown: 'Wait {count} more ticks'
+      },
+      location: {
+        title: 'Location and movement', showOnMap: 'Locate on map', jurisdiction: 'Jurisdiction', space: 'Space', anchor: 'Spatial anchor',
+        noAnchor: 'No anchor', movement: 'Eight-direction movement control', levelUp: 'Level up', levelDown: 'Level down',
+        movementHint: 'Planar movement is limited to adjacent Cells. Z transitions require a server-registered bidirectional portal.',
+        unavailable: 'This actor has no authoritative location fact yet.',
+        direction: {
+          northWest: 'Move north-west', north: 'Move north', northEast: 'Move north-east', west: 'Move west',
+          east: 'Move east', southWest: 'Move south-west', south: 'Move south', southEast: 'Move south-east'
+        }
+      },
+      navigation: {
+        title: 'Deterministic path planning', preview: 'Plan to selected Cell', planning: 'Planning…', clear: 'Clear path',
+        noTarget: 'No target selected', hint: 'Select a Cell on the local map. The server computes a reproducible route from terrain, building entrances, stairs, and actor occupancy.',
+        status: 'Result', steps: 'Moves', cost: 'Total cost', expanded: 'Expanded', route: 'Planned route',
+        reachable: 'Reachable', arrived: 'Already at target', unreachable: 'Unreachable', moveNext: 'Execute next move',
+        failed: 'Path planning failed',
+        reasons: {
+          outside_world: 'Target is outside world bounds', chunk_not_generated: 'A required Chunk has not been generated',
+          terrain_blocked: 'Target terrain is impassable', furniture_blocked: 'Target is blocked by furniture',
+          building_wall: 'Building boundary cannot be crossed here', void: 'No traversable space exists on this Z level',
+          actor_occupied: 'Another actor occupies the target Cell', portal_required: 'A registered entrance or stair is required',
+          portal_closed: 'A required entrance is closed', portal_locked: 'A required entrance is locked',
+          portal_access_denied: 'The actor does not satisfy a required entrance policy',
+          corner_blocked: 'Diagonal corner cutting is not allowed', search_limit: 'Route exceeds the step or node search bound',
+          unreachable: 'No route exists in the current spatial topology'
+        }
+      },
+      navigationIntent: {
+        title: 'Persistent movement intent', loading: 'Synchronizing movement scheduler state…', reservationCount: '{count} move reservations in the current tick',
+        empty: 'This actor has no movement intent. Use a selected map Cell as the destination and let later world ticks advance it.',
+        destination: 'Destination XYZ', nextAttempt: 'Next attempt', priority: 'Priority', blockedAttempts: 'Blocked attempts',
+        maxSteps: 'Search bound', onBlocked: 'Blocked policy', budget: 'Action budget', useSelectedCell: 'Use selected map Cell',
+        create: 'Create movement intent', replace: 'Replace movement intent', cancel: 'Cancel movement intent', stepCost: 'Step cost {cost}',
+        statuses: { active: 'Active', blocked: 'Blocked', arrived: 'Arrived', cancelled: 'Cancelled', failed: 'Failed' },
+        onBlockedOptions: { retry: 'Retry with deterministic backoff', cancel: 'Cancel on first blockage' },
+        reasons: {
+          budget_insufficient: 'Action budget is insufficient; accrue it in a later tick', target_reached: 'The actor reached the destination',
+          user_cancelled: 'The movement intent was cancelled by the user', target_invalid: 'The destination is no longer valid',
+          reservation_target_conflict: 'Another Actor reserved the target Cell in this tick',
+          reservation_edge_conflict: 'Another Actor reserved this movement edge in this tick',
+          outside_world: 'Target is outside world bounds', chunk_not_generated: 'A required Chunk has not been generated',
+          terrain_blocked: 'Target terrain is impassable', furniture_blocked: 'Target is blocked by furniture',
+          building_wall: 'Building boundary cannot be crossed here', void: 'No traversable space exists on this Z level',
+          actor_occupied: 'Another actor occupies the target Cell', portal_required: 'A registered entrance or stair is required',
+          portal_closed: 'A required entrance is closed', portal_locked: 'A required entrance is locked',
+          portal_access_denied: 'The actor does not satisfy a required entrance policy', corner_blocked: 'Diagonal corner cutting is not allowed',
+          search_limit: 'Route exceeds the step or node search bound', unreachable: 'No route exists in the current spatial topology'
+        }
+      },
+      portals: {
+        title: 'Portal state and access control', loading: 'Loading portal projection…', count: '{count} portals', empty: 'This world has no active portals.',
+        direction: 'Direction', version: 'Version', policy: 'Access policy', actorAccess: 'Selected actor', fixedOpen: 'Stairs remain open',
+        outOfRange: 'Move the actor next to this portal', editPolicy: 'Edit policy', policyEditor: 'Portal access policy editor',
+        policyHint: 'The server validates and posts each policy as a fact. Saving replaces the portal’s complete access requirement.', portal: 'Target portal',
+        policyMode: 'Policy condition', noDefinitions: 'No definitions available', minimumStacks: 'Minimum status stacks', factType: 'Fact type',
+        windowTicks: 'Window (ticks)', scaledThreshold: 'Attribute threshold', integerThreshold: 'Integer threshold', savePolicy: 'Save access policy',
+        requirementFailure: '{condition}: current {actual}, required {required}',
+        states: { open: 'Open', closed: 'Closed', locked: 'Locked' },
+        actions: { open: 'Open', close: 'Close', lock: 'Lock', unlock: 'Unlock' },
+        access: { allowed: 'Pass allowed', denied: 'Policy denied', closed: 'Portal closed', locked: 'Portal locked', notEvaluated: 'No actor selected' },
+        policyModes: {
+          unchanged: 'Keep current complex policy', public: 'Public access', roleActive: 'Require active role', roleInactive: 'Require inactive role',
+          attributeGte: 'Attribute at least threshold', attributeLte: 'Attribute at most threshold', experienceGte: 'Attribute experience at least threshold',
+          statusPresent: 'Require status present', statusAbsent: 'Require status absent', factCountGte: 'Fact count in time window', worldTickGte: 'World tick threshold'
+        },
+        definitionKinds: { attribute: 'Actor attribute', role: 'Identity or profession', status: 'Actor status' },
+        requirements: { and: 'AND', or: 'OR', not: 'NOT', public: 'Public access', active: 'active', inactive: 'inactive', absent: 'absent' }
+      },
+      control: {
+        title: 'Actor control delegation', memberUserID: 'City member', memberUserIDPlaceholder: 'Select an active member',
+        memberSearchPlaceholder: 'Search username, email, or ID', noEligibleMembers: 'No eligible active members',
+        capabilities: 'Delegated capabilities', actorCommand: 'Issue actor commands', manageControl: 'Manage control grants', grant: 'Grant',
+        owner: 'Actor owner', delegate: 'Delegated member', readOnly: 'This member has read-only access without actor-command or control-management capability.',
+        noDelegations: 'No active visible control grants.',
+        revokeCapability: 'Revoke “{capability}” from user {user}'
       }
     },
     landUse: { residential: 'Residential', commercial: 'Commercial', industrial: 'Industrial' },
@@ -383,7 +617,41 @@ export default {
       action: 'New city', title: 'Create city world', name: 'City name',
       namePlaceholder: 'For example: Harbor Test City', timezone: 'IANA time zone',
       timezoneHint: 'Used for city calendar boundaries, for example Asia/Shanghai.', creating: 'Creating…',
-      confirm: 'Create and bind rule set', success: 'City world created', failed: 'Failed to create city world'
+      style: 'World-generation style', stylePlaceholder: 'Choose a style',
+      styleHint: 'Creation freezes the generator, regional style, and glyph rule set; it does not reuse the legacy fixed F7 map.',
+      styleLoadFailed: 'Unable to load the open-world style catalog',
+      confirm: 'Create open world', success: 'City world created', failed: 'Failed to create city world'
+    },
+    openWorld: {
+      world: 'Open world', profile: 'World style', generator: 'Generator {version}',
+      refresh: 'Reload server world facts', returnToSpawn: 'Return to spawn', nearestInterior: 'Focus nearest materialized interior',
+      materializeSector: 'Generate and seal the sector at the current view', materializeFailed: 'The sector-materialization command was not applied',
+	  verifyCurrentRegion: 'Verify sealed map facts for the current Region', regionVerified: 'Current Region map facts verified',
+	  worldVerified: 'Whole-world state and canonical hash verified', verificationSummary: '{sectors} sector(s) · {chunks} Chunk(s)',
+	  verificationFailed: 'Map verification returned a mismatched scope',
+      mapTitle: 'OPEN WORLD / Local glyph map',
+      mapSubtitle: '{chunks} materialized Chunks · {buildings} buildings with interior facts',
+      viewportAria: 'Open-world glyph map. Use arrow keys to move and the wheel to zoom.',
+      dragHint: 'Drag the map or use arrow keys to move the view', panHint: 'Pan', zoomHint: 'Zoom',
+      loadFailed: 'Failed to load open-world data',
+      hovered: 'Hovered coordinate {x} / {y} / {z}',
+      inspector: {
+        eyebrow: 'Materialized world facts', title: 'Cell inspector', coordinate: 'World coordinate',
+        chunk: 'Chunk', terrain: 'Base terrain', stack: 'Content stack', building: 'Building and interior',
+        floors: '{count} floors', interiorReady: '{count} visible interior floor fact(s) sealed.',
+        interiorUnavailable: 'No readable ground-floor interior fact is available for this building.', openInterior: 'View interior glyph map', focusInterior: 'Focus interior entrance',
+        emptyTitle: 'Select a map Cell', emptyDescription: 'Click the map to inspect server-sealed terrain, walls, doors, and building facts.',
+        seed: 'World seed', hash: 'Genesis hash'
+      },
+      interior: {
+        title: 'Building interior / glyph map', floor: 'Floor {floor} · Z {z}', layout: 'Layout version',
+        openFloor: 'Open floor {floor}', connections: 'Available connections',
+        cells: '{count} sealed Cells', loading: 'Reading server-sealed interior facts…',
+        loadFailed: 'Failed to load interior facts', verificationFailed: 'Interior content hash does not match the building manifest',
+        viewportAria: 'Building interior glyph map. Drag or use arrow keys to move, and the wheel to zoom.',
+        dragHint: 'Shows only server-sealed rooms, doors, stairs, and furnishings',
+        serverFacts: 'Server-sealed facts', selectCell: 'Select a glyph to inspect the complete Cell stack.'
+      }
     },
     help: {
       action: 'View shortcuts', title: 'CLASSIC map controls', pan: 'Pan by one Cell', zoom: 'Scale glyph size',
@@ -425,7 +693,9 @@ export default {
     facts: {
       actor_created: 'Character created', actor_activity_performed: 'Action performed',
       actor_role_transitioned: 'Role transitioned', actor_status_expired: 'Status expired',
-      rule_consequence_applied: 'Rule consequence applied'
+      rule_consequence_applied: 'Rule consequence applied', actor_location_moved: 'Actor location moved',
+      actor_control_granted: 'Actor control granted', actor_control_revoked: 'Actor control revoked',
+      portal_state_changed: 'Portal state changed', portal_access_changed: 'Portal access policy changed'
     }
   },
 

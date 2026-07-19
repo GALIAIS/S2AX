@@ -45,6 +45,28 @@ func TestLoadHTTPIngressSafetyDefaults(t *testing.T) {
 	require.True(t, cfg.APIKeyAuth.InvalidAbuse.Enabled)
 	require.Equal(t, 120, cfg.APIKeyAuth.InvalidAbuse.Threshold)
 	require.Equal(t, 16384, cfg.APIKeyAuth.InvalidAbuse.Capacity)
+	require.Equal(t, []string{"127.0.0.1/32", "::1/128"}, cfg.Server.TrustedProxies)
+}
+
+func TestLoadTrustedProxiesFromCommaDelimitedEnvironment(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("SERVER_TRUSTED_PROXIES", "127.0.0.1/32, 172.30.5.0/24 ; ::1/128")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, []string{"127.0.0.1/32", "172.30.5.0/24", "::1/128"}, cfg.Server.TrustedProxies)
+	require.NoError(t, cfg.Validate())
+}
+
+func TestValidateRejectsInvalidTrustedProxy(t *testing.T) {
+	cfg := &Config{Server: ServerConfig{
+		ReadHeaderTimeout:  10,
+		MaxHeaderBytes:     64 * 1024,
+		IdleTimeout:        120,
+		TrustedProxies:     []string{"not-an-address"},
+		MaxRequestBodySize: 1,
+	}}
+	require.ErrorContains(t, cfg.Validate(), "server.trusted_proxies contains invalid IP")
 }
 
 func TestLoadForBootstrapAllowsMissingJWTSecret(t *testing.T) {

@@ -38,6 +38,7 @@ func RegisterAdminRoutes(
 
 		// 账号管理
 		registerAccountRoutes(admin, h, stepUpAuth)
+		registerAccountAllocationRoutes(admin, h)
 
 		// 公告管理
 		registerAnnouncementRoutes(admin, h)
@@ -399,6 +400,24 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.POST("/exchange-setup-token-code", h.Admin.OAuth.ExchangeSetupTokenCode)
 		accounts.POST("/cookie-auth", h.Admin.OAuth.CookieAuth)
 		accounts.POST("/setup-token-cookie-auth", h.Admin.OAuth.SetupTokenCookieAuth)
+	}
+}
+
+func registerAccountAllocationRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	allocations := admin.Group("/account-allocations")
+	{
+		allocations.GET("/capabilities", h.Admin.AccountAllocation.GetCapabilities)
+		allocations.GET("/policies", h.Admin.AccountAllocation.ListPolicies)
+		allocations.POST("/policies", h.Admin.AccountAllocation.CreatePolicy)
+		allocations.GET("/policies/:id", h.Admin.AccountAllocation.GetPolicy)
+		allocations.PUT("/policies/:id", h.Admin.AccountAllocation.UpdatePolicy)
+		allocations.POST("/policies/:id/status", h.Admin.AccountAllocation.SetPolicyStatus)
+		allocations.POST("/policies/:id/reconcile", h.Admin.AccountAllocation.ReconcilePolicy)
+		allocations.GET("/policies/:id/assignments", h.Admin.AccountAllocation.ListAssignments)
+		allocations.GET("/policies/:id/candidates", h.Admin.AccountAllocation.ListCandidates)
+		allocations.POST("/policies/:id/assignments", h.Admin.AccountAllocation.CreateAssignment)
+		allocations.DELETE("/policies/:id/assignments/:assignment_id", h.Admin.AccountAllocation.ReleaseAssignment)
+		allocations.GET("/policies/:id/events", h.Admin.AccountAllocation.ListEvents)
 	}
 }
 

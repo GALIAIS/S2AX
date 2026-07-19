@@ -26,6 +26,22 @@ func TestCityEngineDefinitionsKeepLegacyAndCurrentPipelinesSeparate(t *testing.T
 	require.False(t, f6.supportsCommand(CityCommandTypePopulationRelocate))
 	require.False(t, f6.supportsCommand("unknown.command"))
 
+	openWorldV2, err := cityEngineForVersion(CitySimulationVersionOpenWorldV2)
+	require.NoError(t, err)
+	require.True(t, openWorldV2.hasStage(cityEngineStageOpenWorld))
+	require.True(t, openWorldV2.supportsCommand(CityCommandTypeOpenWorldSectorMaterialize))
+	require.False(t, f6.supportsCommand(CityCommandTypeOpenWorldSectorMaterialize))
+	require.True(t, cityEngineSupportsOpenWorld(CitySimulationVersionOpenWorldV2))
+	require.True(t, cityEngineSupportsOpenWorldMaterialization(CitySimulationVersionOpenWorldV2))
+	require.False(t, cityEngineSupportsOpenWorldMaterialization(CitySimulationVersionOpenWorld))
+	openWorldV3, err := cityEngineForVersion(CitySimulationVersionOpenWorldV3)
+	require.NoError(t, err)
+	require.True(t, openWorldV3.hasStage(cityEngineStageOpenWorld))
+	require.True(t, openWorldV3.supportsCommand(CityCommandTypeOpenWorldSectorMaterialize))
+	require.True(t, cityEngineSupportsOpenWorldMaterialization(CitySimulationVersionOpenWorldV3))
+	require.True(t, cityEngineSupportsOpenWorldVerticalTopology(CitySimulationVersionOpenWorldV3))
+	require.False(t, cityEngineSupportsOpenWorldVerticalTopology(CitySimulationVersionOpenWorldV2))
+
 	f6v2, err := cityEngineForVersion(CitySimulationVersionF6V2)
 	require.NoError(t, err)
 	require.True(t, f6v2.hasStage(cityEngineStageCalendarDemography))
@@ -94,9 +110,91 @@ func TestCityEngineDefinitionsKeepLegacyAndCurrentPipelinesSeparate(t *testing.T
 	require.True(t, f7v5.supportsCommand(CityCommandTypeActorCreate))
 	require.True(t, f7v5.supportsCommand(CityCommandTypeActorActivityPerform))
 	require.True(t, f7v5.supportsCommand(CityCommandTypeActorRoleTransition))
-	require.Empty(t, cityEngineUpgradeTargets(CitySimulationVersionF7V5))
+	require.False(t, f7v5.supportsCommand(CityCommandTypeActorLocationMove))
+	require.Equal(t, []string{CitySimulationVersionF7V6}, cityEngineUpgradeTargets(CitySimulationVersionF7V5))
 	require.True(t, cityEngineCanUpgrade(CitySimulationVersionF7V4, CitySimulationVersionF7V5))
 	require.False(t, f7v4.supportsCommand(CityCommandTypeActorCreate))
+
+	f7v6, err := cityEngineForVersion(CitySimulationVersionF7V6)
+	require.NoError(t, err)
+	require.True(t, f7v6.hasStage(cityEngineStageWorldRuntime))
+	require.True(t, f7v6.supportsCommand(CityCommandTypeActorLocationMove))
+	require.True(t, f7v6.supportsCommand(CityCommandTypeActorControlGrant))
+	require.True(t, f7v6.supportsCommand(CityCommandTypeActorControlRevoke))
+	require.Equal(t, []string{CitySimulationVersionF7V7}, cityEngineUpgradeTargets(CitySimulationVersionF7V6))
+	require.True(t, cityEngineCanUpgrade(CitySimulationVersionF7V5, CitySimulationVersionF7V6))
+	require.False(t, cityEngineSupportsWorldActorNavigation(CitySimulationVersionF7V6))
+
+	f7v7, err := cityEngineForVersion(CitySimulationVersionF7V7)
+	require.NoError(t, err)
+	require.True(t, f7v7.hasStage(cityEngineStageWorldRuntime))
+	require.True(t, f7v7.supportsCommand(CityCommandTypeActorLocationMove))
+	require.True(t, cityEngineSupportsWorldActorNavigation(CitySimulationVersionF7V7))
+	require.False(t, cityEngineSupportsWorldPortalAccess(CitySimulationVersionF7V7))
+	require.Equal(t, []string{CitySimulationVersionF7V8}, cityEngineUpgradeTargets(CitySimulationVersionF7V7))
+	require.True(t, cityEngineCanUpgrade(CitySimulationVersionF7V6, CitySimulationVersionF7V7))
+
+	f7v8, err := cityEngineForVersion(CitySimulationVersionF7V8)
+	require.NoError(t, err)
+	require.True(t, f7v8.hasStage(cityEngineStageWorldRuntime))
+	require.True(t, f7v8.supportsCommand(CityCommandTypeActorLocationMove))
+	require.True(t, f7v8.supportsCommand(CityCommandTypePortalStateTransition))
+	require.True(t, f7v8.supportsCommand(CityCommandTypePortalAccessConfigure))
+	require.True(t, cityEngineSupportsWorldActorNavigation(CitySimulationVersionF7V8))
+	require.True(t, cityEngineSupportsWorldPortalAccess(CitySimulationVersionF7V8))
+	require.False(t, cityEngineSupportsWorldNavigationIntents(CitySimulationVersionF7V8))
+	require.Equal(t, []string{CitySimulationVersionF7V9}, cityEngineUpgradeTargets(CitySimulationVersionF7V8))
+	require.True(t, cityEngineCanUpgrade(CitySimulationVersionF7V7, CitySimulationVersionF7V8))
+
+	f7v9, err := cityEngineForVersion(CitySimulationVersionF7V9)
+	require.NoError(t, err)
+	require.True(t, f7v9.supportsCommand(CityCommandTypeActorNavigationIntentSet))
+	require.True(t, f7v9.supportsCommand(CityCommandTypeActorNavigationIntentCancel))
+	require.True(t, cityEngineSupportsWorldNavigationIntents(CitySimulationVersionF7V9))
+	require.False(t, f7v9.supportsCommand(CityCommandTypeFacilityRegister))
+	require.Equal(t, []string{CitySimulationVersionF8}, cityEngineUpgradeTargets(CitySimulationVersionF7V9))
+	require.True(t, cityEngineCanUpgrade(CitySimulationVersionF7V8, CitySimulationVersionF7V9))
+
+	f8, err := cityEngineForVersion(CitySimulationVersionF8)
+	require.NoError(t, err)
+	require.True(t, f8.hasStage(cityEngineStagePublicServices))
+	require.True(t, f8.supportsCommand(CityCommandTypeFacilityRegister))
+	require.True(t, f8.supportsCommand(CityCommandTypeFacilityStatusTransition))
+	require.True(t, f8.supportsCommand(CityCommandTypeFacilityCapacityConfigure))
+	require.True(t, f8.supportsCommand(CityCommandTypeServiceDemandConfigure))
+	require.True(t, f8.supportsCommand(CityCommandTypeServiceConnectionConfigure))
+	require.True(t, cityEngineSupportsWorldActorSpatialControl(CitySimulationVersionF8))
+	require.True(t, cityEngineSupportsWorldActorNavigation(CitySimulationVersionF8))
+	require.True(t, cityEngineSupportsWorldPortalAccess(CitySimulationVersionF8))
+	require.True(t, cityEngineSupportsWorldNavigationIntents(CitySimulationVersionF8))
+	require.True(t, cityEngineSupportsPublicServices(CitySimulationVersionF8))
+	require.False(t, cityEngineSupportsFacilityLifecycle(CitySimulationVersionF8))
+	require.Equal(t, []string{CitySimulationVersionF8V2}, cityEngineUpgradeTargets(CitySimulationVersionF8))
+	require.True(t, cityEngineCanUpgrade(CitySimulationVersionF7V9, CitySimulationVersionF8))
+	require.True(t, cityEngineCanUpgrade(CitySimulationVersionF8, CitySimulationVersionF8V2))
+
+	f8v2, err := cityEngineForVersion(CitySimulationVersionF8V2)
+	require.NoError(t, err)
+	require.True(t, f8v2.hasStage(cityEngineStagePublicServices))
+	require.True(t, f8v2.supportsCommand(CityCommandTypeFacilityOperationSchedule))
+	require.True(t, f8v2.supportsCommand(CityCommandTypeFacilityOperationStart))
+	require.True(t, f8v2.supportsCommand(CityCommandTypeFacilityOperationCancel))
+	require.True(t, f8v2.supportsCommand(CityCommandTypeFacilityStaffingConfigure))
+	require.True(t, cityEngineSupportsFacilityLifecycle(CitySimulationVersionF8V2))
+	require.False(t, f8v2.supportsCommand(CityCommandTypePhysicalNetworkConfigure))
+	require.Equal(t, []string{CitySimulationVersionF8V3}, cityEngineUpgradeTargets(CitySimulationVersionF8V2))
+	require.True(t, cityEngineCanUpgrade(CitySimulationVersionF8V2, CitySimulationVersionF8V3))
+
+	f8v3, err := cityEngineForVersion(CitySimulationVersionF8V3)
+	require.NoError(t, err)
+	require.True(t, f8v3.hasStage(cityEngineStagePublicServices))
+	require.True(t, cityEngineSupportsFacilityLifecycle(CitySimulationVersionF8V3))
+	require.True(t, cityEngineSupportsPhysicalNetworks(CitySimulationVersionF8V3))
+	require.True(t, f8v3.supportsCommand(CityCommandTypePhysicalNetworkConfigure))
+	require.True(t, f8v3.supportsCommand(CityCommandTypePhysicalNodeConfigure))
+	require.True(t, f8v3.supportsCommand(CityCommandTypePhysicalEdgeConfigure))
+	require.True(t, f8v3.supportsCommand(CityCommandTypePhysicalEdgeTransition))
+	require.Empty(t, cityEngineUpgradeTargets(CitySimulationVersionF8V3))
 
 	_, err = cityEngineForVersion("city-unknown-v1")
 	require.Error(t, err)
@@ -111,6 +209,10 @@ func TestCityEngineDefinitionRejectsInvalidSubsystemGraphs(t *testing.T) {
 			cityEngineStageControl, cityEngineStageLedger, cityEngineStageMarkets, cityEngineStageResources,
 		}},
 		{version: "unknown", stages: []cityEngineStage{cityEngineStageControl, "mystery"}},
+		{version: "service-without-runtime", stages: []cityEngineStage{
+			cityEngineStageControl, cityEngineStageLedger, cityEngineStageResources,
+			cityEngineStagePublicServices, cityEngineStageMarkets,
+		}},
 	} {
 		require.Error(t, engine.validate(), engine.version)
 	}
@@ -235,6 +337,119 @@ func TestMarshalCanonicalCityStatePreservesVersionedShape(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Contains(t, string(f7v5), `"world_runtime"`)
+	require.NotContains(t, string(f7v5), `"locations"`)
+	require.NotContains(t, string(f7v5), `"control_grants"`)
+
+	locations := make([]WorldActorLocation, 0)
+	controlGrants := make([]WorldActorControlGrant, 0)
+	f7v6, err := marshalCanonicalCityState(cityHashState{
+		SimulationVersion:  CitySimulationVersionF7V6,
+		Spatial:            &citySpatialHashState{},
+		Land:               &cityLandHashState{},
+		Development:        &cityDevelopmentHashState{},
+		EnterpriseLocation: &cityEnterpriseLocationHashState{},
+		WorldRuntime: &worldRuntimeHashState{
+			Definitions: make([]WorldRuntimeDefinition, 0), Actors: make([]WorldActor, 0),
+			Attributes: make([]WorldActorAttribute, 0), Roles: make([]WorldActorRole, 0),
+			Statuses: make([]WorldActorStatus, 0), Facts: make([]WorldRuntimeFact, 0),
+			Effects: make([]WorldEffectOperation, 0), RuleCases: make([]WorldRuleCase, 0),
+			Locations: &locations, ControlGrants: &controlGrants,
+		},
+	})
+	require.NoError(t, err)
+	require.Contains(t, string(f7v6), `"locations":[]`)
+	require.Contains(t, string(f7v6), `"control_grants":[]`)
+
+	f7v7, err := marshalCanonicalCityState(cityHashState{
+		SimulationVersion:  CitySimulationVersionF7V7,
+		Spatial:            &citySpatialHashState{},
+		Land:               &cityLandHashState{},
+		Development:        &cityDevelopmentHashState{},
+		EnterpriseLocation: &cityEnterpriseLocationHashState{},
+		WorldRuntime: &worldRuntimeHashState{
+			Definitions: make([]WorldRuntimeDefinition, 0), Actors: make([]WorldActor, 0),
+			Attributes: make([]WorldActorAttribute, 0), Roles: make([]WorldActorRole, 0),
+			Statuses: make([]WorldActorStatus, 0), Facts: make([]WorldRuntimeFact, 0),
+			Effects: make([]WorldEffectOperation, 0), RuleCases: make([]WorldRuleCase, 0),
+			Locations: &locations, ControlGrants: &controlGrants,
+		},
+	})
+	require.NoError(t, err)
+	require.Contains(t, string(f7v7), `"locations":[]`)
+	require.Contains(t, string(f7v7), `"control_grants":[]`)
+	require.NotContains(t, string(f7v7), `"portal_states"`)
+
+	portalStates := make([]WorldPortalState, 0)
+	f7v8, err := marshalCanonicalCityState(cityHashState{
+		SimulationVersion:  CitySimulationVersionF7V8,
+		Spatial:            &citySpatialHashState{},
+		Land:               &cityLandHashState{},
+		Development:        &cityDevelopmentHashState{},
+		EnterpriseLocation: &cityEnterpriseLocationHashState{},
+		WorldRuntime: &worldRuntimeHashState{
+			Definitions: make([]WorldRuntimeDefinition, 0), Actors: make([]WorldActor, 0),
+			Attributes: make([]WorldActorAttribute, 0), Roles: make([]WorldActorRole, 0),
+			Statuses: make([]WorldActorStatus, 0), Facts: make([]WorldRuntimeFact, 0),
+			Effects: make([]WorldEffectOperation, 0), RuleCases: make([]WorldRuleCase, 0),
+			Locations: &locations, ControlGrants: &controlGrants, PortalStates: &portalStates,
+		},
+	})
+	require.NoError(t, err)
+	require.Contains(t, string(f7v8), `"portal_states":[]`)
+	require.NotContains(t, string(f7v8), `"navigation_profile"`)
+
+	navigationIntents := make([]WorldActorNavigationIntent, 0)
+	f7v9, err := marshalCanonicalCityState(cityHashState{
+		SimulationVersion:  CitySimulationVersionF7V9,
+		Spatial:            &citySpatialHashState{},
+		Land:               &cityLandHashState{},
+		Development:        &cityDevelopmentHashState{},
+		EnterpriseLocation: &cityEnterpriseLocationHashState{},
+		WorldRuntime: &worldRuntimeHashState{
+			Definitions: make([]WorldRuntimeDefinition, 0), Actors: make([]WorldActor, 0),
+			Attributes: make([]WorldActorAttribute, 0), Roles: make([]WorldActorRole, 0),
+			Statuses: make([]WorldActorStatus, 0), Facts: make([]WorldRuntimeFact, 0),
+			Effects: make([]WorldEffectOperation, 0), RuleCases: make([]WorldRuleCase, 0),
+			Locations: &locations, ControlGrants: &controlGrants, PortalStates: &portalStates,
+			NavigationProfile: &WorldNavigationProfile{
+				ProfileVersion: worldNavigationProfileVersion, Revision: 1,
+			},
+			NavigationIntents: &navigationIntents,
+		},
+	})
+	require.NoError(t, err)
+	require.Contains(t, string(f7v9), `"navigation_profile"`)
+	require.Contains(t, string(f7v9), `"navigation_intents":[]`)
+	require.NotContains(t, string(f7v9), `"public_services"`)
+
+	f8, err := marshalCanonicalCityState(cityHashState{
+		SimulationVersion:  CitySimulationVersionF8,
+		Spatial:            &citySpatialHashState{},
+		Land:               &cityLandHashState{},
+		Development:        &cityDevelopmentHashState{},
+		EnterpriseLocation: &cityEnterpriseLocationHashState{},
+		WorldRuntime: &worldRuntimeHashState{
+			Definitions: make([]WorldRuntimeDefinition, 0), Actors: make([]WorldActor, 0),
+			Attributes: make([]WorldActorAttribute, 0), Roles: make([]WorldActorRole, 0),
+			Statuses: make([]WorldActorStatus, 0), Facts: make([]WorldRuntimeFact, 0),
+			Effects: make([]WorldEffectOperation, 0), RuleCases: make([]WorldRuleCase, 0),
+			Locations: &locations, ControlGrants: &controlGrants, PortalStates: &portalStates,
+			NavigationProfile: &WorldNavigationProfile{
+				ProfileVersion: worldNavigationProfileVersion, Revision: 1,
+			},
+			NavigationIntents: &navigationIntents,
+		},
+		PublicServices: &cityPublicServiceHashState{
+			ServiceDefinitions: make([]CityServiceDefinition, 0),
+			FacilityTypes:      make([]CityFacilityTypeDefinition, 0),
+			Facilities:         make([]CityFacility, 0), Capacities: make([]CityFacilityServiceCapacity, 0),
+			Demands: make([]CityServiceDemand, 0), Connections: make([]CityServiceConnection, 0),
+			Facts: make([]CityServiceFact, 0), Allocations: make([]CityServiceAllocation, 0),
+			Settlements: make([]CityServiceSettlement, 0),
+		},
+	})
+	require.NoError(t, err)
+	require.Contains(t, string(f8), `"public_services"`)
 
 	_, err = marshalCanonicalCityState(cityHashState{SimulationVersion: CitySimulationVersionF7})
 	require.Error(t, err)
@@ -262,6 +477,58 @@ func TestMarshalCanonicalCityStatePreservesVersionedShape(t *testing.T) {
 		Land:               &cityLandHashState{},
 		Development:        &cityDevelopmentHashState{},
 		EnterpriseLocation: &cityEnterpriseLocationHashState{},
+	})
+	require.Error(t, err)
+	_, err = marshalCanonicalCityState(cityHashState{
+		SimulationVersion:  CitySimulationVersionF7V6,
+		Spatial:            &citySpatialHashState{},
+		Land:               &cityLandHashState{},
+		Development:        &cityDevelopmentHashState{},
+		EnterpriseLocation: &cityEnterpriseLocationHashState{},
+		WorldRuntime:       &worldRuntimeHashState{},
+	})
+	require.Error(t, err)
+	_, err = marshalCanonicalCityState(cityHashState{
+		SimulationVersion:  CitySimulationVersionF7V7,
+		Spatial:            &citySpatialHashState{},
+		Land:               &cityLandHashState{},
+		Development:        &cityDevelopmentHashState{},
+		EnterpriseLocation: &cityEnterpriseLocationHashState{},
+		WorldRuntime:       &worldRuntimeHashState{},
+	})
+	require.Error(t, err)
+	_, err = marshalCanonicalCityState(cityHashState{
+		SimulationVersion:  CitySimulationVersionF7V8,
+		Spatial:            &citySpatialHashState{},
+		Land:               &cityLandHashState{},
+		Development:        &cityDevelopmentHashState{},
+		EnterpriseLocation: &cityEnterpriseLocationHashState{},
+		WorldRuntime: &worldRuntimeHashState{
+			Locations: &locations, ControlGrants: &controlGrants,
+		},
+	})
+	require.Error(t, err)
+	_, err = marshalCanonicalCityState(cityHashState{
+		SimulationVersion:  CitySimulationVersionF7V9,
+		Spatial:            &citySpatialHashState{},
+		Land:               &cityLandHashState{},
+		Development:        &cityDevelopmentHashState{},
+		EnterpriseLocation: &cityEnterpriseLocationHashState{},
+		WorldRuntime: &worldRuntimeHashState{
+			Locations: &locations, ControlGrants: &controlGrants, PortalStates: &portalStates,
+		},
+	})
+	require.Error(t, err)
+	_, err = marshalCanonicalCityState(cityHashState{
+		SimulationVersion:  CitySimulationVersionF8,
+		Spatial:            &citySpatialHashState{},
+		Land:               &cityLandHashState{},
+		Development:        &cityDevelopmentHashState{},
+		EnterpriseLocation: &cityEnterpriseLocationHashState{},
+		WorldRuntime: &worldRuntimeHashState{
+			Locations: &locations, ControlGrants: &controlGrants, PortalStates: &portalStates,
+			NavigationProfile: &WorldNavigationProfile{}, NavigationIntents: &navigationIntents,
+		},
 	})
 	require.Error(t, err)
 }

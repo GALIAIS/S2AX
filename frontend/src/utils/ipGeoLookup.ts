@@ -1,8 +1,10 @@
 import { reactive } from 'vue'
+import { lookupIPGeolocation, type IPGeolocationLookupResult } from '@/api/ipGeolocation'
 
 export type IpGeoStatus = 'idle' | 'loading' | 'success' | 'error' | 'private'
 
 export interface IpGeoDetail {
+	country?: string
   countryCode?: string
   region?: string
   city?: string
@@ -106,7 +108,7 @@ export function getEntry(ip: string): IpGeoEntry {
 }
 
 export function formatGeoLabel(detail: IpGeoDetail): string {
-  const parts = [detail.countryCode, detail.region, detail.city].filter(
+	const parts = [detail.countryCode || detail.country, detail.region, detail.city].filter(
     (part): part is string => Boolean(part && part.trim())
   )
   return parts.join(' · ')
@@ -114,6 +116,7 @@ export function formatGeoLabel(detail: IpGeoDetail): string {
 
 interface RawGeoResponse {
   ip: string
+	country?: string
   country_code?: string
   region?: string
   city?: string
@@ -126,6 +129,7 @@ interface RawGeoResponse {
 
 function toDetail(raw: RawGeoResponse): IpGeoDetail {
   return {
+		country: raw.country,
     countryCode: raw.country_code,
     region: raw.region,
     city: raw.city,
@@ -138,7 +142,7 @@ function toDetail(raw: RawGeoResponse): IpGeoDetail {
 }
 
 function applyResult(ip: string, raw: RawGeoResponse | undefined): void {
-  if (!raw || !raw.country_code) {
+	if (!raw || (!raw.country_code && !raw.country)) {
     cache.set(ip, { status: 'error' })
     return
   }
@@ -151,6 +155,43 @@ function applyResult(ip: string, raw: RawGeoResponse | undefined): void {
   })
 }
 
+function applyBackendResult(raw: IPGeolocationLookupResult): boolean {
+	const ip = raw.ip.trim()
+	if (!ip) return false
+
+	switch (raw.status) {
+		case 'success':
+			applyResult(ip, raw)
+			return false
+		case 'private':
+			cache.set(ip, { status: 'private' })
+			return false
+		case 'invalid':
+			cache.set(ip, { status: 'error' })
+			return false
+		case 'unavailable':
+		case 'not_found':
+			return true
+		default:
+			return true
+	}
+}
+
+// Prefer the authenticated local endpoint. The legacy GeoJS path is deliberately
+// retained only for an unavailable/missing local xdb or a failed backend request.
+async function resolveWithBackend(ips: string[]): Promise<string[]> {
+	try {
+		const results = await lookupIPGeolocation(ips)
+		const byIP = new Map(results.map((result) => [result.ip, result]))
+		return ips.filter((ip) => {
+			const result = byIP.get(ip)
+			return !result || applyBackendResult(result)
+		})
+	} catch {
+		return ips
+	}
+}
+
 export async function fetchOne(ip: string, force = false): Promise<void> {
   if (isPrivateIp(ip)) {
     cache.set(ip, { status: 'private' })
@@ -159,9 +200,14 @@ export async function fetchOne(ip: string, force = false): Promise<void> {
   const existing = getFreshEntry(ip)
   if (!force && (isFreshSuccess(existing) || existing?.status === 'loading')) {
     return
-  }
-  cache.set(ip, { status: 'loading' })
-  try {
+	}
+	cache.set(ip, { status: 'loading' })
+	const fallbackIPs = await resolveWithBackend([ip])
+	if (fallbackIPs.length === 0) {
+		persistToStorage()
+		return
+	}
+	try {
     const response = await fetch(`${GEO_SINGLE_URL}/${encodeURIComponent(ip)}.json`)
     if (!response.ok) {
       cache.set(ip, { status: 'error' })
@@ -189,11 +235,16 @@ export async function fetchBatch(ips: string[]): Promise<boolean> {
   }
   if (targets.length === 0) return true
 
-  targets.forEach((ip) => cache.set(ip, { status: 'loading' }))
+	targets.forEach((ip) => cache.set(ip, { status: 'loading' }))
+	const fallbackTargets = await resolveWithBackend(targets)
+	if (fallbackTargets.length === 0) {
+		persistToStorage()
+		return true
+	}
 
-  let allChunksOk = true
-  for (let i = 0; i < targets.length; i += BATCH_CHUNK_SIZE) {
-    const chunk = targets.slice(i, i + BATCH_CHUNK_SIZE)
+	let allChunksOk = true
+	for (let i = 0; i < fallbackTargets.length; i += BATCH_CHUNK_SIZE) {
+		const chunk = fallbackTargets.slice(i, i + BATCH_CHUNK_SIZE)
     try {
       const response = await fetch(`${GEO_BATCH_URL}?ip=${chunk.map(encodeURIComponent).join(',')}`)
       if (!response.ok) {

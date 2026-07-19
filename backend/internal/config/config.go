@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net/netip"
 	"net/url"
 	"os"
 	"strings"
@@ -61,6 +62,8 @@ const DefaultUpstreamResponseReadMaxBytes int64 = 128 * 1024 * 1024
 
 type Config struct {
 	Server                  ServerConfig                  `mapstructure:"server"`
+	IPGeolocation           IPGeolocationConfig           `mapstructure:"ip_geolocation"`
+	AccountAllocation       AccountAllocationConfig       `mapstructure:"account_allocation"`
 	Log                     LogConfig                     `mapstructure:"log"`
 	CORS                    CORSConfig                    `mapstructure:"cors"`
 	Security                SecurityConfig                `mapstructure:"security"`
@@ -647,9 +650,33 @@ type ServerConfig struct {
 	ReadHeaderTimeout  int       `mapstructure:"read_header_timeout"`   // 读取请求头超时（秒）
 	MaxHeaderBytes     int       `mapstructure:"max_header_bytes"`      // 请求头最大字节数（HTTP/2 映射为 header-list 上限）
 	IdleTimeout        int       `mapstructure:"idle_timeout"`          // 空闲连接超时（秒）
-	TrustedProxies     []string  `mapstructure:"trusted_proxies"`       // 可信代理列表（CIDR/IP）
+	TrustedProxies     []string  `mapstructure:"trusted_proxies"`       // 可信代理列表（CIDR/IP；SERVER_TRUSTED_PROXIES 支持逗号分隔）
 	MaxRequestBodySize int64     `mapstructure:"max_request_body_size"` // 全局最大请求体限制
 	H2C                H2CConfig `mapstructure:"h2c"`                   // HTTP/2 Cleartext 配置
+}
+
+// IPGeolocationConfig controls server-side IP geolocation. Client-address
+// extraction remains governed exclusively by server.trusted_proxies.
+type IPGeolocationConfig struct {
+	// Provider is currently ip2region or disabled. ip2region is the offline
+	// default; browser GeoJS remains only as a compatibility fallback.
+	Provider string `mapstructure:"provider"`
+	// IPv4XDBPath and IPv6XDBPath are optional verified ip2region xdb files.
+	// An unset family is unavailable rather than causing the server to fail.
+	IPv4XDBPath string `mapstructure:"ipv4_xdb_path"`
+	IPv6XDBPath string `mapstructure:"ipv6_xdb_path"`
+	// CachePolicy is one of file, vectorindex, or content.
+	CachePolicy string `mapstructure:"cache_policy"`
+	// Searchers bounds pooled file/vector-index searchers per IP family.
+	Searchers int `mapstructure:"searchers"`
+}
+
+// AccountAllocationConfig bounds the policy reconciler. It does not alter
+// routing when no allocation policy exists.
+type AccountAllocationConfig struct {
+	ReconcileIntervalSeconds int `mapstructure:"reconcile_interval_seconds"`
+	PolicyBatchSize          int `mapstructure:"policy_batch_size"`
+	MaxDesiredCount          int `mapstructure:"max_desired_count"`
 }
 
 // H2CConfig HTTP/2 Cleartext 配置
@@ -1570,6 +1597,15 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config error: %w", err)
 	}
+	// Viper does not reliably coerce a comma-delimited environment value into a
+	// string slice. Keep YAML list support and make the deployment-friendly
+	// SERVER_TRUSTED_PROXIES override explicit instead of silently trusting a
+	// malformed value.
+	if raw, configured := os.LookupEnv("SERVER_TRUSTED_PROXIES"); configured {
+		cfg.Server.TrustedProxies = parseTrustedProxyList(raw)
+	} else {
+		cfg.Server.TrustedProxies = normalizeTrustedProxyList(cfg.Server.TrustedProxies)
+	}
 	if cfg.Gateway.OpenAIScheduler.StickyEscapeTTFTMs == 0 {
 		cfg.Gateway.OpenAIScheduler.StickyEscapeTTFTMs = 15000
 	}
@@ -1586,6 +1622,10 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 		cfg.Server.Mode = "debug"
 	}
 	cfg.Server.FrontendURL = strings.TrimSpace(cfg.Server.FrontendURL)
+	cfg.IPGeolocation.Provider = strings.ToLower(strings.TrimSpace(cfg.IPGeolocation.Provider))
+	cfg.IPGeolocation.IPv4XDBPath = strings.TrimSpace(cfg.IPGeolocation.IPv4XDBPath)
+	cfg.IPGeolocation.IPv6XDBPath = strings.TrimSpace(cfg.IPGeolocation.IPv6XDBPath)
+	cfg.IPGeolocation.CachePolicy = strings.ToLower(strings.TrimSpace(cfg.IPGeolocation.CachePolicy))
 	cfg.JWT.Secret = strings.TrimSpace(cfg.JWT.Secret)
 	cfg.LinuxDo.ClientID = strings.TrimSpace(cfg.LinuxDo.ClientID)
 	cfg.LinuxDo.ClientSecret = strings.TrimSpace(cfg.LinuxDo.ClientSecret)
@@ -1720,8 +1760,18 @@ func setDefaults() {
 	viper.SetDefault("server.read_header_timeout", 10) // 10秒读取请求头
 	viper.SetDefault("server.max_header_bytes", 64*1024)
 	viper.SetDefault("server.idle_timeout", 120) // 120秒空闲超时
-	viper.SetDefault("server.trusted_proxies", []string{})
+	// Same-host Caddy/Nginx is the supported default. Never trust broad private
+	// networks here: Docker/LB peers must be configured explicitly by operators.
+	viper.SetDefault("server.trusted_proxies", []string{"127.0.0.1/32", "::1/128"})
 	viper.SetDefault("server.max_request_body_size", int64(256*1024*1024))
+	viper.SetDefault("ip_geolocation.provider", "ip2region")
+	viper.SetDefault("ip_geolocation.ipv4_xdb_path", "")
+	viper.SetDefault("ip_geolocation.ipv6_xdb_path", "")
+	viper.SetDefault("ip_geolocation.cache_policy", "vectorindex")
+	viper.SetDefault("ip_geolocation.searchers", 4)
+	viper.SetDefault("account_allocation.reconcile_interval_seconds", 15)
+	viper.SetDefault("account_allocation.policy_batch_size", 100)
+	viper.SetDefault("account_allocation.max_desired_count", 50)
 	// H2C 默认配置
 	viper.SetDefault("server.h2c.enabled", false)
 	viper.SetDefault("server.h2c.max_concurrent_streams", uint32(50))      // 50 个并发流
@@ -2234,6 +2284,36 @@ func setDefaults() {
 
 }
 
+func parseTrustedProxyList(raw string) []string {
+	return normalizeTrustedProxyList(strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n' || r == '\r' || r == '\t' || r == ' '
+	}))
+}
+
+func normalizeTrustedProxyList(values []string) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		for _, item := range strings.FieldsFunc(value, func(r rune) bool {
+			return r == ',' || r == ';' || r == '\n' || r == '\r' || r == '\t' || r == ' '
+		}) {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			if _, exists := seen[item]; exists {
+				continue
+			}
+			seen[item] = struct{}{}
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
 func (c *Config) Validate() error {
 	if c.Server.ReadHeaderTimeout < 1 || c.Server.ReadHeaderTimeout > 60 {
 		return fmt.Errorf("server.read_header_timeout must be between 1 and 60 seconds")
@@ -2246,6 +2326,39 @@ func (c *Config) Validate() error {
 	}
 	if c.Server.MaxRequestBodySize < 0 {
 		return fmt.Errorf("server.max_request_body_size must be non-negative")
+	}
+	for _, raw := range c.Server.TrustedProxies {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			return fmt.Errorf("server.trusted_proxies must not contain empty entries")
+		}
+		if strings.Contains(value, "/") {
+			if _, err := netip.ParsePrefix(value); err != nil {
+				return fmt.Errorf("server.trusted_proxies contains invalid CIDR %q: %w", value, err)
+			}
+			continue
+		}
+		if _, err := netip.ParseAddr(value); err != nil {
+			return fmt.Errorf("server.trusted_proxies contains invalid IP %q: %w", value, err)
+		}
+	}
+	if provider := strings.ToLower(strings.TrimSpace(c.IPGeolocation.Provider)); provider != "" && provider != "ip2region" && provider != "disabled" {
+		return fmt.Errorf("ip_geolocation.provider must be one of: ip2region/disabled")
+	}
+	if policy := strings.ToLower(strings.TrimSpace(c.IPGeolocation.CachePolicy)); policy != "" && policy != "file" && policy != "nocache" && policy != "vectorindex" && policy != "vindex" && policy != "vindexcache" && policy != "content" && policy != "buffercache" {
+		return fmt.Errorf("ip_geolocation.cache_policy must be one of: file/vectorindex/content")
+	}
+	if c.IPGeolocation.Searchers < 0 || c.IPGeolocation.Searchers > 64 {
+		return fmt.Errorf("ip_geolocation.searchers must be between 0 and 64")
+	}
+	if c.AccountAllocation.ReconcileIntervalSeconds != 0 && (c.AccountAllocation.ReconcileIntervalSeconds < 1 || c.AccountAllocation.ReconcileIntervalSeconds > 300) {
+		return fmt.Errorf("account_allocation.reconcile_interval_seconds must be between 1 and 300")
+	}
+	if c.AccountAllocation.PolicyBatchSize != 0 && (c.AccountAllocation.PolicyBatchSize < 1 || c.AccountAllocation.PolicyBatchSize > 1000) {
+		return fmt.Errorf("account_allocation.policy_batch_size must be between 1 and 1000")
+	}
+	if c.AccountAllocation.MaxDesiredCount != 0 && (c.AccountAllocation.MaxDesiredCount < 1 || c.AccountAllocation.MaxDesiredCount > 1000) {
+		return fmt.Errorf("account_allocation.max_desired_count must be between 1 and 1000")
 	}
 	if c.Server.H2C.Enabled {
 		if c.Server.H2C.MaxConcurrentStreams == 0 {

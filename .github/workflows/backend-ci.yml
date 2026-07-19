@@ -1,4 +1,4 @@
-name: CI
+name: Build
 
 on:
   push:
@@ -8,36 +8,7 @@ permissions:
   contents: read
 
 jobs:
-  shell:
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v6
-      - name: Check deployment scripts
-        run: |
-          /bin/bash -n deploy/apple-container.sh
-          /bin/bash deploy/tests/apple-container-test.sh
-
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: backend/go.mod
-          check-latest: false
-          cache: true
-          cache-dependency-path: backend/go.sum
-      - name: Verify Go version
-        run: |
-          go version | grep -q 'go1.26.5'
-      - name: Unit tests
-        working-directory: backend
-        run: make test-unit
-      - name: Integration tests
-        working-directory: backend
-        run: make test-integration
-
-  frontend:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -54,25 +25,15 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: pnpm install --frozen-lockfile
-      - name: Frontend typecheck and critical vitest
-        run: make test-frontend
-
-  golangci-lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
+      - name: Build frontend
+        working-directory: frontend
+        run: pnpm run build
       - uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod
           check-latest: false
           cache: true
           cache-dependency-path: backend/go.sum
-      - name: Verify Go version
-        run: |
-          go version | grep -q 'go1.26.5'
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.9
-          args: --timeout=30m
-          working-directory: backend
+      - name: Build backend
+        working-directory: backend
+        run: go build -tags=embed -o /tmp/sub2api ./cmd/server

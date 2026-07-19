@@ -38,9 +38,36 @@ export interface CityWorldFoundation {
   markets: unknown
 }
 
+export type CityMemberRole = 'owner' | 'planner' | 'treasurer' | 'trader' | 'viewer'
+export type CityMemberStatus = 'active' | 'left' | 'banned'
+
+export interface CityMember {
+  user_id: number
+  email: string
+  username: string
+  role: CityMemberRole
+  status: CityMemberStatus
+  joined_at: string
+  left_at?: string
+  banned_at?: string
+  updated_at: string
+}
+
+export interface AddCityWorldMemberRequest {
+  identity: string
+  role: Exclude<CityMemberRole, 'owner'>
+}
+
+export interface UpdateCityWorldMemberRequest {
+  role?: Exclude<CityMemberRole, 'owner'>
+  status?: CityMemberStatus
+}
+
 export interface CreateCityWorldRequest {
   name: string
   timezone?: string
+  style_profile_id?: string
+  spawn_policy?: 'city_center'
   monetary_unit?: {
     code?: string
     name?: string
@@ -232,6 +259,284 @@ export interface CityBuildingPortal {
   version: number
 }
 
+export type CityBuildingLayoutCellKind = 'wall' | 'window' | 'floor' | 'door' | 'furniture'
+
+export interface CityBuildingLayoutCell {
+  x: number
+  y: number
+  z: number
+  kind: CityBuildingLayoutCellKind
+  feature?: string
+}
+
+export interface CityBuildingLayout {
+  building_code: string
+  layout_version: string
+  archetype: string
+  cells: CityBuildingLayoutCell[]
+}
+
+export type CityParcelLayoutCellKind = 'path' | 'garden' | 'tree' | 'sidewalk' | 'parking' | 'loading'
+
+export interface CityParcelLayoutCell {
+  x: number
+  y: number
+  z: number
+  kind: CityParcelLayoutCellKind
+}
+
+export interface CityParcelLayout {
+  parcel_code: string
+  layout_version: string
+  style: string
+  cells: CityParcelLayoutCell[]
+}
+
+export interface CityWorldgenBounds {
+  minimum_chunk_x: number
+  maximum_chunk_x: number
+  minimum_chunk_y: number
+  maximum_chunk_y: number
+  z: number
+}
+
+export interface CityWorldgenTerrainPatch {
+  chunk_x: number
+  chunk_y: number
+  z: number
+  biome_code: string
+  definition_id: string
+  elevation_milli: number
+  moisture_milli: number
+}
+
+export interface CityWorldgenPoint {
+  x: number
+  y: number
+  z: number
+}
+
+export interface CityWorldgenRoad {
+  code: string
+  city_code: string
+  class: 'arterial' | 'local'
+  width: number
+  points: CityWorldgenPoint[]
+}
+
+export interface CityWorldgenLot {
+  code: string
+  city_code: string
+  district_code: string
+  primary_use: CityLandUse
+  bounds: {
+    minimum_x: number
+    maximum_x: number
+    minimum_y: number
+    maximum_y: number
+    z: number
+  }
+  frontage_road_code: string
+  frontage_direction: 'north' | 'east' | 'south' | 'west'
+}
+
+export interface CityWorldgenBuilding {
+  code: string
+  city_code: string
+  lot_code: string
+  primary_use: CityLandUse
+  archetype_code: string
+  layout_style: string
+  floor_count: number
+  entrance: CityWorldgenPoint
+  footprint: CityWorldgenPoint[]
+}
+
+export interface CityOpenWorldStyleProfile {
+  id: string
+  version: string
+  name: string
+  content_hash: string
+}
+
+export interface CityOpenWorldBinding {
+  world_id: number
+  generator_id: string
+  generator_version: string
+  rule_set_id: string
+  rule_set_version: string
+  rule_set_hash: string
+  profile_id: string
+  profile_version: string
+  profile_hash: string
+  context_hash: string
+  seed: number
+  spawn_sector_x: number
+  spawn_sector_y: number
+  spawn_x: number
+  spawn_y: number
+  spawn_z: number
+  epoch: number
+  bootstrap_plan_hash: string
+  genesis_hash: string
+  created_at: string
+  updated_at: string
+}
+
+export interface CityOpenWorldSector {
+  sector_x: number
+  sector_y: number
+  epoch: number
+  chunk_size: number
+  sector_size_chunks: number
+  status: 'generated'
+  plan_hash: string
+  content_hash: string
+  generated_tick: number
+  revision: number
+  created_at: string
+  updated_at: string
+}
+
+export interface CityOpenWorldRegion {
+  region_x: number
+  region_y: number
+  epoch: number
+  chunk_size: number
+  region_size_chunks: number
+  status: 'generated'
+  plan_hash: string
+  generated_tick: number
+  revision: number
+  created_at: string
+  updated_at: string
+}
+
+export interface CityOpenWorldGenerationState {
+  binding: CityOpenWorldBinding
+  regions: CityOpenWorldRegion[]
+  sectors: CityOpenWorldSector[]
+}
+
+export interface CityOpenWorldCellLayer {
+  x: number
+  y: number
+  kind: CitySpatialRuleKind
+  definition_id: string
+}
+
+export interface CityOpenWorldChunkPayload {
+  format: 'city-openworld-chunk-v1'
+  width: number
+  height: number
+  terrain_runs: CityTerrainRun[]
+  layers: CityOpenWorldCellLayer[]
+}
+
+export interface CityOpenWorldChunk {
+  chunk_x: number
+  chunk_y: number
+  z: number
+  payload: CityOpenWorldChunkPayload
+  payload_hash: string
+  revision: number
+}
+
+export interface CityOpenWorldBuilding {
+  code: string
+  city_code: string
+  lot_code: string
+  primary_use: CityLandUse
+  archetype_code: string
+  layout_style: string
+  floor_count: number
+  entrance: CityWorldgenPoint
+  footprint: CityWorldgenPoint[]
+  footprint_hash: string
+  interior_floor_count: number
+  ground_interior_version?: string
+  ground_interior_hash?: string
+  revision: number
+}
+
+export interface CityOpenWorldBuildingInterior {
+  building_code: string
+  floor_index: number
+  z: number
+  layout_version: string
+  layout_style: string
+  cells: CityBuildingLayoutCell[]
+  content_hash: string
+  revision: number
+}
+
+export interface CityOpenWorldPortal {
+	code: string
+	building_code: string
+  portal_type: 'entrance' | 'stairs'
+  from_floor_index: number
+  to_floor_index: number
+  from: CityWorldgenPoint
+  to: CityWorldgenPoint
+  bidirectional: boolean
+  topology_hash: string
+	revision: number
+}
+
+export interface CityOpenWorldVerification {
+	world_id: number
+	simulation_version: string
+	scope: 'world' | 'region'
+	region_x?: number
+	region_y?: number
+	current_tick: number
+	state_hash: string
+	canonical_state_verified: boolean
+	region_count: number
+	sector_count: number
+	chunk_count: number
+	building_count: number
+	interior_count: number
+	portal_count: number
+	verified_at: string
+}
+
+export interface CityOpenWorldMapQuery {
+  min_x: number
+  max_x: number
+  min_y: number
+  max_y: number
+  z: number
+}
+
+export interface CityOpenWorldMap {
+  binding: CityOpenWorldBinding
+  chunks: CityOpenWorldChunk[]
+  buildings: CityOpenWorldBuilding[]
+}
+
+export interface CityWorldgenWindow {
+  generator_id: string
+  generator_version: string
+  profile_id: string
+  profile_version: string
+  plan_hash: string
+  bounds: CityWorldgenBounds
+  terrain: CityWorldgenTerrainPatch[]
+  cities: Array<{
+    code: string
+    center: CityWorldgenPoint
+    radius_chunks: number
+    biome_code: string
+    elevation_milli: number
+    moisture_milli: number
+    placement_mode: 'preferred' | 'fallback'
+  }>
+  roads: CityWorldgenRoad[]
+  lots: CityWorldgenLot[]
+  buildings: CityWorldgenBuilding[]
+}
+
 export interface CityLandState {
   profile: CityLandProfile
   zoning_rules: CityLandZoningRule[]
@@ -240,6 +545,9 @@ export interface CityLandState {
   unit_pools: CityBuildingUnitPool[]
   housing_allocations: CityHousingAllocation[]
   portals: CityBuildingPortal[]
+  building_layouts?: CityBuildingLayout[]
+  parcel_layouts?: CityParcelLayout[]
+  worldgen?: CityWorldgenWindow
 }
 
 export type CityDevelopmentProjectType = 'vertical_expansion' | 'renovation'
@@ -591,6 +899,184 @@ export interface WorldActor {
   updated_tick: number
   version: number
   metadata: Record<string, unknown>
+  location?: WorldActorLocation
+}
+
+export interface WorldActorLocation {
+  actor_code: string
+  space_kind: string
+  space_code: string
+  x: number
+  y: number
+  z: number
+  chunk_x: number
+  chunk_y: number
+  local_x: number
+  local_y: number
+  anchor_kind?: 'chunk' | 'building' | 'site'
+  anchor_code?: string
+  jurisdiction_code: string
+  moved_tick: number
+  source_fact?: WorldRuntimeFactRef
+  version: number
+  metadata: Record<string, unknown>
+}
+
+export interface CityNavigationCoordinate {
+  x: number
+  y: number
+  z: number
+}
+
+export interface CityNavigationPathStep {
+  coordinate: CityNavigationCoordinate
+  step_cost: number
+  total_cost: number
+  anchor_kind: string
+  anchor_code: string
+  jurisdiction_code: string
+}
+
+export interface CityNavigationPath {
+  navigation_version: string
+  world_tick: number
+  spatial_rule_hash: string
+  actor_code: string
+  from: CityNavigationCoordinate
+  to: CityNavigationCoordinate
+  reachable: boolean
+  reason?: string
+  total_cost: number
+  expanded_nodes: number
+  steps: CityNavigationPathStep[]
+}
+
+export type WorldNavigationIntentStatus =
+  | 'active'
+  | 'blocked'
+  | 'arrived'
+  | 'cancelled'
+  | 'failed'
+
+export type WorldNavigationOnBlocked = 'retry' | 'cancel'
+
+export interface WorldNavigationProfile {
+  profile_version: string
+  baseline_tick: number
+  maximum_intents_per_tick: number
+  default_budget_gain_units: number
+  default_budget_cap_units: number
+  default_max_steps: number
+  maximum_blocked_attempts: number
+  maximum_retry_delay_ticks: number
+  fairness_aging_cap: number
+  revision: number
+  metadata: Record<string, unknown>
+}
+
+export interface WorldActorNavigationIntent {
+  actor_code: string
+  intent_code: string
+  destination: CityNavigationCoordinate
+  status: WorldNavigationIntentStatus
+  on_blocked: WorldNavigationOnBlocked
+  priority: number
+  max_steps: number
+  budget_units: number
+  budget_gain_units: number
+  budget_cap_units: number
+  blocked_attempts: number
+  last_reason?: string
+  next_attempt_tick: number
+  created_tick: number
+  updated_tick: number
+  source_fact: WorldRuntimeFactRef
+  version: number
+  metadata: Record<string, unknown>
+}
+
+export interface WorldNavigationReservation {
+  tick: number
+  sequence: number
+  actor_code: string
+  intent_code: string
+  from: CityNavigationCoordinate
+  to: CityNavigationCoordinate
+  target_key: string
+  edge_key: string
+  step_cost: number
+  source_fact: WorldRuntimeFactRef
+  status: string
+  metadata: Record<string, unknown>
+}
+
+export type WorldRequirementOperator =
+  | 'all'
+  | 'any'
+  | 'not'
+  | 'attribute_gte'
+  | 'attribute_lte'
+  | 'experience_gte'
+  | 'role_active'
+  | 'role_inactive'
+  | 'status_present'
+  | 'status_absent'
+  | 'fact_count_gte'
+  | 'world_tick_gte'
+
+export interface WorldRequirementNode {
+  op: WorldRequirementOperator
+  items?: WorldRequirementNode[]
+  item?: WorldRequirementNode
+  attribute_code?: string
+  role_code?: string
+  status_code?: string
+  fact_type?: string
+  value_units?: number
+  minimum_stacks?: number
+  window_ticks?: number
+}
+
+export type WorldPortalStateCode = 'open' | 'closed' | 'locked'
+export type WorldPortalAction = 'open' | 'close' | 'lock' | 'unlock'
+
+export interface WorldPortalState {
+  building_code: string
+  portal_code: string
+  portal_type: string
+  state_code: WorldPortalStateCode
+  access_requirement: WorldRequirementNode
+  access_policy_hash: string
+  changed_tick: number
+  source_fact?: WorldRuntimeFactRef
+  version: number
+  metadata: Record<string, unknown>
+}
+
+export interface WorldPortalAccessView {
+  state: WorldPortalState
+  from: CityNavigationCoordinate
+  to: CityNavigationCoordinate
+  bidirectional: boolean
+  accessible?: boolean
+  access_evaluation?: WorldRequirementEvaluation
+}
+
+export type WorldActorCapability = 'actor.command' | 'actor.control.manage'
+
+export interface WorldActorControlGrant {
+  code: string
+  actor_code: string
+  user_id: number
+  capability: WorldActorCapability
+  status: 'active' | 'revoked'
+  granted_by_user_id: number
+  granted_tick: number
+  revoked_tick?: number
+  grant_source_fact?: WorldRuntimeFactRef
+  revoke_source_fact?: WorldRuntimeFactRef
+  version: number
+  metadata: Record<string, unknown>
 }
 
 export interface WorldActorAttribute {
@@ -735,12 +1221,615 @@ export interface WorldActorState {
   roles: WorldActorRole[]
   statuses: WorldActorStatus[]
   recent_facts: WorldRuntimeFact[]
+  location?: WorldActorLocation
+  control_grants: WorldActorControlGrant[]
+  capabilities: WorldActorCapability[]
+  navigation_intent?: WorldActorNavigationIntent
 }
 
 export type WorldRuntimeCommandType =
   | 'actor.create'
   | 'actor.activity.perform'
   | 'actor.role.transition'
+  | 'actor.location.move'
+  | 'actor.control.grant'
+  | 'actor.control.revoke'
+  | 'portal.state.transition'
+  | 'portal.access.configure'
+  | 'actor.navigation.intent.set'
+  | 'actor.navigation.intent.cancel'
+
+export type CityServiceAvailability = 'available' | 'unsupported'
+export type CityFacilityStatus = 'offline' | 'operational' | 'degraded' | 'retired'
+export type CityServiceProjectionStatus = 'active' | 'suspended' | 'retired'
+export type CityServiceSubjectKind = 'district' | 'building' | 'household' | 'enterprise' | 'actor'
+export type CityServiceCommandType =
+  | 'facility.register'
+  | 'facility.status.transition'
+  | 'facility.capacity.configure'
+  | 'service.demand.configure'
+  | 'service.connection.configure'
+  | 'network.configure'
+  | 'network.node.configure'
+  | 'network.edge.configure'
+  | 'network.edge.transition'
+
+export interface CityServiceProfile {
+  catalog_id: string
+  catalog_version: string
+  catalog_hash: string
+  settlement_version: string
+  baseline_tick: number
+  service_definition_count: number
+  facility_type_count: number
+  facility_count: number
+  capacity_count: number
+  demand_count: number
+  connection_count: number
+  fact_count: number
+  allocation_count: number
+  settlement_count: number
+  revision: number
+  metadata: Record<string, unknown>
+}
+
+export interface CityServiceDefinition {
+  code: string
+  definition_version: string
+  definition_hash: string
+  name: string
+  category: string
+  unit_code: string
+  flow_kind: 'delivery' | 'collection' | 'capacity'
+  status: string
+  sort_order: number
+  payload: Record<string, unknown>
+}
+
+export interface CityFacilityTypeDefinition {
+  code: string
+  definition_version: string
+  definition_hash: string
+  name: string
+  minimum_floor_area_sqm: number
+  default_reliability_milli: number
+  allowed_service_codes: string[]
+  status: string
+  sort_order: number
+  payload: Record<string, unknown>
+}
+
+export interface CityFacility {
+  code: string
+  name: string
+  facility_type_code: string
+  facility_type_version: string
+  facility_type_hash: string
+  district_code: string
+  building_code: string
+  owner_entity_code?: string
+  status: CityFacilityStatus
+  reliability_milli: number
+  created_tick: number
+  updated_tick: number
+  version: number
+  source_fact_tick: number
+  source_fact_sequence: number
+  metadata: Record<string, unknown>
+}
+
+export interface CityFacilityServiceCapacity {
+  facility_code: string
+  service_code: string
+  service_version: string
+  service_hash: string
+  installed_capacity_units: number
+  availability_milli: number
+  available_capacity_units: number
+  dispatch_capacity_units: number
+  updated_tick: number
+  version: number
+  source_fact_tick: number
+  source_fact_sequence: number
+  metadata: Record<string, unknown>
+}
+
+export interface CityServiceDemand {
+  code: string
+  service_code: string
+  service_version: string
+  service_hash: string
+  subject_kind: CityServiceSubjectKind
+  subject_code: string
+  district_code: string
+  building_code?: string
+  requested_units_per_tick: number
+  priority: number
+  status: CityServiceProjectionStatus
+  created_tick: number
+  updated_tick: number
+  version: number
+  source_fact_tick: number
+  source_fact_sequence: number
+  metadata: Record<string, unknown>
+}
+
+export interface CityServiceConnection {
+  code: string
+  facility_code: string
+  service_code: string
+  demand_code: string
+  max_flow_units_per_tick: number
+  loss_milli: number
+  preference: number
+  status: CityServiceProjectionStatus
+  created_tick: number
+  updated_tick: number
+  version: number
+  source_fact_tick: number
+  source_fact_sequence: number
+  metadata: Record<string, unknown>
+}
+
+export interface CityServiceFact {
+  tick: number
+  sequence: number
+  source_command_sequence?: number
+  fact_type: string
+  subject_kind: string
+  subject_code: string
+  version_before: number
+  version_after: number
+  payload: Record<string, unknown>
+}
+
+export interface CityServiceAllocation {
+  tick: number
+  sequence: number
+  allocation_index: number
+  service_code: string
+  facility_code: string
+  demand_code: string
+  connection_code: string
+  capacity_version: number
+  demand_version: number
+  connection_version: number
+  facility_capacity_units: number
+  connection_capacity_units: number
+  loss_milli: number
+  dispatched_units: number
+  delivered_units: number
+  loss_units: number
+  metadata: Record<string, unknown>
+}
+
+export interface CityServiceSettlement {
+  tick: number
+  sequence: number
+  service_code: string
+  demand_code: string
+  demand_version: number
+  requested_units: number
+  delivered_units: number
+  shortage_units: number
+  allocation_count: number
+  quality_milli: number
+  metadata: Record<string, unknown>
+}
+
+export interface CityServiceOverview {
+  facility_count: number
+  operational_facility_count: number
+  active_capacity_count: number
+  dispatch_capacity_units: string
+  active_demand_count: number
+  requested_units_per_tick: string
+  latest_settlement_tick?: number
+  latest_requested_units: string
+  latest_delivered_units: string
+  latest_shortage_units: string
+  latest_weighted_quality_milli: number
+}
+
+export interface CityServiceCatalogView {
+  availability: CityServiceAvailability
+  simulation_version: string
+  required_version: string
+  profile?: CityServiceProfile
+  overview?: CityServiceOverview
+  service_definitions: CityServiceDefinition[]
+  facility_types: CityFacilityTypeDefinition[]
+}
+
+export interface CityServiceFacilityView {
+  facility: CityFacility
+  capacities: CityFacilityServiceCapacity[]
+}
+
+export interface CityServiceFacilityPage {
+  availability: CityServiceAvailability
+  simulation_version: string
+  required_version: string
+  items: CityServiceFacilityView[]
+  next_code?: string
+}
+
+export interface CityServiceDemandView {
+  demand: CityServiceDemand
+  latest_settlement?: CityServiceSettlement
+}
+
+export interface CityServiceDemandPage {
+  availability: CityServiceAvailability
+  simulation_version: string
+  required_version: string
+  items: CityServiceDemandView[]
+  next_code?: string
+}
+
+export interface CityServiceConnectionPage {
+  availability: CityServiceAvailability
+  simulation_version: string
+  required_version: string
+  items: CityServiceConnection[]
+  next_code?: string
+}
+
+export interface CityServiceSettlementView {
+  settlement: CityServiceSettlement
+  allocations: CityServiceAllocation[]
+}
+
+export interface CityServiceSettlementPage {
+  availability: CityServiceAvailability
+  simulation_version: string
+  required_version: string
+  items: CityServiceSettlementView[]
+  next_cursor?: { tick: number; sequence: number }
+}
+
+export interface CityServiceListQuery {
+  service?: string
+  status?: string
+  district?: string
+  facility?: string
+  demand?: string
+  after_code?: string
+  after_tick?: number
+  after_sequence?: number
+  limit?: number
+}
+
+export type CityPhysicalNetworkStatus = 'active' | 'suspended' | 'retired'
+export type CityPhysicalNetworkNodeRole = 'supply' | 'demand' | 'junction' | 'storage' | 'gateway'
+export type CityPhysicalNetworkNodeStatus = 'active' | 'offline' | 'retired'
+export type CityPhysicalNetworkEdgeDirection = 'directed' | 'bidirectional'
+export type CityPhysicalNetworkEdgeStatus = 'active' | 'isolated' | 'failed' | 'retired'
+
+export interface CityPhysicalNetworkProfile {
+  policy_id: string
+  policy_version: string
+  policy_hash: string
+  baseline_tick: number
+  policy_count: number
+  network_count: number
+  node_count: number
+  edge_count: number
+  fact_count: number
+  batch_count: number
+  path_count: number
+  segment_count: number
+  revision: number
+  metadata: Record<string, unknown>
+}
+
+export interface CityPhysicalNetworkPolicy {
+  service_code: string
+  policy_version: string
+  policy_hash: string
+  network_required: boolean
+  route_direction: 'supply_to_demand' | 'demand_to_facility'
+  maximum_nodes: number
+  maximum_edges: number
+  maximum_paths: number
+  maximum_hops: number
+  loss_cost_weight: number
+  allow_bidirectional: boolean
+  algorithm_version: string
+  payload: Record<string, unknown>
+}
+
+export interface CityPhysicalNetworkOverview {
+  active_network_count: number
+  active_node_count: number
+  active_edge_count: number
+  isolated_edge_count: number
+  failed_edge_count: number
+  installed_edge_capacity_units: string
+  available_edge_capacity_units: string
+  latest_flow_tick?: number
+  latest_dispatched_units: string
+  latest_network_received_units: string
+  latest_network_loss_units: string
+  latest_delivery_ratio_milli: number
+}
+
+export interface CityPhysicalNetworkCatalogView {
+  availability: CityServiceAvailability
+  simulation_version: string
+  required_version: string
+  profile?: CityPhysicalNetworkProfile
+  overview?: CityPhysicalNetworkOverview
+  policies: CityPhysicalNetworkPolicy[]
+}
+
+export interface CityPhysicalNetwork {
+  code: string
+  name: string
+  service_code: string
+  status: CityPhysicalNetworkStatus
+  topology_revision: number
+  created_tick: number
+  updated_tick: number
+  version: number
+  source_fact_tick: number
+  source_fact_sequence: number
+  metadata: Record<string, unknown>
+}
+
+export interface CityPhysicalNetworkNode {
+  code: string
+  network_code: string
+  role: CityPhysicalNetworkNodeRole
+  capacity_code?: string
+  demand_code?: string
+  district_code?: string
+  building_code?: string
+  world_x?: number
+  world_y?: number
+  world_z?: number
+  status: CityPhysicalNetworkNodeStatus
+  created_tick: number
+  updated_tick: number
+  version: number
+  source_fact_tick: number
+  source_fact_sequence: number
+  metadata: Record<string, unknown>
+}
+
+export interface CityPhysicalNetworkEdge {
+  code: string
+  network_code: string
+  from_node_code: string
+  to_node_code: string
+  direction: CityPhysicalNetworkEdgeDirection
+  installed_capacity_units: number
+  availability_milli: number
+  available_capacity_units: number
+  loss_milli: number
+  base_cost_units: number
+  status: CityPhysicalNetworkEdgeStatus
+  condition_milli: number
+  failure_count: number
+  created_tick: number
+  updated_tick: number
+  version: number
+  source_fact_tick: number
+  source_fact_sequence: number
+  metadata: Record<string, unknown>
+}
+
+export interface CityPhysicalNetworkFact {
+  tick: number
+  sequence: number
+  phase: 'command' | 'pre_network' | 'settlement' | string
+  source_command_sequence?: number
+  fact_type: string
+  subject_kind: string
+  subject_code: string
+  version_before: number
+  version_after: number
+  payload: Record<string, unknown>
+}
+
+export interface CityPhysicalNetworkFlowBatch {
+  tick: number
+  sequence: number
+  network_code: string
+  service_code: string
+  topology_revision: number
+  allocation_count: number
+  path_count: number
+  segment_count: number
+  dispatched_units: number
+  network_received_units: number
+  network_loss_units: number
+  source_fact_tick: number
+  source_fact_sequence: number
+  metadata: Record<string, unknown>
+}
+
+export interface CityPhysicalNetworkFlowPath {
+  tick: number
+  sequence: number
+  service_sequence: number
+  allocation_index: number
+  path_index: number
+  network_code: string
+  connection_code: string
+  source_node_code: string
+  sink_node_code: string
+  hop_count: number
+  dispatched_units: number
+  network_received_units: number
+  network_loss_units: number
+  path_cost_units: number
+  path_hash: string
+  metadata: Record<string, unknown>
+}
+
+export interface CityPhysicalNetworkFlowSegment {
+  tick: number
+  sequence: number
+  service_sequence: number
+  allocation_index: number
+  path_index: number
+  segment_index: number
+  edge_code: string
+  edge_version: number
+  direction: string
+  from_node_code: string
+  to_node_code: string
+  edge_capacity_units: number
+  loss_milli: number
+  input_units: number
+  output_units: number
+  loss_units: number
+  metadata: Record<string, unknown>
+}
+
+export interface CityPhysicalNetworkFlowView {
+  batch: CityPhysicalNetworkFlowBatch
+  paths: CityPhysicalNetworkFlowPath[]
+  segments: CityPhysicalNetworkFlowSegment[]
+}
+
+export interface CityPhysicalNetworkPage {
+  availability: CityServiceAvailability
+  simulation_version: string
+  required_version: string
+  items: CityPhysicalNetwork[]
+  next_code?: string
+}
+
+export interface CityPhysicalNetworkNodePage {
+  availability: CityServiceAvailability
+  simulation_version: string
+  required_version: string
+  items: CityPhysicalNetworkNode[]
+  next_code?: string
+}
+
+export interface CityPhysicalNetworkEdgePage {
+  availability: CityServiceAvailability
+  simulation_version: string
+  required_version: string
+  items: CityPhysicalNetworkEdge[]
+  next_code?: string
+}
+
+export interface CityPhysicalNetworkFlowPage {
+  availability: CityServiceAvailability
+  simulation_version: string
+  required_version: string
+  items: CityPhysicalNetworkFlowView[]
+  next_cursor?: { tick: number; sequence: number }
+}
+
+export interface CityPhysicalNetworkFactPage {
+  availability: CityServiceAvailability
+  simulation_version: string
+  required_version: string
+  items: CityPhysicalNetworkFact[]
+  next_cursor?: { tick: number; sequence: number }
+}
+
+export interface CityPhysicalNetworkComponentDiagnostic {
+  index: number
+  node_count: number
+  edge_count: number
+  supply_node_count: number
+  demand_node_count: number
+  node_codes: string[]
+  service_island: boolean
+}
+
+export interface CityPhysicalNetworkEdgeDiagnostic {
+  edge_code: string
+  status: CityPhysicalNetworkEdgeStatus
+  available_capacity_units: number
+  latest_input_units: number
+  latest_output_units: number
+  latest_loss_units: number
+  utilization_milli: number
+  saturated: boolean
+  bottleneck: boolean
+}
+
+export interface CityPhysicalNetworkDiagnosticSegment {
+  index: number
+  edge_code: string
+  direction: string
+  from_node_code: string
+  to_node_code: string
+  edge_capacity_units: number
+  loss_milli: number
+  input_units: number
+  output_units: number
+  loss_units: number
+}
+
+export interface CityPhysicalNetworkDiagnosticPath {
+  index: number
+  cost_units: number
+  dispatched_units: number
+  network_received_units: number
+  network_loss_units: number
+  path_hash: string
+  segments: CityPhysicalNetworkDiagnosticSegment[]
+}
+
+export interface CityPhysicalNetworkRouteDiagnostic {
+  source_node_code: string
+  sink_node_code: string
+  probe_units: number
+  reachable: boolean
+  reason_code: string
+  dispatched_units: number
+  network_received_units: number
+  network_loss_units: number
+  paths: CityPhysicalNetworkDiagnosticPath[]
+}
+
+export interface CityPhysicalNetworkDiagnosticsView {
+  availability: CityServiceAvailability
+  simulation_version: string
+  required_version: string
+  network?: CityPhysicalNetwork
+  policy?: CityPhysicalNetworkPolicy
+  latest_flow_tick?: number
+  active_node_count: number
+  active_edge_count: number
+  component_count: number
+  isolated_node_count: number
+  service_island_count: number
+  bottleneck_edge_count: number
+  saturated_edge_count: number
+  components: CityPhysicalNetworkComponentDiagnostic[]
+  edge_diagnostics: CityPhysicalNetworkEdgeDiagnostic[]
+  truncated_edge_diagnostic_count: number
+  route?: CityPhysicalNetworkRouteDiagnostic
+}
+
+export interface CityPhysicalNetworkDiagnosticQuery {
+  network: string
+  source?: string
+  sink?: string
+  probe_units?: number
+}
+
+export interface CityPhysicalNetworkListQuery {
+  service?: string
+  network?: string
+  status?: string
+  role?: string
+  phase?: string
+  fact_type?: string
+  after_code?: string
+  after_tick?: number
+  after_sequence?: number
+  limit?: number
+}
 
 export interface CityCommand {
   id: number
@@ -757,6 +1846,18 @@ export interface CityCommand {
   error_code?: string
   submitted_at: string
   updated_at: string
+}
+
+export interface CityCommandPage {
+  items: CityCommand[]
+  next_cursor?: number
+}
+
+export interface CityCommandQuery {
+  status?: CityCommand['status']
+  after_sequence?: number
+  limit?: number
+  latest?: boolean
 }
 
 export interface CityTick {
@@ -781,6 +1882,13 @@ export interface CityStepResult {
   world_runtime_facts: WorldRuntimeFact[]
   world_effect_operations: WorldEffectOperation[]
   world_rule_cases: WorldRuleCase[]
+  service_facts: CityServiceFact[]
+  service_allocations: CityServiceAllocation[]
+  service_settlements: CityServiceSettlement[]
+  physical_network_facts: CityPhysicalNetworkFact[]
+  physical_network_batches: CityPhysicalNetworkFlowBatch[]
+  physical_network_paths: CityPhysicalNetworkFlowPath[]
+  physical_network_segments: CityPhysicalNetworkFlowSegment[]
   events: unknown[]
 }
 
@@ -804,10 +1912,121 @@ export async function listCityWorlds(): Promise<CityWorld[]> {
   return data
 }
 
+export async function getCityWorld(worldID: number): Promise<CityWorld> {
+  const { data } = await apiClient.get<CityWorld>(worldPath(worldID))
+  return data
+}
+
+export async function listCityWorldMembers(worldID: number): Promise<CityMember[]> {
+  const { data } = await apiClient.get<CityMember[]>(`${worldPath(worldID)}/members`)
+  return data
+}
+
+export async function addCityWorldMember(
+  worldID: number,
+  request: AddCityWorldMemberRequest
+): Promise<CityMember> {
+  const { data } = await apiClient.post<CityMember>(`${worldPath(worldID)}/members`, request, {
+    headers: { 'Idempotency-Key': idempotencyKey(`city-member-add-${worldID}`) }
+  })
+  return data
+}
+
+export async function updateCityWorldMember(
+  worldID: number,
+  userID: number,
+  request: UpdateCityWorldMemberRequest
+): Promise<CityMember> {
+  const { data } = await apiClient.patch<CityMember>(
+    `${worldPath(worldID)}/members/${userID}`,
+    request,
+    { headers: { 'Idempotency-Key': idempotencyKey(`city-member-update-${worldID}-${userID}`) } }
+  )
+  return data
+}
+
 export async function createCityWorld(request: CreateCityWorldRequest): Promise<CityWorldFoundation> {
   const { data } = await apiClient.post<CityWorldFoundation>('/city/worlds', request, {
     headers: { 'Idempotency-Key': idempotencyKey('city-world-create') }
   })
+  return data
+}
+
+export async function getCitySpatialRuleSet(ruleSetID: string): Promise<CitySpatialRuleSet> {
+  const { data } = await apiClient.get<CitySpatialRuleSet>(`/city/spatial/rule-sets/${encodeURIComponent(ruleSetID)}`)
+  return data
+}
+
+export async function listOpenWorldStyleProfiles(): Promise<CityOpenWorldStyleProfile[]> {
+  const { data } = await apiClient.get<CityOpenWorldStyleProfile[]>('/city/open-world/styles')
+  return data
+}
+
+export async function getOpenWorldGeneration(worldID: number): Promise<CityOpenWorldGenerationState> {
+	const { data } = await apiClient.get<CityOpenWorldGenerationState>(`${worldPath(worldID)}/open-world/generation`)
+	return data
+}
+
+export async function getOpenWorldVerification(
+	worldID: number,
+	region?: { region_x: number; region_y: number }
+): Promise<CityOpenWorldVerification> {
+	const { data } = await apiClient.get<CityOpenWorldVerification>(`${worldPath(worldID)}/open-world/verification`, {
+		params: region
+	})
+	return data
+}
+
+export async function getOpenWorldMap(
+  worldID: number,
+  query: CityOpenWorldMapQuery
+): Promise<CityOpenWorldMap> {
+  const { data } = await apiClient.get<CityOpenWorldMap>(`${worldPath(worldID)}/open-world/map`, {
+    params: query
+  })
+  return data
+}
+
+export async function getOpenWorldBuildingInterior(
+  worldID: number,
+  buildingCode: string,
+  floorIndex: number
+): Promise<CityOpenWorldBuildingInterior> {
+  const { data } = await apiClient.get<CityOpenWorldBuildingInterior>(
+    `${worldPath(worldID)}/open-world/buildings/${encodeURIComponent(buildingCode)}/interiors/${floorIndex}`
+  )
+  return data
+}
+
+export async function listOpenWorldBuildingPortals(
+  worldID: number,
+  buildingCode: string
+): Promise<CityOpenWorldPortal[]> {
+  const { data } = await apiClient.get<CityOpenWorldPortal[]>(
+    `${worldPath(worldID)}/open-world/buildings/${encodeURIComponent(buildingCode)}/portals`
+  )
+  return data
+}
+
+export async function submitOpenWorldSectorMaterialization(
+  worldID: number,
+  sectorX: number,
+  sectorY: number,
+  expectedWorldTick: number
+): Promise<CityCommand> {
+  const { data } = await apiClient.post<CityCommand>(
+    `${worldPath(worldID)}/commands`,
+    {
+      command_type: 'open_world.sector.materialize',
+      payload: { sector_x: sectorX, sector_y: sectorY },
+      expected_world_tick: expectedWorldTick
+    },
+    {
+      headers: {
+        'Idempotency-Key': idempotencyKey(`open-world-sector-${worldID}-${sectorX}-${sectorY}`)
+      }
+    }
+  )
   return data
 }
 
@@ -858,6 +2077,148 @@ export async function getCityEnterpriseLocationState(
         after_sequence: 0,
         limit: 200,
         ...query
+      }
+    }
+  )
+  return data
+}
+
+export async function getCityServiceCatalog(worldID: number): Promise<CityServiceCatalogView> {
+  const { data } = await apiClient.get<CityServiceCatalogView>(`${worldPath(worldID)}/services/catalog`)
+  return data
+}
+
+export async function listCityServiceFacilities(
+  worldID: number,
+  query: CityServiceListQuery = {}
+): Promise<CityServiceFacilityPage> {
+  const { data } = await apiClient.get<CityServiceFacilityPage>(
+    `${worldPath(worldID)}/services/facilities`,
+    { params: { limit: 200, ...query } }
+  )
+  return data
+}
+
+export async function listCityServiceDemands(
+  worldID: number,
+  query: CityServiceListQuery = {}
+): Promise<CityServiceDemandPage> {
+  const { data } = await apiClient.get<CityServiceDemandPage>(
+    `${worldPath(worldID)}/services/demands`,
+    { params: { limit: 200, ...query } }
+  )
+  return data
+}
+
+export async function listCityServiceConnections(
+  worldID: number,
+  query: CityServiceListQuery = {}
+): Promise<CityServiceConnectionPage> {
+  const { data } = await apiClient.get<CityServiceConnectionPage>(
+    `${worldPath(worldID)}/services/connections`,
+    { params: { limit: 200, ...query } }
+  )
+  return data
+}
+
+export async function listCityServiceSettlements(
+  worldID: number,
+  query: CityServiceListQuery = {}
+): Promise<CityServiceSettlementPage> {
+  const { data } = await apiClient.get<CityServiceSettlementPage>(
+    `${worldPath(worldID)}/services/settlements`,
+    { params: { after_tick: 0, after_sequence: 0, limit: 200, ...query } }
+  )
+  return data
+}
+
+export async function getCityPhysicalNetworkCatalog(
+  worldID: number
+): Promise<CityPhysicalNetworkCatalogView> {
+  const { data } = await apiClient.get<CityPhysicalNetworkCatalogView>(
+    `${worldPath(worldID)}/services/networks/catalog`
+  )
+  return data
+}
+
+export async function listCityPhysicalNetworks(
+  worldID: number,
+  query: CityPhysicalNetworkListQuery = {}
+): Promise<CityPhysicalNetworkPage> {
+  const { data } = await apiClient.get<CityPhysicalNetworkPage>(
+    `${worldPath(worldID)}/services/networks`,
+    { params: { limit: 200, ...query } }
+  )
+  return data
+}
+
+export async function listCityPhysicalNetworkNodes(
+  worldID: number,
+  query: CityPhysicalNetworkListQuery = {}
+): Promise<CityPhysicalNetworkNodePage> {
+  const { data } = await apiClient.get<CityPhysicalNetworkNodePage>(
+    `${worldPath(worldID)}/services/networks/nodes`,
+    { params: { limit: 200, ...query } }
+  )
+  return data
+}
+
+export async function listCityPhysicalNetworkEdges(
+  worldID: number,
+  query: CityPhysicalNetworkListQuery = {}
+): Promise<CityPhysicalNetworkEdgePage> {
+  const { data } = await apiClient.get<CityPhysicalNetworkEdgePage>(
+    `${worldPath(worldID)}/services/networks/edges`,
+    { params: { limit: 200, ...query } }
+  )
+  return data
+}
+
+export async function listCityPhysicalNetworkFlows(
+  worldID: number,
+  query: CityPhysicalNetworkListQuery = {}
+): Promise<CityPhysicalNetworkFlowPage> {
+  const { data } = await apiClient.get<CityPhysicalNetworkFlowPage>(
+    `${worldPath(worldID)}/services/networks/flows`,
+    { params: { after_tick: 0, after_sequence: 0, limit: 100, ...query } }
+  )
+  return data
+}
+
+export async function listCityPhysicalNetworkFacts(
+  worldID: number,
+  query: CityPhysicalNetworkListQuery = {}
+): Promise<CityPhysicalNetworkFactPage> {
+  const { data } = await apiClient.get<CityPhysicalNetworkFactPage>(
+    `${worldPath(worldID)}/services/networks/facts`,
+    { params: { after_tick: 0, after_sequence: 0, limit: 100, ...query } }
+  )
+  return data
+}
+
+export async function getCityPhysicalNetworkDiagnostics(
+  worldID: number,
+  query: CityPhysicalNetworkDiagnosticQuery
+): Promise<CityPhysicalNetworkDiagnosticsView> {
+  const { data } = await apiClient.get<CityPhysicalNetworkDiagnosticsView>(
+    `${worldPath(worldID)}/services/networks/diagnostics`,
+    { params: query }
+  )
+  return data
+}
+
+export async function submitCityServiceCommand(
+  worldID: number,
+  commandType: CityServiceCommandType,
+  payload: Record<string, unknown>,
+  expectedWorldTick: number
+): Promise<CityCommand> {
+  const { data } = await apiClient.post<CityCommand>(
+    `${worldPath(worldID)}/commands`,
+    { command_type: commandType, payload, expected_world_tick: expectedWorldTick },
+    {
+      headers: {
+        'Idempotency-Key': idempotencyKey(`city-service-${worldID}-${commandType}`)
       }
     }
   )
@@ -973,6 +2334,60 @@ export async function getWorldActorState(worldID: number, actorCode: string): Pr
   return data
 }
 
+export async function findWorldActorPath(
+  worldID: number,
+  actorCode: string,
+  destination: CityNavigationCoordinate,
+  maxSteps = 256
+): Promise<CityNavigationPath> {
+  const { data } = await apiClient.post<CityNavigationPath>(
+    `${worldPath(worldID)}/navigation/path`,
+    { actor_code: actorCode, destination, max_steps: maxSteps }
+  )
+  return data
+}
+
+export async function listWorldPortalStates(
+  worldID: number,
+  actorCode?: string
+): Promise<WorldPortalAccessView[]> {
+  const { data } = await apiClient.get<WorldPortalAccessView[]>(
+    `${worldPath(worldID)}/navigation/portals`,
+    { params: actorCode ? { actor_code: actorCode } : undefined }
+  )
+  return data
+}
+
+export async function listWorldNavigationIntents(
+  worldID: number
+): Promise<WorldActorNavigationIntent[]> {
+  const { data } = await apiClient.get<WorldActorNavigationIntent[]>(
+    `${worldPath(worldID)}/navigation/intents`
+  )
+  return data
+}
+
+export async function getWorldNavigationIntent(
+  worldID: number,
+  actorCode: string
+): Promise<WorldActorNavigationIntent> {
+  const { data } = await apiClient.get<WorldActorNavigationIntent>(
+    `${worldPath(worldID)}/navigation/intents/${encodeURIComponent(actorCode)}`
+  )
+  return data
+}
+
+export async function listWorldNavigationReservations(
+  worldID: number,
+  tick?: number
+): Promise<WorldNavigationReservation[]> {
+  const { data } = await apiClient.get<WorldNavigationReservation[]>(
+    `${worldPath(worldID)}/navigation/reservations`,
+    { params: tick === undefined ? undefined : { tick } }
+  )
+  return data
+}
+
 export async function getWorldActorRoleOptions(
   worldID: number,
   actorCode: string
@@ -1016,6 +2431,21 @@ export async function submitWorldRuntimeCommand(
   return data
 }
 
+export async function getCityCommand(worldID: number, commandID: number): Promise<CityCommand> {
+  const { data } = await apiClient.get<CityCommand>(`${worldPath(worldID)}/commands/${commandID}`)
+  return data
+}
+
+export async function listCityCommands(
+  worldID: number,
+  query: CityCommandQuery = {}
+): Promise<CityCommandPage> {
+  const { data } = await apiClient.get<CityCommandPage>(`${worldPath(worldID)}/commands`, {
+    params: { after_sequence: 0, limit: 100, ...query }
+  })
+  return data
+}
+
 export async function stepCityWorld(worldID: number, expectedWorldTick: number): Promise<CityStepResult> {
   const { data } = await apiClient.post<CityStepResult>(
     `${worldPath(worldID)}/step`,
@@ -1027,12 +2457,35 @@ export async function stepCityWorld(worldID: number, expectedWorldTick: number):
 
 const citySpatialAPI = {
   listWorlds: listCityWorlds,
+  getWorld: getCityWorld,
   createWorld: createCityWorld,
+  getSpatialRuleSet: getCitySpatialRuleSet,
+	listOpenWorldStyleProfiles,
+	getOpenWorldGeneration,
+	getOpenWorldVerification,
+	getOpenWorldMap,
+  submitOpenWorldSectorMaterialization,
+  listWorldMembers: listCityWorldMembers,
+  addWorldMember: addCityWorldMember,
+  updateWorldMember: updateCityWorldMember,
   getWorldSpatialRuleSet: getCityWorldSpatialRuleSet,
   getOvermap: getCityOvermap,
   getLandState: getCityLandState,
   getDevelopmentState: getCityDevelopmentState,
   getEnterpriseLocationState: getCityEnterpriseLocationState,
+  getServiceCatalog: getCityServiceCatalog,
+  listServiceFacilities: listCityServiceFacilities,
+  listServiceDemands: listCityServiceDemands,
+  listServiceConnections: listCityServiceConnections,
+  listServiceSettlements: listCityServiceSettlements,
+  getPhysicalNetworkCatalog: getCityPhysicalNetworkCatalog,
+  listPhysicalNetworks: listCityPhysicalNetworks,
+  listPhysicalNetworkNodes: listCityPhysicalNetworkNodes,
+  listPhysicalNetworkEdges: listCityPhysicalNetworkEdges,
+  listPhysicalNetworkFlows: listCityPhysicalNetworkFlows,
+  listPhysicalNetworkFacts: listCityPhysicalNetworkFacts,
+  getPhysicalNetworkDiagnostics: getCityPhysicalNetworkDiagnostics,
+  submitServiceCommand: submitCityServiceCommand,
   listMapChunks: listCityMapChunks,
   getMapChunk: getCityMapChunk,
   listSpatialChanges: listCitySpatialChanges,
@@ -1042,10 +2495,17 @@ const citySpatialAPI = {
   getWorldRuntimeCatalog,
   listWorldActors,
   getWorldActorState,
+  findWorldActorPath,
+  listWorldPortalStates,
+  listWorldNavigationIntents,
+  getWorldNavigationIntent,
+  listWorldNavigationReservations,
   getWorldActorRoleOptions,
   listWorldRuntimeRules,
   listWorldRuleCases,
   submitWorldRuntimeCommand,
+  getCommand: getCityCommand,
+  listCommands: listCityCommands,
   stepWorld: stepCityWorld
 }
 

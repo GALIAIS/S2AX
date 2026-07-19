@@ -4,14 +4,19 @@ import type {
   CityEnterpriseLocationState,
   CityLandState,
   CityMapChunk,
+  CityOpenWorldBuildingInterior,
+  CityOpenWorldChunk,
   CityOvermapTile,
-  CitySpatialRuleSet
+  CitySpatialRuleSet,
+  WorldActor
 } from '@/api/citySpatial'
 import {
   applyCityDevelopmentOverlay,
   applyCityEnterpriseOverlay,
   applyCityLandOverlay,
+  applyWorldActorOverlay,
   buildLocalScene,
+  buildOpenWorldInteriorScene,
   buildOvermapScene,
   chunkKey,
   exportProjectedChunkText,
@@ -20,6 +25,7 @@ import {
   getCityLandTileSummary,
   hitTestClassicScene,
   projectCityChunk,
+  projectOpenWorldChunk,
   resolveClassicVisual,
   viewportChunkBounds,
   xterm256Color
@@ -47,7 +53,11 @@ const ruleSet: CitySpatialRuleSet = {
     { id: 'terrain.grass', kind: 'terrain', name: 'Grass', foreground: 'green', looks_like: 'terrain.ground', movement_cost: 110, flags: ['passable'], metadata: {} },
     { id: 'terrain.road', kind: 'terrain', name: 'Road', glyph: '=', foreground: 'road', background: 'road', movement_cost: 80, flags: ['passable'], metadata: {} },
     { id: 'terrain.deep_water', kind: 'terrain', name: 'Water', glyph: '≈', foreground: 'water', background: 'water', movement_cost: 400, flags: ['liquid'], metadata: {} },
-    { id: 'furniture.tree', kind: 'furniture', name: 'Tree', glyph: '♣', foreground: 'green', movement_cost: 0, flags: ['blocks_items'], metadata: {} }
+    { id: 'furniture.tree', kind: 'furniture', name: 'Tree', glyph: '♣', foreground: 'green', movement_cost: 0, flags: ['blocks_items'], metadata: {} },
+    { id: 'missing.structure', kind: 'structure', name: 'Unknown structure', glyph: '?', foreground: 'danger', movement_cost: 0, flags: [], metadata: {} },
+    { id: 'missing.portal', kind: 'portal', name: 'Unknown portal', glyph: '?', foreground: 'danger', movement_cost: 0, flags: [], metadata: {} },
+    { id: 'structure.wall', kind: 'structure', name: 'Wall', glyph: '#', foreground: 'ground', movement_cost: 0, flags: ['blocks_items'], metadata: {} },
+    { id: 'portal.door_open', kind: 'portal', name: 'Door', glyph: '/', foreground: 'danger', movement_cost: 100, flags: ['passable'], metadata: {} }
   ]
 }
 
@@ -77,6 +87,57 @@ const chunk: CityMapChunk = {
   metadata: {},
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z'
+}
+
+const openWorldChunk: CityOpenWorldChunk = {
+  chunk_x: -1,
+  chunk_y: 0,
+  z: 0,
+  revision: 1,
+  payload_hash: 'c'.repeat(64),
+  payload: {
+    format: 'city-openworld-chunk-v1',
+    width: 2,
+    height: 2,
+    terrain_runs: [
+      { definition_id: 'terrain.grass', length: 2 },
+      { definition_id: 'terrain.road', length: 2 }
+    ],
+    layers: [
+      { x: 1, y: 0, kind: 'structure', definition_id: 'structure.wall' },
+      { x: 1, y: 0, kind: 'portal', definition_id: 'portal.door_open' }
+    ]
+  }
+}
+
+const interiorRuleSet: CitySpatialRuleSet = {
+  ...ruleSet,
+  definitions: [
+    ...ruleSet.definitions,
+    { id: 'terrain.floor', kind: 'terrain', name: 'Floor', glyph: '.', foreground: 'ground', movement_cost: 100, flags: ['passable'], metadata: {} },
+    { id: 'structure.window', kind: 'structure', name: 'Window', glyph: '□', foreground: 'water', movement_cost: 0, flags: [], metadata: {} },
+    { id: 'portal.stairs_up', kind: 'portal', name: 'Stairs up', glyph: '↕', foreground: 'water', movement_cost: 100, flags: ['passable'], metadata: {} },
+    { id: 'furniture.bed', kind: 'furniture', name: 'Bed', glyph: 'H', foreground: 'ground', movement_cost: 0, flags: [], metadata: {} },
+    { id: 'furniture.chair', kind: 'furniture', name: 'Chair', glyph: 'h', foreground: 'ground', movement_cost: 0, flags: [], metadata: {} },
+    { id: 'furniture.table', kind: 'furniture', name: 'Table', glyph: 'T', foreground: 'ground', movement_cost: 0, flags: [], metadata: {} },
+    { id: 'item.crate', kind: 'item', name: 'Crate', glyph: 'B', foreground: 'ground', movement_cost: 0, flags: [], metadata: {} }
+  ]
+}
+
+const materializedInterior: CityOpenWorldBuildingInterior = {
+  building_code: 'building_core_001', floor_index: 0, z: 0,
+  layout_version: '1.0.0', layout_style: 'courtyard', content_hash: 'd'.repeat(64), revision: 1,
+  cells: [
+    { x: 10, y: 10, z: 0, kind: 'wall' },
+    { x: 11, y: 10, z: 0, kind: 'window' },
+    { x: 12, y: 10, z: 0, kind: 'door' },
+    { x: 10, y: 11, z: 0, kind: 'floor' },
+    { x: 11, y: 11, z: 0, kind: 'floor', feature: 'stairs' },
+    { x: 12, y: 11, z: 0, kind: 'furniture', feature: 'bed' },
+    { x: 10, y: 12, z: 0, kind: 'furniture', feature: 'chair' },
+    { x: 11, y: 12, z: 0, kind: 'furniture', feature: 'table' },
+    { x: 12, y: 12, z: 0, kind: 'furniture', feature: 'crate' }
+  ]
 }
 
 const landState: CityLandState = {
@@ -171,6 +232,17 @@ const enterpriseState: CityEnterpriseLocationState = {
   }]
 }
 
+const actor: WorldActor = {
+  code: 'actor_00000001', owner_user_id: 9, actor_type_code: 'character', name: 'Aster', status: 'active',
+  archetype_code: 'urban_apprentice', archetype_version: '1.0.0', created_tick: 1, updated_tick: 2,
+  version: 2, metadata: {},
+  location: {
+    actor_code: 'actor_00000001', space_kind: 'world', space_code: 'world',
+    x: -2, y: 0, z: 0, chunk_x: -1, chunk_y: 0, local_x: 0, local_y: 0,
+    jurisdiction_code: 'west', moved_tick: 1, version: 1, metadata: {}
+  }
+}
+
 describe('city spatial projection', () => {
   it('converts xterm colors and negative coordinates deterministically', () => {
     expect(xterm256Color(16)).toBe('#000000')
@@ -199,6 +271,27 @@ describe('city spatial projection', () => {
     expect(projected.cells[1].stack.map(layer => layer.kind)).toEqual(['terrain', 'furniture'])
   })
 
+  it('projects persisted V2 walls and portals without inferring browser geometry', () => {
+    const projected = projectOpenWorldChunk(openWorldChunk, ruleSet)
+    expect(projected.cells[1]).toMatchObject({
+      worldX: -1,
+      worldY: 0,
+      glyph: '/',
+      terrainDefinitionID: 'terrain.grass'
+    })
+    expect(projected.cells[1].stack.map(layer => layer.kind)).toEqual(['terrain', 'structure', 'portal'])
+    expect(() => projectOpenWorldChunk({
+      ...openWorldChunk,
+      payload: {
+        ...openWorldChunk.payload,
+        layers: [
+          { x: 1, y: 0, kind: 'portal', definition_id: 'portal.door_open' },
+          { x: 1, y: 0, kind: 'structure', definition_id: 'structure.wall' }
+        ]
+      }
+    }, ruleSet)).toThrow('Invalid open-world chunk layer')
+  })
+
   it('rejects incomplete RLE payloads', () => {
     const invalid = structuredClone(chunk)
     invalid.payload.terrain_runs = [{ definition_id: 'terrain.ground', length: 3 }]
@@ -213,6 +306,40 @@ describe('city spatial projection', () => {
     expect(hit && 'worldX' in hit ? hit.worldX : null).toBe(-2)
     expect(exportProjectedChunkText(projected)).toContain('.♣\n..')
     expect(exportProjectedChunkText(projected)).toContain(`# payload_hash=${chunk.payload_hash}`)
+  })
+
+  it('keeps the compact CLASSIC zoom dense without changing cell semantics', () => {
+    const projected = projectCityChunk(chunk, ruleSet)
+    const scene = buildLocalScene(
+      new Map([[projected.key, projected]]),
+      { worldX: -1, worldY: 1, z: 0, cellSize: 8 },
+      { width: 960, height: 560 },
+      2
+    )
+
+    expect(scene).toMatchObject({ cellSize: 8, columns: 120, rows: 70 })
+    expect(scene.cells).toHaveLength(120 * 70)
+  })
+
+  it('renders a sealed V2 building floor as sparse CLASSIC glyph facts without rebuilding its footprint', () => {
+    const scene = buildOpenWorldInteriorScene(
+      materializedInterior,
+      interiorRuleSet,
+      { worldX: 11, worldY: 11, z: 0, cellSize: 16 },
+      { width: 128, height: 96 }
+    )
+    const glyphAt = (x: number, y: number) => scene.cells.find(cell => cell?.worldX === x && cell.worldY === y)?.glyph
+
+    expect(scene).toMatchObject({ mode: 'local', cellSize: 16, columns: 8, rows: 6, startWorldX: 7, startWorldY: 8 })
+    expect(glyphAt(10, 10)).toBe('#')
+    expect(glyphAt(11, 10)).toBe('□')
+    expect(glyphAt(12, 10)).toBe('/')
+    expect(glyphAt(11, 11)).toBe('↕')
+    expect(glyphAt(12, 11)).toBe('H')
+    expect(glyphAt(10, 12)).toBe('h')
+    expect(glyphAt(11, 12)).toBe('T')
+    expect(glyphAt(12, 12)).toBe('B')
+    expect(scene.cells.find(cell => cell?.worldX === 9 && cell.worldY === 10)).toBeUndefined()
   })
 
   it('projects server-backed buildings and portals above furniture without changing the Chunk', () => {
@@ -230,6 +357,70 @@ describe('city spatial projection', () => {
     expect(context?.unitPools[0]?.occupied_unit_count).toBe(25)
     expect(context?.housingAllocations[0]?.cohort_key).toBe('west/household/medium')
     expect(context?.portals[0]?.portal_type).toBe('stair')
+  })
+
+  it('uses the authoritative irregular building-layout cells instead of filling a footprint rectangle', () => {
+    const layoutLand: CityLandState = {
+      ...landState,
+      building_layouts: [{
+        building_code: 'building_west',
+        layout_version: '1.0.0',
+        archetype: 'residential.l_house',
+        cells: [
+          { x: -2, y: 0, z: 0, kind: 'door' },
+          { x: -1, y: 0, z: 0, kind: 'window' }
+        ]
+      }]
+    }
+    const projected = projectCityChunk(chunk, ruleSet)
+    const windowCell = applyCityLandOverlay(projected.cells[1], layoutLand, 2)
+    const omittedCell = getCityLandCellContext(layoutLand, -2, 1, 0, 2)
+
+    expect(windowCell).toMatchObject({ glyph: '□', background: '#26282d' })
+    expect(windowCell.stack.at(-1)).toMatchObject({
+      kind: 'structure', definitionID: 'structure.window'
+    })
+    expect(omittedCell?.building).toBeNull()
+    expect(omittedCell?.layoutCell).toBeNull()
+  })
+
+  it('projects materialized stairs as a CLASSIC vertical connector glyph', () => {
+    const stairsLand: CityLandState = {
+      ...landState,
+      building_layouts: [{
+        building_code: 'building_west', layout_version: '1.1.0', archetype: 'residential.walkup',
+        cells: [{ x: -1, y: 0, z: 0, kind: 'floor', feature: 'stairs' }]
+      }]
+    }
+    const projected = projectCityChunk(chunk, ruleSet)
+    const stairs = applyCityLandOverlay(projected.cells[1], stairsLand, 2)
+
+    expect(stairs).toMatchObject({ glyph: '↕', foreground: '#89c5e9', background: '#25272c' })
+    expect(stairs.stack.at(-1)).toMatchObject({ kind: 'portal', definitionID: 'portal.stairs' })
+  })
+
+  it('renders authoritative parcel site detail only where no building structure owns the cell', () => {
+    const siteLand: CityLandState = {
+      ...landState,
+      buildings: [],
+      unit_pools: [],
+      housing_allocations: [],
+      portals: [],
+      parcel_layouts: [{
+        parcel_code: 'parcel_west',
+        layout_version: '1.0.0',
+        style: 'residential.garden',
+        cells: [{ x: -2, y: 0, z: 0, kind: 'tree' }]
+      }]
+    }
+    const projected = projectCityChunk(chunk, ruleSet)
+    const siteCell = applyCityLandOverlay(projected.cells[0], siteLand, 2)
+    const context = getCityLandCellContext(siteLand, -2, 0, 0, 2)
+
+    expect(siteCell).toMatchObject({ glyph: '♣', foreground: '#78a56d' })
+    expect(siteCell.stack.at(-1)).toMatchObject({ kind: 'furniture', definitionID: 'furniture.tree' })
+    expect(context?.parcelLayoutCell?.kind).toBe('tree')
+    expect(context?.building).toBeNull()
   })
 
   it('adds construction facts as a non-destructive CLASSIC overlay and Overmap count', () => {
@@ -277,6 +468,38 @@ describe('city spatial projection', () => {
     expect(scene.cells[0]).toMatchObject({
       activeEnterpriseSiteCount: 1, enterpriseFirmCount: 1, enterpriseOccupiedUnits: 5
     })
+  })
+
+  it('projects authoritative actor locations above spatial overlays in local and Overmap scenes', () => {
+    const projected = projectCityChunk(chunk, ruleSet)
+    const landCell = applyCityLandOverlay(projected.cells[0], landState, 2)
+    const actorCell = applyWorldActorOverlay(landCell, [actor])
+    expect(actorCell).toMatchObject({ glyph: '@', foreground: '#f4f7fb' })
+    expect(actorCell.stack.at(-1)).toMatchObject({
+      kind: 'entity', definitionID: 'actor:actor_00000001'
+    })
+
+    const localScene = buildLocalScene(
+      new Map([[projected.key, projected]]),
+      { worldX: -1, worldY: 1, z: 0, cellSize: 16 },
+      { width: 32, height: 32 },
+      2,
+      landState,
+      developmentState,
+      enterpriseState,
+      [actor]
+    )
+    expect(localScene.cells[0]).toMatchObject({ glyph: '@' })
+
+    const tile: CityOvermapTile = {
+      chunk_x: -1, chunk_y: 0, z: 0, district_code: 'west',
+      terrain_definition_id: 'terrain.grass', road_mask: 0, river_mask: 0,
+      variant: 0, tile_hash: 'actor', metadata: {}
+    }
+    const overmapScene = buildOvermapScene(
+      [tile], ruleSet, { width: 300, height: 240 }, landState, developmentState, enterpriseState, [actor]
+    )
+    expect(overmapScene.cells[0]).toMatchObject({ glyph: '@', actorCount: 1, actorCodes: [actor.code] })
   })
 
   it('projects real road and river masks on the Overmap', () => {

@@ -6145,6 +6145,30 @@
           </div>
         </div>
 
+        <div class="card">
+          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              {{ t('admin.settings.features.citySimulation.title') }}
+            </h2>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              {{ t('admin.settings.features.citySimulation.description') }}
+            </p>
+          </div>
+          <div class="space-y-5 p-6">
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.features.citySimulation.enabled') }}
+                </label>
+                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.features.citySimulation.enabledHint') }}
+                </p>
+              </div>
+              <Toggle v-model="form.city_simulation_enabled" />
+            </div>
+          </div>
+        </div>
+
         <!-- Affiliate (邀请返利) feature card -->
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
@@ -8355,6 +8379,7 @@ const form = reactive<SettingsForm>({
   hide_ccs_import_button: false,
   payment_enabled: false,
   risk_control_enabled: false,
+  city_simulation_enabled: false,
   cyber_session_block_enabled: false,
   cyber_session_block_ttl_seconds: 3600,
   payment_min_amount: 1,
@@ -9873,6 +9898,7 @@ async function saveSettings() {
       // Payment configuration
       payment_enabled: form.payment_enabled,
       risk_control_enabled: form.risk_control_enabled,
+      city_simulation_enabled: form.city_simulation_enabled,
       cyber_session_block_enabled: form.cyber_session_block_enabled,
       cyber_session_block_ttl_seconds:
         Number(form.cyber_session_block_ttl_seconds) || 3600,

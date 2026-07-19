@@ -267,15 +267,39 @@ func decodeCanonicalCitySnapshot(canonical []byte, simulationVersion string) (ci
 		return decoder.Decode(target)
 	}
 	switch simulationVersion {
-	case CitySimulationVersionF6, CitySimulationVersionF6V2, CitySimulationVersionF6V3,
+	case CitySimulationVersionOpenWorld, CitySimulationVersionOpenWorldV2, CitySimulationVersionOpenWorldV3,
+		CitySimulationVersionOpenWorldV4, CitySimulationVersionOpenWorldV5,
+		CitySimulationVersionF6, CitySimulationVersionF6V2, CitySimulationVersionF6V3,
 		CitySimulationVersionF7, CitySimulationVersionF7V2, CitySimulationVersionF7V3,
-		CitySimulationVersionF7V4, CitySimulationVersionF7V5:
+		CitySimulationVersionF7V4, CitySimulationVersionF7V5, CitySimulationVersionF7V6,
+		CitySimulationVersionF7V7, CitySimulationVersionF7V8, CitySimulationVersionF7V9,
+		CitySimulationVersionF8, CitySimulationVersionF8V2, CitySimulationVersionF8V3:
 		var state cityHashState
 		if err := decode(&state); err != nil {
 			return cityHashState{}, nil, err
 		}
 		if state.SimulationVersion != simulationVersion {
 			return cityHashState{}, nil, fmt.Errorf("city snapshot simulation version mismatch")
+		}
+		if cityEngineSupportsOpenWorld(simulationVersion) && state.OpenWorld == nil {
+			return cityHashState{}, nil, fmt.Errorf("city open-world snapshot requires V2 genesis state")
+		}
+		if !cityEngineSupportsOpenWorld(simulationVersion) && state.OpenWorld != nil {
+			return cityHashState{}, nil, fmt.Errorf("legacy city snapshot cannot contain open-world state")
+		}
+		if cityEngineSupportsOpenWorldRuntime(simulationVersion) && state.OpenWorldRuntime == nil {
+			return cityHashState{}, nil, fmt.Errorf("city open-world V4 snapshot requires runtime state")
+		}
+		if !cityEngineSupportsOpenWorldRuntime(simulationVersion) && state.OpenWorldRuntime != nil {
+			return cityHashState{}, nil, fmt.Errorf("pre-V4 open-world snapshot cannot contain runtime state")
+		}
+		if cityEngineSupportsOpenWorldSocialRuntime(simulationVersion) &&
+			(state.OpenWorldRuntime == nil || state.OpenWorldRuntime.Social == nil) {
+			return cityHashState{}, nil, fmt.Errorf("city open-world V5 snapshot requires social state")
+		}
+		if !cityEngineSupportsOpenWorldSocialRuntime(simulationVersion) && state.OpenWorldRuntime != nil &&
+			state.OpenWorldRuntime.Social != nil {
+			return cityHashState{}, nil, fmt.Errorf("pre-V5 open-world snapshot cannot contain social state")
 		}
 		if cityEngineSupportsSpatial(simulationVersion) && state.Spatial == nil {
 			return cityHashState{}, nil, fmt.Errorf("city F7 snapshot requires spatial state")
@@ -306,6 +330,47 @@ func decodeCanonicalCitySnapshot(canonical []byte, simulationVersion string) (ci
 		}
 		if !cityEngineSupportsWorldRuntime(simulationVersion) && state.WorldRuntime != nil {
 			return cityHashState{}, nil, fmt.Errorf("legacy city snapshot cannot contain world runtime state")
+		}
+		if cityEngineSupportsWorldActorSpatialControl(simulationVersion) &&
+			(state.WorldRuntime.Locations == nil || state.WorldRuntime.ControlGrants == nil) {
+			return cityHashState{}, nil, fmt.Errorf("city F7.7 snapshot requires actor location and control grant state")
+		}
+		if !cityEngineSupportsWorldActorSpatialControl(simulationVersion) && state.WorldRuntime != nil &&
+			(state.WorldRuntime.Locations != nil || state.WorldRuntime.ControlGrants != nil) {
+			return cityHashState{}, nil, fmt.Errorf("legacy world runtime snapshot cannot contain actor spatial-control state")
+		}
+		if cityEngineSupportsWorldPortalAccess(simulationVersion) && state.WorldRuntime.PortalStates == nil {
+			return cityHashState{}, nil, fmt.Errorf("city F7.10 snapshot requires world portal state")
+		}
+		if !cityEngineSupportsWorldPortalAccess(simulationVersion) && state.WorldRuntime != nil &&
+			state.WorldRuntime.PortalStates != nil {
+			return cityHashState{}, nil, fmt.Errorf("legacy world runtime snapshot cannot contain portal-access state")
+		}
+		if cityEngineSupportsWorldNavigationIntents(simulationVersion) &&
+			(state.WorldRuntime.NavigationProfile == nil || state.WorldRuntime.NavigationIntents == nil) {
+			return cityHashState{}, nil, fmt.Errorf("city F7.11 snapshot requires navigation profile and intent state")
+		}
+		if !cityEngineSupportsWorldNavigationIntents(simulationVersion) && state.WorldRuntime != nil &&
+			(state.WorldRuntime.NavigationProfile != nil || state.WorldRuntime.NavigationIntents != nil) {
+			return cityHashState{}, nil, fmt.Errorf("legacy world runtime snapshot cannot contain navigation-intent state")
+		}
+		if cityEngineSupportsPublicServices(simulationVersion) && state.PublicServices == nil {
+			return cityHashState{}, nil, fmt.Errorf("city F8 snapshot requires public-service state")
+		}
+		if !cityEngineSupportsPublicServices(simulationVersion) && state.PublicServices != nil {
+			return cityHashState{}, nil, fmt.Errorf("legacy city snapshot cannot contain public-service state")
+		}
+		if cityEngineSupportsFacilityLifecycle(simulationVersion) && state.FacilityLifecycle == nil {
+			return cityHashState{}, nil, fmt.Errorf("city F8.1 snapshot requires facility lifecycle state")
+		}
+		if !cityEngineSupportsFacilityLifecycle(simulationVersion) && state.FacilityLifecycle != nil {
+			return cityHashState{}, nil, fmt.Errorf("pre-F8.1 city snapshot cannot contain facility lifecycle state")
+		}
+		if cityEngineSupportsPhysicalNetworks(simulationVersion) && state.PhysicalNetworks == nil {
+			return cityHashState{}, nil, fmt.Errorf("city F8.2 snapshot requires physical network state")
+		}
+		if !cityEngineSupportsPhysicalNetworks(simulationVersion) && state.PhysicalNetworks != nil {
+			return cityHashState{}, nil, fmt.Errorf("pre-F8.2 city snapshot cannot contain physical network state")
 		}
 		reencoded, err := marshalCanonicalCityState(state)
 		return state, reencoded, err
@@ -837,6 +902,30 @@ func applyCityTickFacts(
 			stageErr = replayCityEnterpriseLocationFacts(ctx, queryer, worldID, tick.Tick, state)
 		case cityEngineStageWorldRuntime:
 			stageErr = replayWorldRuntimeFacts(ctx, queryer, worldID, tick.Tick, state)
+		case cityEngineStagePublicServices:
+			if cityEngineSupportsFacilityLifecycle(engine.version) {
+				stageErr = replayCityFacilityLifecycleBeforeService(
+					ctx, queryer, worldID, tick.Tick, state,
+				)
+			}
+			if stageErr == nil && cityEngineSupportsPhysicalNetworks(engine.version) {
+				stageErr = replayCityPhysicalNetworkTopologyFacts(
+					ctx, queryer, worldID, tick.Tick, state,
+				)
+			}
+			if stageErr == nil {
+				stageErr = replayCityServiceFacts(ctx, queryer, worldID, tick.Tick, state)
+			}
+			if stageErr == nil && cityEngineSupportsPhysicalNetworks(engine.version) {
+				stageErr = replayCityPhysicalNetworkFlowFacts(
+					ctx, queryer, worldID, tick.Tick, state,
+				)
+			}
+			if stageErr == nil && cityEngineSupportsFacilityLifecycle(engine.version) {
+				stageErr = replayCityFacilityLifecycleAfterService(
+					ctx, queryer, worldID, tick.Tick, state,
+				)
+			}
 		case cityEngineStageMarkets:
 			stageErr = replayCityMarketSettlements(ctx, queryer, worldID, tick.Tick, state)
 		default:
@@ -1538,6 +1627,9 @@ func (s *CityEconomyService) StartRecovery(ctx context.Context, input CityRecove
 	if world.memberRole != CityMemberRoleOwner {
 		return nil, ErrCityPermissionDenied
 	}
+	if cityEngineSupportsOpenWorld(world.simulationVersion) {
+		return nil, ErrCitySimulationVersion.WithMetadata(map[string]string{"version": world.simulationVersion})
+	}
 	existing, err := loadCityRecoveryByRequest(ctx, tx, input.WorldID, input.UserID, requestID)
 	if err == nil {
 		if existing.requestFingerprint != fingerprint {
@@ -1813,6 +1905,42 @@ WHERE account.world_id = $1 AND entity.id = account.entity_id
 	if err = restoreCityMarketProjection(ctx, tx, worldID, state.Markets, apply); err != nil {
 		return 0, err
 	}
+	var physicalNetworkFactIDs map[cityPhysicalNetworkRecoveryFactKey]int64
+	if cityEngineSupportsPhysicalNetworks(state.SimulationVersion) {
+		physicalNetworkFactIDs, err = loadCityPhysicalNetworkRecoveryFactIDs(ctx, tx, worldID)
+		if err != nil {
+			return 0, err
+		}
+		physicalCount, physicalErr := clearCityPhysicalNetworkProjection(ctx, tx, worldID)
+		if physicalErr != nil {
+			return 0, physicalErr
+		}
+		count += physicalCount
+	}
+	var facilityLifecycleFactIDs map[cityFacilityLifecycleRecoveryFactKey]int64
+	if cityEngineSupportsFacilityLifecycle(state.SimulationVersion) {
+		facilityLifecycleFactIDs, err = loadCityFacilityLifecycleRecoveryFactIDs(ctx, tx, worldID)
+		if err != nil {
+			return 0, err
+		}
+		lifecycleCount, lifecycleErr := clearCityFacilityLifecycleProjection(ctx, tx, worldID)
+		if lifecycleErr != nil {
+			return 0, lifecycleErr
+		}
+		count += lifecycleCount
+	}
+	var cityServiceFactIDs map[cityServiceRecoveryFactKey]int64
+	if engine.hasStage(cityEngineStagePublicServices) {
+		cityServiceFactIDs, err = loadCityServiceRecoveryFactIDs(ctx, tx, worldID)
+		if err != nil {
+			return 0, err
+		}
+		serviceCount, serviceErr := clearCityPublicServiceProjection(ctx, tx, worldID)
+		if serviceErr != nil {
+			return 0, serviceErr
+		}
+		count += serviceCount
+	}
 	var worldRuntimeIDs worldRuntimeRecoveryIDs
 	if engine.hasStage(cityEngineStageWorldRuntime) {
 		worldRuntimeIDs, err = loadWorldRuntimeRecoveryIDs(ctx, tx, worldID)
@@ -1899,6 +2027,33 @@ WHERE account.world_id = $1 AND entity.id = account.entity_id
 			return 0, runtimeErr
 		}
 		count += runtimeCount
+	}
+	if engine.hasStage(cityEngineStagePublicServices) {
+		serviceCount, serviceErr := restoreCityPublicServiceProjection(
+			ctx, tx, worldID, &state, cityServiceFactIDs,
+		)
+		if serviceErr != nil {
+			return 0, serviceErr
+		}
+		count += serviceCount
+	}
+	if cityEngineSupportsFacilityLifecycle(state.SimulationVersion) {
+		lifecycleCount, lifecycleErr := restoreCityFacilityLifecycleProjection(
+			ctx, tx, worldID, &state, facilityLifecycleFactIDs,
+		)
+		if lifecycleErr != nil {
+			return 0, lifecycleErr
+		}
+		count += lifecycleCount
+	}
+	if cityEngineSupportsPhysicalNetworks(state.SimulationVersion) {
+		physicalCount, physicalErr := restoreCityPhysicalNetworkProjection(
+			ctx, tx, worldID, &state, physicalNetworkFactIDs,
+		)
+		if physicalErr != nil {
+			return 0, physicalErr
+		}
+		count += physicalCount
 	}
 	return count, nil
 }

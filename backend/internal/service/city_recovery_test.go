@@ -58,6 +58,62 @@ func TestCitySnapshotCompressionIsDeterministicAndTamperEvident(t *testing.T) {
 			Facts:       make([]WorldRuntimeFact, 0),
 			Effects:     make([]WorldEffectOperation, 0),
 			RuleCases:   make([]WorldRuleCase, 0),
+			Locations: func() *[]WorldActorLocation {
+				values := make([]WorldActorLocation, 0)
+				return &values
+			}(),
+			ControlGrants: func() *[]WorldActorControlGrant {
+				values := make([]WorldActorControlGrant, 0)
+				return &values
+			}(),
+			PortalStates: func() *[]WorldPortalState {
+				values := make([]WorldPortalState, 0)
+				return &values
+			}(),
+			NavigationProfile: &WorldNavigationProfile{
+				ProfileVersion:        worldNavigationProfileVersion,
+				MaximumIntentsPerTick: 128, DefaultBudgetGainUnits: 100,
+				DefaultBudgetCapUnits: 400, DefaultMaxSteps: 256,
+				MaximumBlockedAttempts: 64, MaximumRetryDelayTicks: 8,
+				FairnessAgingCap: 1024, Revision: 1, Metadata: json.RawMessage(`{}`),
+			},
+			NavigationIntents: func() *[]WorldActorNavigationIntent {
+				values := make([]WorldActorNavigationIntent, 0)
+				return &values
+			}(),
+		},
+		PublicServices: &cityPublicServiceHashState{
+			Profile:            CityServiceProfile{Metadata: json.RawMessage(`{}`)},
+			ServiceDefinitions: make([]CityServiceDefinition, 0),
+			FacilityTypes:      make([]CityFacilityTypeDefinition, 0),
+			Facilities:         make([]CityFacility, 0),
+			Capacities:         make([]CityFacilityServiceCapacity, 0),
+			Demands:            make([]CityServiceDemand, 0),
+			Connections:        make([]CityServiceConnection, 0),
+			Facts:              make([]CityServiceFact, 0),
+			Allocations:        make([]CityServiceAllocation, 0),
+			Settlements:        make([]CityServiceSettlement, 0),
+		},
+		FacilityLifecycle: &cityFacilityLifecycleHashState{
+			Profile:          CityFacilityLifecycleProfile{Metadata: json.RawMessage(`{}`)},
+			Policies:         make([]CityFacilityLifecyclePolicy, 0),
+			States:           make([]CityFacilityLifecycleState, 0),
+			Operations:       make([]CityFacilityOperation, 0),
+			StaffAssignments: make([]CityFacilityStaffAssignment, 0),
+			Incidents:        make([]CityFacilityIncident, 0),
+			BudgetMovements:  make([]CityFacilityBudgetMovement, 0),
+			Facts:            make([]CityFacilityLifecycleFact, 0),
+		},
+		PhysicalNetworks: &cityPhysicalNetworkHashState{
+			Profile:  CityPhysicalNetworkProfile{Metadata: json.RawMessage(`{}`)},
+			Policies: make([]CityPhysicalNetworkPolicy, 0),
+			Networks: make([]CityPhysicalNetwork, 0),
+			Nodes:    make([]CityPhysicalNetworkNode, 0),
+			Edges:    make([]CityPhysicalNetworkEdge, 0),
+			Facts:    make([]CityPhysicalNetworkFact, 0),
+			Batches:  make([]CityPhysicalNetworkFlowBatch, 0),
+			Paths:    make([]CityPhysicalNetworkFlowPath, 0),
+			Segments: make([]CityPhysicalNetworkFlowSegment, 0),
 		},
 	}
 	canonical, hash, err := canonicalCityHashState(fullState)

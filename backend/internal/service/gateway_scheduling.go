@@ -910,6 +910,9 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 	if s.schedulerSnapshot != nil {
 		accounts, useMixed, err := s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, platform, hasForcePlatform)
 		if err == nil {
+			accounts, err = filterAccountAllocationCandidates(ctx, s.accountAllocationService, groupID, accounts)
+		}
+		if err == nil {
 			slog.Debug("account_scheduling_list_snapshot",
 				"group_id", derefGroupID(groupID),
 				"platform", platform,
@@ -955,6 +958,10 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 			}
 			filtered = append(filtered, acc)
 		}
+		filtered, err = filterAccountAllocationCandidates(ctx, s.accountAllocationService, groupID, filtered)
+		if err != nil {
+			return nil, useMixed, err
+		}
 		slog.Debug("account_scheduling_list_mixed",
 			"group_id", derefGroupID(groupID),
 			"platform", platform,
@@ -989,6 +996,10 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 			"group_id", derefGroupID(groupID),
 			"platform", platform,
 			"error", err)
+		return nil, useMixed, err
+	}
+	accounts, err = filterAccountAllocationCandidates(ctx, s.accountAllocationService, groupID, accounts)
+	if err != nil {
 		return nil, useMixed, err
 	}
 	slog.Debug("account_scheduling_list_single",
@@ -1377,10 +1388,26 @@ func (s *GatewayService) checkAndRegisterSession(ctx context.Context, account *A
 }
 
 func (s *GatewayService) getSchedulableAccount(ctx context.Context, accountID int64) (*Account, error) {
+	var (
+		account *Account
+		err     error
+	)
 	if s.schedulerSnapshot != nil {
-		return s.schedulerSnapshot.GetAccount(ctx, accountID)
+		account, err = s.schedulerSnapshot.GetAccount(ctx, accountID)
+	} else {
+		account, err = s.accountRepo.GetByID(ctx, accountID)
 	}
-	return s.accountRepo.GetByID(ctx, accountID)
+	if err != nil || account == nil {
+		return account, err
+	}
+	allowed, err := canUseAllocatedAccount(ctx, s.accountAllocationService, account.ID)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, ErrNoAvailableAccounts
+	}
+	return account, nil
 }
 
 func (s *GatewayService) hydrateSelectedAccount(ctx context.Context, account *Account) (*Account, error) {

@@ -42,6 +42,18 @@ type CityLandState struct {
 	UnitPools          []cityspatial.GeneratedBuildingUnitPool  `json:"unit_pools"`
 	HousingAllocations []cityspatial.GeneratedHousingAllocation `json:"housing_allocations"`
 	Portals            []cityspatial.GeneratedBuildingPortal    `json:"portals"`
+	// BuildingLayouts are a deterministic presentation/navigation projection
+	// derived after immutable baseline verification. They are deliberately not
+	// persisted land-foundation facts and must remain absent from hash-state
+	// loads used by snapshots.
+	BuildingLayouts []cityspatial.GeneratedBuildingLayout `json:"building_layouts,omitempty"`
+	// ParcelLayouts are non-blocking site details derived for the requested
+	// level after building layouts have been produced.
+	ParcelLayouts []cityspatial.GeneratedParcelLayout `json:"parcel_layouts,omitempty"`
+	// Worldgen is a versioned, query-scoped planning projection. It deliberately
+	// sits outside the frozen F7/F8 facts until a later materialization version
+	// chooses to persist a new world baseline.
+	Worldgen *cityspatial.GeneratedWorldgenWindow `json:"worldgen,omitempty"`
 }
 
 type CityLandQueryInput struct {
@@ -670,7 +682,95 @@ func (s *CityEconomyService) GetLandState(
 			return nil, adjustmentErr
 		}
 	}
-	return filterCityLandState(full, input), nil
+	filtered := filterCityLandState(full, input)
+	if err = attachCityLandPresentationLayouts(filtered, full.Portals, input.Z); err != nil {
+		return nil, err
+	}
+	if err = attachCityLandWorldgen(filtered, version, seed, profile, input); err != nil {
+		return nil, err
+	}
+	return filtered, nil
+}
+
+func attachCityLandWorldgen(
+	state *CityLandState,
+	simulationVersion string,
+	seed int64,
+	spatialProfile *CitySpatialProfile,
+	query CityLandQueryInput,
+) error {
+	if state == nil || spatialProfile == nil {
+		return ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "worldgen_state"})
+	}
+	profile, err := cityspatial.DefaultWorldgenProfile()
+	if err != nil {
+		return ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "worldgen_profile"}).WithCause(err)
+	}
+	binding, err := cityspatial.DefaultWorldgenBinding(
+		simulationVersion, seed, state.Profile.SpatialOvermapRootHash, profile,
+	)
+	if err != nil {
+		return ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "worldgen_binding"}).WithCause(err)
+	}
+	plan, err := cityspatial.GenerateWorldgenPlan(binding, profile, cityspatial.WorldgenBounds{
+		MinimumChunkX: spatialProfile.MinimumChunkX, MaximumChunkX: spatialProfile.MaximumChunkX,
+		MinimumChunkY: spatialProfile.MinimumChunkY, MaximumChunkY: spatialProfile.MaximumChunkY,
+		Z: cityspatial.SurfaceZ,
+	})
+	if err != nil {
+		return ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "worldgen_generation"}).WithCause(err)
+	}
+	window, err := cityspatial.FilterWorldgenPlan(plan, cityspatial.WorldgenBounds{
+		MinimumChunkX: query.MinimumX, MaximumChunkX: query.MaximumX,
+		MinimumChunkY: query.MinimumY, MaximumChunkY: query.MaximumY, Z: query.Z,
+	})
+	if err != nil {
+		return ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "worldgen_window"}).WithCause(err)
+	}
+	state.Worldgen = window
+	return nil
+}
+
+func attachCityLandPresentationLayouts(
+	state *CityLandState,
+	portals []cityspatial.GeneratedBuildingPortal,
+	z int32,
+) error {
+	if state == nil {
+		return ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "land_layout_state"})
+	}
+	layouts, err := cityspatial.GenerateBuildingLayouts(state.Buildings, portals)
+	if err != nil {
+		return ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "land_layout_generation"}).WithCause(err)
+	}
+	state.BuildingLayouts = make([]cityspatial.GeneratedBuildingLayout, 0, len(layouts))
+	for _, layout := range layouts {
+		layout.Cells = layoutsCellsForLevel(layout, z)
+		if len(layout.Cells) > 0 {
+			state.BuildingLayouts = append(state.BuildingLayouts, layout)
+		}
+	}
+	parcelLayouts, err := cityspatial.GenerateParcelLayouts(
+		state.Parcels, state.Buildings, state.BuildingLayouts, portals, z,
+	)
+	if err != nil {
+		return ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "parcel_layout_generation"}).WithCause(err)
+	}
+	state.ParcelLayouts = parcelLayouts
+	return nil
+}
+
+func layoutsCellsForLevel(
+	layout cityspatial.GeneratedBuildingLayout,
+	z int32,
+) []cityspatial.GeneratedBuildingLayoutCell {
+	result := make([]cityspatial.GeneratedBuildingLayoutCell, 0)
+	for _, cell := range layout.Cells {
+		if cell.Z == z {
+			result = append(result, cell)
+		}
+	}
+	return result
 }
 
 func loadAllCityBuildingAdjustments(
@@ -812,6 +912,8 @@ func filterCityLandState(full *CityLandState, input CityLandQueryInput) *CityLan
 		UnitPools:          make([]cityspatial.GeneratedBuildingUnitPool, 0),
 		HousingAllocations: make([]cityspatial.GeneratedHousingAllocation, 0),
 		Portals:            make([]cityspatial.GeneratedBuildingPortal, 0),
+		BuildingLayouts:    make([]cityspatial.GeneratedBuildingLayout, 0),
+		ParcelLayouts:      make([]cityspatial.GeneratedParcelLayout, 0),
 	}
 	selectedBuildings := make(map[string]struct{})
 	selectedParcels := make(map[string]struct{})
@@ -853,6 +955,48 @@ func filterCityLandState(full *CityLandState, input CityLandQueryInput) *CityLan
 			result.Portals = append(result.Portals, portal)
 		}
 	}
+	for _, layout := range full.BuildingLayouts {
+		if _, ok := selectedBuildings[layout.BuildingCode]; !ok {
+			continue
+		}
+		filtered := cityspatial.GeneratedBuildingLayout{
+			BuildingCode:  layout.BuildingCode,
+			LayoutVersion: layout.LayoutVersion,
+			Archetype:     layout.Archetype,
+			Cells:         make([]cityspatial.GeneratedBuildingLayoutCell, 0),
+		}
+		for _, cell := range layout.Cells {
+			if cell.Z == input.Z {
+				filtered.Cells = append(filtered.Cells, cell)
+			}
+		}
+		if len(filtered.Cells) > 0 {
+			result.BuildingLayouts = append(result.BuildingLayouts, filtered)
+		}
+	}
+	for _, layout := range full.ParcelLayouts {
+		if _, ok := selectedParcels[layout.ParcelCode]; !ok {
+			continue
+		}
+		filtered := cityspatial.GeneratedParcelLayout{
+			ParcelCode: layout.ParcelCode, LayoutVersion: layout.LayoutVersion,
+			Style: layout.Style, Cells: make([]cityspatial.GeneratedParcelLayoutCell, 0),
+		}
+		for _, cell := range layout.Cells {
+			if cell.Z == input.Z {
+				filtered.Cells = append(filtered.Cells, cell)
+			}
+		}
+		if len(filtered.Cells) > 0 {
+			result.ParcelLayouts = append(result.ParcelLayouts, filtered)
+		}
+	}
 	sort.Slice(result.Parcels, func(i, j int) bool { return result.Parcels[i].Code < result.Parcels[j].Code })
+	sort.Slice(result.BuildingLayouts, func(i, j int) bool {
+		return result.BuildingLayouts[i].BuildingCode < result.BuildingLayouts[j].BuildingCode
+	})
+	sort.Slice(result.ParcelLayouts, func(i, j int) bool {
+		return result.ParcelLayouts[i].ParcelCode < result.ParcelLayouts[j].ParcelCode
+	})
 	return result
 }

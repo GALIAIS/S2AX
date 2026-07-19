@@ -16,9 +16,16 @@ import (
 )
 
 const (
-	CityCommandTypeActorCreate          = "actor.create"
-	CityCommandTypeActorActivityPerform = "actor.activity.perform"
-	CityCommandTypeActorRoleTransition  = "actor.role.transition"
+	CityCommandTypeActorCreate                 = "actor.create"
+	CityCommandTypeActorActivityPerform        = "actor.activity.perform"
+	CityCommandTypeActorRoleTransition         = "actor.role.transition"
+	CityCommandTypeActorLocationMove           = "actor.location.move"
+	CityCommandTypeActorControlGrant           = "actor.control.grant"
+	CityCommandTypeActorControlRevoke          = "actor.control.revoke"
+	CityCommandTypePortalStateTransition       = "portal.state.transition"
+	CityCommandTypePortalAccessConfigure       = "portal.access.configure"
+	CityCommandTypeActorNavigationIntentSet    = "actor.navigation.intent.set"
+	CityCommandTypeActorNavigationIntentCancel = "actor.navigation.intent.cancel"
 
 	WorldRuntimeDefinitionActorType = "actor_type"
 	WorldRuntimeDefinitionArchetype = "archetype"
@@ -28,23 +35,46 @@ const (
 	WorldRuntimeDefinitionStatus    = "status"
 	WorldRuntimeDefinitionRule      = "rule"
 
-	WorldRuntimeFactActorCreated      = "actor.created"
-	WorldRuntimeFactActivityPerformed = "actor.activity.performed"
-	WorldRuntimeFactRoleTransitioned  = "actor.role.transitioned"
-	WorldRuntimeFactStatusExpired     = "actor.status.expired"
-	WorldRuntimeFactRuleConsequent    = "rule.consequence.applied"
+	WorldRuntimeFactActorCreated               = "actor.created"
+	WorldRuntimeFactActivityPerformed          = "actor.activity.performed"
+	WorldRuntimeFactRoleTransitioned           = "actor.role.transitioned"
+	WorldRuntimeFactStatusExpired              = "actor.status.expired"
+	WorldRuntimeFactRuleConsequent             = "rule.consequence.applied"
+	WorldRuntimeFactLocationMoved              = "actor.location.moved"
+	WorldRuntimeFactControlGranted             = "actor.control.granted"
+	WorldRuntimeFactControlRevoked             = "actor.control.revoked"
+	WorldRuntimeFactPortalStateChanged         = "portal.state.changed"
+	WorldRuntimeFactPortalAccessChanged        = "portal.access.changed"
+	WorldRuntimeFactNavigationIntentCreated    = "actor.navigation.intent.created"
+	WorldRuntimeFactNavigationIntentReplaced   = "actor.navigation.intent.replaced"
+	WorldRuntimeFactNavigationIntentCancelled  = "actor.navigation.intent.cancelled"
+	WorldRuntimeFactNavigationIntentWaited     = "actor.navigation.intent.waited"
+	WorldRuntimeFactNavigationIntentBlocked    = "actor.navigation.intent.blocked"
+	WorldRuntimeFactNavigationIntentProgressed = "actor.navigation.intent.progressed"
+	WorldRuntimeFactNavigationIntentArrived    = "actor.navigation.intent.arrived"
+	WorldRuntimeFactNavigationIntentFailed     = "actor.navigation.intent.failed"
 
-	WorldRuntimeEffectAttributeSet  = "attribute.set"
-	WorldRuntimeEffectAttributeAdd  = "attribute.add"
-	WorldRuntimeEffectExperienceAdd = "experience.add"
-	WorldRuntimeEffectRoleGrant     = "role.grant"
-	WorldRuntimeEffectRoleRevoke    = "role.revoke"
-	WorldRuntimeEffectStatusGrant   = "status.grant"
-	WorldRuntimeEffectStatusRevoke  = "status.revoke"
-	WorldRuntimeEffectStatusExpire  = "status.expire"
+	WorldRuntimeEffectAttributeSet        = "attribute.set"
+	WorldRuntimeEffectAttributeAdd        = "attribute.add"
+	WorldRuntimeEffectExperienceAdd       = "experience.add"
+	WorldRuntimeEffectRoleGrant           = "role.grant"
+	WorldRuntimeEffectRoleRevoke          = "role.revoke"
+	WorldRuntimeEffectStatusGrant         = "status.grant"
+	WorldRuntimeEffectStatusRevoke        = "status.revoke"
+	WorldRuntimeEffectStatusExpire        = "status.expire"
+	WorldRuntimeEffectLocationSet         = "location.set"
+	WorldRuntimeEffectControlGrant        = "capability.grant"
+	WorldRuntimeEffectControlRevoke       = "capability.revoke"
+	WorldRuntimeEffectPortalStateSet      = "portal.state.set"
+	WorldRuntimeEffectPortalAccessSet     = "portal.access.set"
+	WorldRuntimeEffectNavigationIntentSet = "actor.navigation.intent.set"
+
+	WorldActorCapabilityCommand       = "actor.command"
+	WorldActorCapabilityManageControl = "actor.control.manage"
 
 	worldRuntimeID                     = "sub2api-open-world-runtime"
 	worldRuntimeVersion                = "1.0.0"
+	worldRuntimeSpatialControlVersion  = "1.1.0"
 	worldRuntimeCatalogVersion         = "1.0.0"
 	worldRuntimeExecutorVersion        = "1.0.0"
 	worldRuntimeMaximumEffects         = 64
@@ -91,17 +121,116 @@ type WorldRuntimeDefinition struct {
 }
 
 type WorldActor struct {
-	Code             string          `json:"code"`
-	OwnerUserID      *int64          `json:"owner_user_id,omitempty"`
-	ActorTypeCode    string          `json:"actor_type_code"`
-	Name             string          `json:"name"`
-	Status           string          `json:"status"`
-	ArchetypeCode    *string         `json:"archetype_code,omitempty"`
-	ArchetypeVersion *string         `json:"archetype_version,omitempty"`
-	CreatedTick      int64           `json:"created_tick"`
-	UpdatedTick      int64           `json:"updated_tick"`
-	Version          int64           `json:"version"`
-	Metadata         json.RawMessage `json:"metadata"`
+	Code             string              `json:"code"`
+	OwnerUserID      *int64              `json:"owner_user_id,omitempty"`
+	ActorTypeCode    string              `json:"actor_type_code"`
+	Name             string              `json:"name"`
+	Status           string              `json:"status"`
+	ArchetypeCode    *string             `json:"archetype_code,omitempty"`
+	ArchetypeVersion *string             `json:"archetype_version,omitempty"`
+	CreatedTick      int64               `json:"created_tick"`
+	UpdatedTick      int64               `json:"updated_tick"`
+	Version          int64               `json:"version"`
+	Metadata         json.RawMessage     `json:"metadata"`
+	Location         *WorldActorLocation `json:"location,omitempty"`
+}
+
+type WorldActorLocation struct {
+	ActorCode        string               `json:"actor_code"`
+	SpaceKind        string               `json:"space_kind"`
+	SpaceCode        string               `json:"space_code"`
+	X                int64                `json:"x"`
+	Y                int64                `json:"y"`
+	Z                int32                `json:"z"`
+	ChunkX           int64                `json:"chunk_x"`
+	ChunkY           int64                `json:"chunk_y"`
+	LocalX           int32                `json:"local_x"`
+	LocalY           int32                `json:"local_y"`
+	AnchorKind       *string              `json:"anchor_kind,omitempty"`
+	AnchorCode       *string              `json:"anchor_code,omitempty"`
+	JurisdictionCode string               `json:"jurisdiction_code"`
+	MovedTick        int64                `json:"moved_tick"`
+	SourceFact       *WorldRuntimeFactRef `json:"source_fact,omitempty"`
+	Version          int64                `json:"version"`
+	Metadata         json.RawMessage      `json:"metadata"`
+}
+
+type WorldActorControlGrant struct {
+	Code             string               `json:"code"`
+	ActorCode        string               `json:"actor_code"`
+	UserID           int64                `json:"user_id"`
+	Capability       string               `json:"capability"`
+	Status           string               `json:"status"`
+	GrantedByUserID  int64                `json:"granted_by_user_id"`
+	GrantedTick      int64                `json:"granted_tick"`
+	RevokedTick      *int64               `json:"revoked_tick,omitempty"`
+	GrantSourceFact  *WorldRuntimeFactRef `json:"grant_source_fact,omitempty"`
+	RevokeSourceFact *WorldRuntimeFactRef `json:"revoke_source_fact,omitempty"`
+	Version          int64                `json:"version"`
+	Metadata         json.RawMessage      `json:"metadata"`
+}
+
+type WorldPortalState struct {
+	BuildingCode      string               `json:"building_code"`
+	PortalCode        string               `json:"portal_code"`
+	PortalType        string               `json:"portal_type"`
+	StateCode         string               `json:"state_code"`
+	AccessRequirement WorldRequirementNode `json:"access_requirement"`
+	AccessPolicyHash  string               `json:"access_policy_hash"`
+	ChangedTick       int64                `json:"changed_tick"`
+	SourceFact        *WorldRuntimeFactRef `json:"source_fact,omitempty"`
+	Version           int64                `json:"version"`
+	Metadata          json.RawMessage      `json:"metadata"`
+}
+
+type WorldNavigationProfile struct {
+	ProfileVersion         string          `json:"profile_version"`
+	BaselineTick           int64           `json:"baseline_tick"`
+	MaximumIntentsPerTick  int             `json:"maximum_intents_per_tick"`
+	DefaultBudgetGainUnits int64           `json:"default_budget_gain_units"`
+	DefaultBudgetCapUnits  int64           `json:"default_budget_cap_units"`
+	DefaultMaxSteps        int             `json:"default_max_steps"`
+	MaximumBlockedAttempts int             `json:"maximum_blocked_attempts"`
+	MaximumRetryDelayTicks int64           `json:"maximum_retry_delay_ticks"`
+	FairnessAgingCap       int64           `json:"fairness_aging_cap"`
+	Revision               int64           `json:"revision"`
+	Metadata               json.RawMessage `json:"metadata"`
+}
+
+type WorldActorNavigationIntent struct {
+	ActorCode       string                   `json:"actor_code"`
+	IntentCode      string                   `json:"intent_code"`
+	Destination     CityNavigationCoordinate `json:"destination"`
+	Status          string                   `json:"status"`
+	OnBlocked       string                   `json:"on_blocked"`
+	Priority        int                      `json:"priority"`
+	MaxSteps        int                      `json:"max_steps"`
+	BudgetUnits     int64                    `json:"budget_units"`
+	BudgetGainUnits int64                    `json:"budget_gain_units"`
+	BudgetCapUnits  int64                    `json:"budget_cap_units"`
+	BlockedAttempts int                      `json:"blocked_attempts"`
+	LastReason      *string                  `json:"last_reason,omitempty"`
+	NextAttemptTick int64                    `json:"next_attempt_tick"`
+	CreatedTick     int64                    `json:"created_tick"`
+	UpdatedTick     int64                    `json:"updated_tick"`
+	SourceFact      WorldRuntimeFactRef      `json:"source_fact"`
+	Version         int64                    `json:"version"`
+	Metadata        json.RawMessage          `json:"metadata"`
+}
+
+type WorldNavigationReservation struct {
+	Tick       int64                    `json:"tick"`
+	Sequence   int64                    `json:"sequence"`
+	ActorCode  string                   `json:"actor_code"`
+	IntentCode string                   `json:"intent_code"`
+	From       CityNavigationCoordinate `json:"from"`
+	To         CityNavigationCoordinate `json:"to"`
+	TargetKey  string                   `json:"target_key"`
+	EdgeKey    string                   `json:"edge_key"`
+	StepCost   int64                    `json:"step_cost"`
+	SourceFact WorldRuntimeFactRef      `json:"source_fact"`
+	Status     string                   `json:"status"`
+	Metadata   json.RawMessage          `json:"metadata"`
 }
 
 type WorldActorAttribute struct {
@@ -198,25 +327,34 @@ type WorldRuleCase struct {
 }
 
 type WorldRuntimeState struct {
-	Profile     WorldRuntimeProfile      `json:"profile"`
-	Definitions []WorldRuntimeDefinition `json:"definitions"`
-	Actors      []WorldActor             `json:"actors"`
-	Attributes  []WorldActorAttribute    `json:"attributes"`
-	Roles       []WorldActorRole         `json:"roles"`
-	Statuses    []WorldActorStatus       `json:"statuses"`
-	Facts       []WorldRuntimeFact       `json:"facts"`
-	Effects     []WorldEffectOperation   `json:"effects"`
-	RuleCases   []WorldRuleCase          `json:"rule_cases"`
+	Profile           WorldRuntimeProfile           `json:"profile"`
+	Definitions       []WorldRuntimeDefinition      `json:"definitions"`
+	Actors            []WorldActor                  `json:"actors"`
+	Attributes        []WorldActorAttribute         `json:"attributes"`
+	Roles             []WorldActorRole              `json:"roles"`
+	Statuses          []WorldActorStatus            `json:"statuses"`
+	Facts             []WorldRuntimeFact            `json:"facts"`
+	Effects           []WorldEffectOperation        `json:"effects"`
+	RuleCases         []WorldRuleCase               `json:"rule_cases"`
+	Locations         *[]WorldActorLocation         `json:"locations,omitempty"`
+	ControlGrants     *[]WorldActorControlGrant     `json:"control_grants,omitempty"`
+	PortalStates      *[]WorldPortalState           `json:"portal_states,omitempty"`
+	NavigationProfile *WorldNavigationProfile       `json:"navigation_profile,omitempty"`
+	NavigationIntents *[]WorldActorNavigationIntent `json:"navigation_intents,omitempty"`
 }
 
 type worldRuntimeHashState = WorldRuntimeState
 
 type WorldActorState struct {
-	Actor       WorldActor            `json:"actor"`
-	Attributes  []WorldActorAttribute `json:"attributes"`
-	Roles       []WorldActorRole      `json:"roles"`
-	Statuses    []WorldActorStatus    `json:"statuses"`
-	RecentFacts []WorldRuntimeFact    `json:"recent_facts"`
+	Actor            WorldActor                  `json:"actor"`
+	Attributes       []WorldActorAttribute       `json:"attributes"`
+	Roles            []WorldActorRole            `json:"roles"`
+	Statuses         []WorldActorStatus          `json:"statuses"`
+	RecentFacts      []WorldRuntimeFact          `json:"recent_facts"`
+	Location         *WorldActorLocation         `json:"location,omitempty"`
+	ControlGrants    []WorldActorControlGrant    `json:"control_grants"`
+	Capabilities     []string                    `json:"capabilities"`
+	NavigationIntent *WorldActorNavigationIntent `json:"navigation_intent,omitempty"`
 }
 
 type worldRuntimeAttributeDefinition struct {
@@ -298,7 +436,30 @@ type worldRuntimeDefinitionSeed struct {
 func isWorldRuntimeCommand(commandType string) bool {
 	switch commandType {
 	case CityCommandTypeActorCreate, CityCommandTypeActorActivityPerform,
-		CityCommandTypeActorRoleTransition:
+		CityCommandTypeActorRoleTransition, CityCommandTypeActorLocationMove,
+		CityCommandTypeActorControlGrant, CityCommandTypeActorControlRevoke,
+		CityCommandTypePortalStateTransition, CityCommandTypePortalAccessConfigure,
+		CityCommandTypeActorNavigationIntentSet, CityCommandTypeActorNavigationIntentCancel:
+		return true
+	default:
+		return false
+	}
+}
+
+func isWorldPortalAccessCommand(commandType string) bool {
+	return commandType == CityCommandTypePortalStateTransition ||
+		commandType == CityCommandTypePortalAccessConfigure
+}
+
+func isWorldNavigationIntentCommand(commandType string) bool {
+	return commandType == CityCommandTypeActorNavigationIntentSet ||
+		commandType == CityCommandTypeActorNavigationIntentCancel
+}
+
+func isWorldActorSpatialControlCommand(commandType string) bool {
+	switch commandType {
+	case CityCommandTypeActorLocationMove, CityCommandTypeActorControlGrant,
+		CityCommandTypeActorControlRevoke:
 		return true
 	default:
 		return false
@@ -318,6 +479,46 @@ type worldActorActivityPayload struct {
 type worldActorRoleTransitionPayload struct {
 	ActorCode string `json:"actor_code"`
 	RoleCode  string `json:"role_code"`
+}
+
+type worldActorLocationMovePayload struct {
+	ActorCode  string `json:"actor_code"`
+	X          int64  `json:"x"`
+	Y          int64  `json:"y"`
+	Z          int32  `json:"z"`
+	AnchorKind string `json:"anchor_kind,omitempty"`
+	AnchorCode string `json:"anchor_code,omitempty"`
+}
+
+type worldActorControlPayload struct {
+	ActorCode    string   `json:"actor_code"`
+	UserID       int64    `json:"user_id"`
+	Capabilities []string `json:"capabilities"`
+}
+
+type worldPortalStateTransitionPayload struct {
+	ActorCode    string `json:"actor_code"`
+	BuildingCode string `json:"building_code"`
+	PortalCode   string `json:"portal_code"`
+	Action       string `json:"action"`
+}
+
+type worldPortalAccessConfigurePayload struct {
+	BuildingCode string               `json:"building_code"`
+	PortalCode   string               `json:"portal_code"`
+	Requirements WorldRequirementNode `json:"requirements"`
+}
+
+type worldNavigationIntentSetPayload struct {
+	ActorCode   string                   `json:"actor_code"`
+	Destination CityNavigationCoordinate `json:"destination"`
+	Priority    int                      `json:"priority"`
+	MaxSteps    int                      `json:"max_steps"`
+	OnBlocked   string                   `json:"on_blocked"`
+}
+
+type worldNavigationIntentCancelPayload struct {
+	ActorCode string `json:"actor_code"`
 }
 
 func normalizeWorldRuntimeCommand(commandType string, rawPayload json.RawMessage) (any, bool, error) {
@@ -363,6 +564,118 @@ func normalizeWorldRuntimeCommand(commandType string, rawPayload json.RawMessage
 			return nil, true, err
 		}
 		if err := normalizeCode(&value.RoleCode); err != nil {
+			return nil, true, err
+		}
+		return value, true, nil
+	case CityCommandTypeActorLocationMove:
+		var value worldActorLocationMovePayload
+		if err := decodeStrictCityObject(rawPayload, &value); err != nil {
+			return nil, true, ErrCityInvalidInput.WithCause(err)
+		}
+		if err := normalizeCode(&value.ActorCode); err != nil {
+			return nil, true, err
+		}
+		value.AnchorKind = strings.ToLower(strings.TrimSpace(value.AnchorKind))
+		value.AnchorCode = strings.ToLower(strings.TrimSpace(value.AnchorCode))
+		if (value.AnchorKind == "") != (value.AnchorCode == "") {
+			return nil, true, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "anchor"})
+		}
+		if value.AnchorKind != "" {
+			if value.AnchorKind != "chunk" && value.AnchorKind != "building" && value.AnchorKind != "site" {
+				return nil, true, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "anchor_kind"})
+			}
+			if !worldRuntimeCodeValid(value.AnchorCode, 192) {
+				return nil, true, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "anchor_code"})
+			}
+		}
+		return value, true, nil
+	case CityCommandTypeActorControlGrant, CityCommandTypeActorControlRevoke:
+		var value worldActorControlPayload
+		if err := decodeStrictCityObject(rawPayload, &value); err != nil {
+			return nil, true, ErrCityInvalidInput.WithCause(err)
+		}
+		if err := normalizeCode(&value.ActorCode); err != nil {
+			return nil, true, err
+		}
+		if value.UserID <= 0 || len(value.Capabilities) == 0 || len(value.Capabilities) > 2 {
+			return nil, true, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "capabilities"})
+		}
+		seen := make(map[string]struct{}, len(value.Capabilities))
+		for index := range value.Capabilities {
+			value.Capabilities[index] = strings.ToLower(strings.TrimSpace(value.Capabilities[index]))
+			if value.Capabilities[index] != WorldActorCapabilityCommand &&
+				value.Capabilities[index] != WorldActorCapabilityManageControl {
+				return nil, true, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "capabilities"})
+			}
+			if _, duplicate := seen[value.Capabilities[index]]; duplicate {
+				return nil, true, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "capabilities"})
+			}
+			seen[value.Capabilities[index]] = struct{}{}
+		}
+		sort.Strings(value.Capabilities)
+		return value, true, nil
+	case CityCommandTypePortalStateTransition:
+		var value worldPortalStateTransitionPayload
+		if err := decodeStrictCityObject(rawPayload, &value); err != nil {
+			return nil, true, ErrCityInvalidInput.WithCause(err)
+		}
+		for _, code := range []*string{&value.ActorCode, &value.BuildingCode, &value.PortalCode} {
+			if err := normalizeCode(code); err != nil {
+				return nil, true, err
+			}
+		}
+		value.Action = strings.ToLower(strings.TrimSpace(value.Action))
+		if value.Action != WorldPortalActionOpen && value.Action != WorldPortalActionClose &&
+			value.Action != WorldPortalActionLock && value.Action != WorldPortalActionUnlock {
+			return nil, true, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "action"})
+		}
+		return value, true, nil
+	case CityCommandTypePortalAccessConfigure:
+		var value worldPortalAccessConfigurePayload
+		if err := decodeStrictCityObject(rawPayload, &value); err != nil {
+			return nil, true, ErrCityInvalidInput.WithCause(err)
+		}
+		for _, code := range []*string{&value.BuildingCode, &value.PortalCode} {
+			if err := normalizeCode(code); err != nil {
+				return nil, true, err
+			}
+		}
+		normalizeWorldRequirementNode(&value.Requirements)
+		if err := validateWorldRequirement(value.Requirements); err != nil {
+			return nil, true, ErrCityInvalidInput.WithCause(err).WithMetadata(map[string]string{"field": "requirements"})
+		}
+		return value, true, nil
+	case CityCommandTypeActorNavigationIntentSet:
+		var value worldNavigationIntentSetPayload
+		if err := decodeStrictCityObject(rawPayload, &value); err != nil {
+			return nil, true, ErrCityInvalidInput.WithCause(err)
+		}
+		if err := normalizeCode(&value.ActorCode); err != nil {
+			return nil, true, err
+		}
+		if value.Priority < -10 || value.Priority > 10 {
+			return nil, true, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "priority"})
+		}
+		if value.MaxSteps == 0 {
+			value.MaxSteps = 256
+		}
+		if value.MaxSteps < 1 || value.MaxSteps > 1024 {
+			return nil, true, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "max_steps"})
+		}
+		value.OnBlocked = strings.ToLower(strings.TrimSpace(value.OnBlocked))
+		if value.OnBlocked == "" {
+			value.OnBlocked = "retry"
+		}
+		if value.OnBlocked != "retry" && value.OnBlocked != "cancel" {
+			return nil, true, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "on_blocked"})
+		}
+		return value, true, nil
+	case CityCommandTypeActorNavigationIntentCancel:
+		var value worldNavigationIntentCancelPayload
+		if err := decodeStrictCityObject(rawPayload, &value); err != nil {
+			return nil, true, ErrCityInvalidInput.WithCause(err)
+		}
+		if err := normalizeCode(&value.ActorCode); err != nil {
 			return nil, true, err
 		}
 		return value, true, nil
@@ -629,6 +942,15 @@ func validateWorldRuntimeDefinition(definition WorldRuntimeDefinition) error {
 		if !worldRuntimeCodeValid(value.CategoryCode, 128) || !worldRuntimeCodeValid(value.ScopeKind, 64) ||
 			!worldRuntimeCodeValid(value.ScopeCode, 160) || !worldRuntimeCodesUnique(value.Triggers, 128) ||
 			len(value.Tiers) == 0 || len(value.Tiers) > 16 || value.OccurrenceWindowTicks < 1 {
+			return errWorldRuntimeInvalidDefinition
+		}
+		switch value.ScopeKind {
+		case "world":
+			if value.ScopeCode != "world" {
+				return errWorldRuntimeInvalidDefinition
+			}
+		case "jurisdiction", "organization", "location":
+		default:
 			return errWorldRuntimeInvalidDefinition
 		}
 		if err := validateWorldRequirement(value.Requirements); err != nil {

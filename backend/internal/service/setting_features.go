@@ -77,6 +77,17 @@ func (s *SettingService) IsAffiliateEnabled(ctx context.Context) bool {
 	return value == "true"
 }
 
+// IsCitySimulationEnabled reports whether the optional city simulation is
+// available. This is deliberately fail-closed so an unavailable settings store
+// cannot expose an unfinished gameplay surface.
+func (s *SettingService) IsCitySimulationEnabled(ctx context.Context) bool {
+	if s == nil || s.settingRepo == nil {
+		return false
+	}
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyCitySimulationEnabled)
+	return err == nil && value == "true"
+}
+
 // IsAffiliateAdminRechargeEnabled reports whether admin balance
 // deposits should participate in the affiliate rebate program.
 func (s *SettingService) IsAffiliateAdminRechargeEnabled(ctx context.Context) bool {

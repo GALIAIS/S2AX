@@ -102,6 +102,8 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 
 		RiskControlEnabled: settings.RiskControlEnabled,
 
+		CitySimulationEnabled: settings.CitySimulationEnabled,
+
 		AllowUserViewErrorRequests: settings.AllowUserViewErrorRequests,
 	})
 }

@@ -1,12 +1,14 @@
 # 城市模拟 F5 后续基础层路线与详细设计
 
-版本：v1.7（2026-07-18）  
-当前版本：`city-f7-v5`（F7.6 开放世界角色、成长、身份、规则处罚与恢复核心闭环已完成）  
+版本：v2.4（2026-07-19）
+当前版本：`city-f8-v3`（F8.0 服务结算、F8.1 设施生命周期、F8.2 物理网络、回放恢复与操作工作台已完成）
 主线：先建设真实城市本体，再评审利率、银行信贷和股票等可选经济分支
+
+> 本文保留 F5 后实施切片的详细历史。总体架构、worldgen-v2、F8.3/F8.4 与后续顺序以《城市模拟游戏总体设计》v1.0 为准。
 
 ## 1. 总体决策
 
-F0–F5 已建立世界、确定性 tick、城市复式总账、实物守恒、基础市场以及快照/重放/恢复；F6.1–F6.3 已补齐日历、人口自然变化、人口迁移和独立家庭数量闭环；F7.0–F7.2 已完成空间规则、Overmap/Chunk 与真实 CLASSIC 字符视口，F7.3 已完成地块/建筑事实底座，F7.4 已完成开发审批、施工、资源结算和动态建筑调整，F7.5 已把企业落到真实经营场所。F7.6 已完成开放世界 Actor、版本化属性、身份、Requirement、Rule、Case、Fact、Effect、处罚到期和恢复核心闭环；下一切片补 Actor 位置与控制权委托，再让公共设施、交通、任务或经济分支复用同一底层协议。
+F0–F5 已建立世界、确定性 tick、城市复式总账、实物守恒、基础市场以及快照/重放/恢复；F6.1–F6.3 已补齐日历、人口自然变化、人口迁移和独立家庭数量闭环；F7.0–F7.11 已完成真实空间、地块建筑、开发施工、企业经营场所、开放世界 Actor、空间控制、成员调度、静态通行、动态 Portal 和持续移动意图。F8.0 已完成版本化公共服务目录、真实建筑设施、容量、主体需求、连接、整数损耗、确定性分配、不可变结算、规范哈希、回放恢复、查询 API 和前端工作台；F8.1 又补齐设施投运、维护/维修/退役、人员、磨损故障、材料、总账与预算守恒；F8.2 已完成通用物理网络、容量路由、逐段损耗、流量守恒、隔离故障、诊断查询和拓扑工作台。当前按要求停止，不提前进入 F8.3。
 
 后续功能必须遵守以下顺序：
 
@@ -228,25 +230,38 @@ F6.3 已完成以下底层闭环：
 3. F7.2 CLASSIC 字符视口、Chunk 缓存、检查器和文本导出（已完成）。
 4. F7.3 地块、分区、住宅/商业/工业建筑、单位池和住房占用迁移（已完成）。
 5. F7.4 开发项目、审批、资源结算、施工、完工和动态建筑调整（已完成）。
-6. F7.5 商业/工业建筑占用、企业经营场所和原子迁址（实施中）。
+6. F7.5 商业/工业建筑占用、企业经营场所和原子迁址（已完成）。
+7. F7.6–F7.8 开放世界 Actor、空间控制、成员、可信调度和命令回执（已完成）。
+8. F7.9 静态通行、Actor 占用、移动重校验和确定性路径查询（已完成）。
+9. F7.10 动态 Door/Portal、声明式访问授权和导航双重阻断（已完成）。
+10. F7.11 NPC movement intent、行动预算、确定性重规划和拥堵预留（已完成）。
 
 ## 5. F8：公共设施与城市服务
 
-### 5.1 子系统
+### 5.1 F8.0 通用服务协议（已完成）
+
+- 版本化服务与设施类型目录。
+- 绑定真实建筑的设施及逐服务容量。
+- 绑定 district/building/household/enterprise/actor 的需求。
+- 连接容量、千分损耗、优先级和确定性竞争分配。
+- 不可变 allocation/settlement fact、canonical、snapshot、replay、recovery。
+- 稳定游标查询 API 与无整页刷新的操作工作台。
+
+### 5.2 领域子系统
 
 - 电力：发电/外购、变电容量、区域需求、停电和储备率。
 - 供水：水源、处理、管网容量、需求和漏损。
 - 污水/垃圾：处理能力、收集覆盖和环境外部性。
 - 教育、医疗、消防、治安：设施容量、服务半径、人员和预算。
 
-### 5.2 数据与事实
+### 5.3 数据与事实
 
 - 设施定义和区域服务连接。
 - 每周期 service demand、allocation、shortage settlement。
 - 建设、维护、故障和修复 operation。
 - 服务质量是供给/需求、可达性和可靠性的派生投影。
 
-### 5.3 不变量
+### 5.4 不变量
 
 - 分配量不超过设施可用容量和网络输送容量。
 - 能源、水、材料和维护资金均由 F2/F3 事实提供。
@@ -344,8 +359,8 @@ F11 完成后，F6.2 的迁移评分从简化参数切换到真实城市反馈�
 
 ### 10.3 自动调度
 
-- 到期世界使用租约领取，同世界仍由 advisory lock 保证单写入者。
-- 重试使用指数退避并区分业务暂停、可重试基础设施错误和确定性不变量失败。
+- F7.8 已实现到期世界的数据库持久 lease、崩溃接管、指数退避和应用生命周期清理；同世界仍由 advisory lock 保证单写入者。
+- F13 在此基础上继续细分可重试基础设施错误、确定性不变量错误和人工暂停，并增加管理员健康视图。
 - 追赶有单次 tick 上限和时间预算，不能让一个世界饿死其他世界。
 - 失败世界保留最后可信 tick，不跳过失败 tick。
 
@@ -415,7 +430,7 @@ F11 完成后，F6.2 的迁移评分从简化参数切换到真实城市反馈�
 
 ### 第三批：F7–F9（进行中）
 
-F7.0 坐标与规则集、F7.1 Overmap/Chunk 真实状态、F7.2 只读字符视口与检查器、F7.3 地块/建筑、F7.4 开发施工、F7.5 企业经营场所以及 F7.6 开放世界运行时核心均已完成。下一步先给 Actor 增加版本化位置与控制 grant，再进入公共设施和交通；企业、设施、交通和角色起讫点都依赖真实空间身份，不能倒序。
+F7.0 坐标与规则集至 F7.11 movement intent/行动预算/拥堵预留，以及 F8.0 通用公共服务、F8.1 设施生命周期和 F8.2 通用物理网络均已完成。当前停止；后续恢复时依次实施 F8.3 社会服务可达性、F8.4 跨域效果，再进入 F9 交通，不能绕开现有空间身份、生命周期、服务与网络事实建立旁路汇总。
 
 ### 第四批：F10–F13
 
@@ -469,4 +484,20 @@ F7.2 已完成 Vue 空间状态、视口 Chunk 缓存、glyph atlas renderer、�
 
 F7.5 已发布 `city-f7-v4`：firm state 已落到商业/工业 unit pool，并完成有效占用、场所事实、库存守恒迁移、规范哈希、快照、重放、恢复和 CLASSIC 叠层。
 
-**F7.6 开放世界模拟运行时底座已发布 `city-f7-v5`**：版本化定义目录、通用 Actor、属性、Role、Status、Requirement、Rule、Case、Fact 与 Effect 协议已经落地；角色创建、属性成长、职业转换、规则处罚、状态到期、稳定案件分页、规范哈希、重放恢复和角色工作台形成首批纵向闭环。底层没有把 Role 固化成职业、把 Rule 固化成法律或把 Effect 固化成城市处罚。下一切片在新 canonical 版本追加 Actor 位置、控制 grant 和地图 glyph；F8 公共设施及任何金融分支必须消费该协议，不得再建旁路投影。
+**F7.6 开放世界模拟运行时底座已发布 `city-f7-v5`**：版本化定义目录、通用 Actor、属性、Role、Status、Requirement、Rule、Case、Fact 与 Effect 协议已经落地；角色创建、属性成长、职业转换、规则处罚、状态到期、稳定案件分页、规范哈希、重放恢复和角色工作台形成首批纵向闭环。底层没有把 Role 固化成职业、把 Rule 固化成法律或把 Effect 固化成城市处罚。其后续空间切片已由 F7.7 在新 canonical 版本完成；F8 公共设施及任何金融分支必须消费该协议，不得再建旁路投影。
+
+**F7.7 Actor 空间与控制权已发布 `city-f7-v6`**：每个 Actor 拥有权威 XYZ/Chunk/Local 位置、管辖区与可选 Chunk/Building/Site 锚点；八方向相邻移动和 Portal 跨层移动通过 Fact/Effect 封账；`actor.command` 与 `actor.control.manage` 支持委托、撤销和提交/执行双重授权；world、organization、jurisdiction、location scope 已接入规则判定；Location/Grant 已进入 canonical、snapshot、replay、recovery 和 CLASSIC `@`/`&` 可视化。
+
+**F7.8 成员、调度与命令回执已完成**：owner 可按精确邮箱/用户名维护职责成员；成员离开前会检查 active Actor grant；自动调度使用数据库持久 lease、崩溃接管、指数退避、确定性 idempotency key、expected tick 和原 Step advisory lock；paused 世界仅在有 pending command 时推进；命令列表/详情对非 owner 只暴露本人命令；前端提供成员 roster、可搜索委托 Select、局部 mutation 和无整页刷新的终态回执。该运行闭环不改变 `city-f7-v6` canonical 字节；其后的 F7.9 已在新版本完成通行/占用闭环，没有跳到金融行情。
+
+**F7.9 Actor 导航已发布 `city-f7-v7`**：规则集 passability/整数 movement cost、已生成 Chunk、Furniture、Building edge、Entrance、Stair、Actor Occupancy 和对角防切角已进入统一解析器；路径查询在 repeatable-read 只读快照中执行有界确定性 A*，响应携带 world tick 与规则 hash；实际移动在 Tick 事务中重新校验，拒绝不会污染 Actor 位置；前端完成地图目标选择、route overlay、过期响应抑制和逐步执行。动态 Door/Portal 状态、访问 credential 和群体移动预留留给 F7.10，不在本版本伪造。
+
+**F7.10 动态 Portal 与访问控制已发布 `city-f7-v8`**：每个 active Portal 拥有唯一、版本化、Fact-backed 的 open/closed/locked 状态；访问策略复用通用 Requirement 树并绑定 canonical SHA-256；状态动作验证 Actor 控制权、交互距离和当前策略，策略配置仅允许 owner；路径查询与 Tick 内移动统一阻断关闭、上锁和授权失败；Portal state 已进入 canonical、snapshot、replay、recovery，前端已完成 Portal 图谱、访问诊断、状态动作和结构化策略编辑。
+
+**F7.11 持续移动与拥堵底座已发布 `city-f7-v9`**：每个 Actor 最多一个版本化 movement intent；整数预算按 Tick 归集并封顶；due intent 通过 priority、aging、阻塞次数、创建 Tick 和 ActorCode 稳定排序；每步从当前 Terrain、Portal、授权和 Occupancy 重新执行有界 A*；同 Tick Cell/Edge reservation、结构化等待/阻塞/到达/取消/失败 Fact、Location/Intent Effect、canonical、snapshot、replay 和 verified recovery 已闭环。前端读取真实 intent/reservation API，支持地图目标、设置/替换/取消、预算/原因/版本诊断，并通过请求代次抑制过期刷新且不卸载地图。下一切片是 F8 公共设施通用事实协议，而不是直接写某一种设施的不可扩展汇总字段。
+
+**F8.0 通用公共服务底座已发布 `city-f8-v1`**：八类服务和九类设施类型使用版本化目录；设施绑定真实建筑，需求绑定真实城市主体，连接持有容量、损耗和偏好；running Tick 对共享容量执行稳定整数分配并发布不可变 allocation/settlement。设施状态、有效派发容量、事实链、Profile 计数、规范状态、snapshot、replay、verified recovery、稳定游标 API 和 Vue 操作工作台均已闭环。直接创建 F8 与 `F7.11 → F8.0` 显式升级均通过真实 PostgreSQL 测试。下一切片为 F8.1 设施建设、维护、故障、人员、预算和资源守恒，不修改 F8.0 的历史结算语义。
+
+**F8.1 设施生命周期已发布 `city-f8-v2`**：新设施从 `uncommissioned` 出发，投运、维护、维修和退役均经版本化 operation 与不可变 lifecycle fact；人员覆盖、状况、工程和故障共同门控派发容量。工程启动把 F3 基础材料/资本品消耗、F2 journal、政府预算 movement 和生命周期投影绑定到同一 draft fact，数据库同时校验命令来源、资源声明、预算前后值、劳动预留和事实序列。`PRE_SERVICE → SERVICE_SETTLEMENT → POST_SERVICE` 的阶段顺序、规范状态、从 genesis replay、verified recovery、稳定游标 API 与授权查询均已闭环；真实 PostgreSQL 测试覆盖新建、容量、人员、投运、磨损、查询分页、越权、重放、恢复和不可变保护。
+
+**F8.2 通用物理网络已发布 `city-f8-v3`**：网络、节点、边、策略和事实使用版本化复合身份；供给/需求端点绑定真实 F8.0 容量与需求；确定性整数残量图支持有向/双向共享容量、多路径、逐段损耗、稳定成本和 path hash；网络 batch/path/segment 与服务 allocation/settlement 同事务封账。拓扑、流量和投影已进入 canonical、snapshot、genesis replay、verified recovery；数据库拒绝跨服务绑定、超容量分段、错误损耗、非法状态链和历史篡改。授权查询提供目录、稳定游标投影、流量/事实以及连通分量、孤岛、瓶颈、饱和边和只读路由探针；Vue 工作台不卸载旧投影即可筛选、刷新和执行 CAS 操作。真实 PostgreSQL 测试覆盖 F8.1→F8.2 兼容升级、基线结算、诊断、回放与恢复。当前按要求停止，下一恢复点为 F8.3。

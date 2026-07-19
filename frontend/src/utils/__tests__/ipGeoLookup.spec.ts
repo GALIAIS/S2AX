@@ -1,5 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+
+const { lookupIPGeolocation } = vi.hoisted(() => ({ lookupIPGeolocation: vi.fn() }))
+
+vi.mock('@/api/ipGeolocation', () => ({ lookupIPGeolocation }))
+
 import { isPrivateIp, getEntry, formatGeoLabel, fetchOne, fetchBatch } from '../ipGeoLookup'
+
+beforeEach(() => {
+  lookupIPGeolocation.mockReset()
+  lookupIPGeolocation.mockRejectedValue(new Error('local ip2region unavailable'))
+})
 
 describe('isPrivateIp', () => {
   it('identifies private/reserved IPv4 ranges', () => {
@@ -88,6 +98,18 @@ describe('fetchOne', () => {
     expect(entry.detail?.organization).toBe('AS4134 Chinanet')
   })
 
+  it('prefers the authenticated local lookup before the GeoJS compatibility fallback', async () => {
+    lookupIPGeolocation.mockResolvedValue([
+      { ip: '8.8.8.8', status: 'success', country: 'United States', country_code: 'US', region: 'California', city: 'Mountain View' },
+    ])
+
+    await fetchOne('8.8.8.8')
+
+    expect(lookupIPGeolocation).toHaveBeenCalledWith(['8.8.8.8'])
+    expect(global.fetch).not.toHaveBeenCalled()
+    expect(getEntry('8.8.8.8')).toEqual(expect.objectContaining({ status: 'success', label: 'US · California · Mountain View' }))
+  })
+
   it('marks the entry as error when the response has no country_code', async () => {
     (global.fetch as any).mockResolvedValue({
       ok: true,
@@ -110,16 +132,16 @@ describe('fetchOne', () => {
   it('does not re-fetch a cached successful IP unless forced', async () => {
     (global.fetch as any).mockResolvedValue({
       ok: true,
-      json: async () => ({ ip: '8.8.8.8', country_code: 'US', region: 'California', city: 'Mountain View' }),
+      json: async () => ({ ip: '9.9.9.9', country_code: 'US', region: 'California', city: 'Mountain View' }),
     })
 
-    await fetchOne('8.8.8.8')
+    await fetchOne('9.9.9.9')
     expect(global.fetch).toHaveBeenCalledTimes(1)
 
-    await fetchOne('8.8.8.8')
+    await fetchOne('9.9.9.9')
     expect(global.fetch).toHaveBeenCalledTimes(1)
 
-    await fetchOne('8.8.8.8', true)
+    await fetchOne('9.9.9.9', true)
     expect(global.fetch).toHaveBeenCalledTimes(2)
   })
 })

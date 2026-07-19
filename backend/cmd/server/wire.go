@@ -93,6 +93,7 @@ func provideCleanup(
 	usageCleanup *service.UsageCleanupService,
 	idempotencyCleanup *service.IdempotencyCleanupService,
 	virtualCurrencyHoldCleanup *service.VirtualCurrencyHoldCleanupService,
+	cityTickScheduler *service.CityTickScheduler,
 	batchImageCleanup *service.BatchImageCleanupService,
 	batchImageWorker *service.BatchImageWorkerRuntime,
 	pricing *service.PricingService,
@@ -114,6 +115,8 @@ func provideCleanup(
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 	auditLog *service.AuditLogService,
 	promptAudit *securityaudit.PromptService,
+	ipGeolocation *service.IPGeolocationService,
+	accountAllocation *service.AccountAllocationService,
 ) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -126,6 +129,18 @@ func provideCleanup(
 
 		// 应用层清理步骤可并行执行，基础设施资源（Redis/Ent）最后按顺序关闭。
 		parallelSteps := []cleanupStep{
+			{"AccountAllocationService", func() error {
+				if accountAllocation != nil {
+					accountAllocation.Stop()
+				}
+				return nil
+			}},
+			{"IPGeolocationService", func() error {
+				if ipGeolocation != nil {
+					ipGeolocation.Close()
+				}
+				return nil
+			}},
 			{"OpsIngressRejectAggregator", func() error {
 				if opsIngressReject != nil {
 					opsIngressReject.Stop()
@@ -219,6 +234,12 @@ func provideCleanup(
 			{"VirtualCurrencyHoldCleanupService", func() error {
 				if virtualCurrencyHoldCleanup != nil {
 					virtualCurrencyHoldCleanup.Stop()
+				}
+				return nil
+			}},
+			{"CityTickScheduler", func() error {
+				if cityTickScheduler != nil {
+					cityTickScheduler.Stop()
 				}
 				return nil
 			}},

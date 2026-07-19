@@ -41,6 +41,7 @@ const (
 
 var (
 	ErrCityCommandNotFound         = infraerrors.NotFound("CITY_COMMAND_NOT_FOUND", "city command not found")
+	ErrCityManagementRequired      = infraerrors.Forbidden("CITY_ADMIN_REQUIRED", "city simulation management requires administrator access")
 	ErrCityCommandConflict         = infraerrors.Conflict("CITY_COMMAND_CONFLICT", "city command idempotency key was reused with different intent")
 	ErrCityExpectedTickConflict    = infraerrors.Conflict("CITY_EXPECTED_TICK_CONFLICT", "city world tick no longer matches the expected tick")
 	ErrCityPermissionDenied        = infraerrors.Forbidden("CITY_PERMISSION_DENIED", "city operation requires the owner role")
@@ -52,6 +53,26 @@ var (
 	ErrCityStepIdempotencyConflict = infraerrors.Conflict("CITY_STEP_CONFLICT", "city step idempotency key was reused with different intent")
 	cityTickEpochTime              = time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
 )
+
+type citySystemAdministratorContextKey struct{}
+
+// WithCitySystemAdministrator marks an internal request as originating from a
+// platform administrator. It is set exclusively by the authenticated HTTP
+// middleware; callers cannot set it through a request payload.
+func WithCitySystemAdministrator(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, citySystemAdministratorContextKey{}, true)
+}
+
+func IsCitySystemAdministrator(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	value, _ := ctx.Value(citySystemAdministratorContextKey{}).(bool)
+	return value
+}
 
 type CityCommand struct {
 	ID                 int64          `json:"id"`
@@ -119,22 +140,33 @@ type CityEventPage struct {
 }
 
 type CityStepResult struct {
-	Tick                    *CityTick                    `json:"tick"`
-	Commands                []*CityCommand               `json:"commands"`
-	Journals                []*CityJournal               `json:"journals"`
-	ResourceOperations      []*CityResourceOperation     `json:"resource_operations"`
-	MarketSettlements       []*CityMarketSettlement      `json:"market_settlements"`
-	PopulationMovements     []*CityPopulationMovement    `json:"population_movements"`
-	PopulationMigrations    []*CityPopulationMigration   `json:"population_migrations"`
-	HouseholdMovements      []*CityHouseholdMovement     `json:"household_movements"`
-	SpatialMutations        []*CitySpatialMutation       `json:"spatial_mutations"`
-	DevelopmentFacts        []CityDevelopmentFact        `json:"development_facts"`
-	BuildingAdjustments     []CityBuildingAdjustment     `json:"building_adjustments"`
-	EnterpriseLocationFacts []CityEnterpriseLocationFact `json:"enterprise_location_facts"`
-	WorldRuntimeFacts       []WorldRuntimeFact           `json:"world_runtime_facts"`
-	WorldEffectOperations   []WorldEffectOperation       `json:"world_effect_operations"`
-	WorldRuleCases          []WorldRuleCase              `json:"world_rule_cases"`
-	Events                  []*CityEvent                 `json:"events"`
+	Tick                    *CityTick                        `json:"tick"`
+	Commands                []*CityCommand                   `json:"commands"`
+	Journals                []*CityJournal                   `json:"journals"`
+	ResourceOperations      []*CityResourceOperation         `json:"resource_operations"`
+	MarketSettlements       []*CityMarketSettlement          `json:"market_settlements"`
+	PopulationMovements     []*CityPopulationMovement        `json:"population_movements"`
+	PopulationMigrations    []*CityPopulationMigration       `json:"population_migrations"`
+	HouseholdMovements      []*CityHouseholdMovement         `json:"household_movements"`
+	SpatialMutations        []*CitySpatialMutation           `json:"spatial_mutations"`
+	DevelopmentFacts        []CityDevelopmentFact            `json:"development_facts"`
+	BuildingAdjustments     []CityBuildingAdjustment         `json:"building_adjustments"`
+	EnterpriseLocationFacts []CityEnterpriseLocationFact     `json:"enterprise_location_facts"`
+	WorldRuntimeFacts       []WorldRuntimeFact               `json:"world_runtime_facts"`
+	OpenWorldRuntimeFacts   []CityOpenWorldRuntimeFact       `json:"open_world_runtime_facts"`
+	OpenWorldRuntimeEffects []CityOpenWorldRuntimeEffect     `json:"open_world_runtime_effects"`
+	OpenWorldRuleCases      []CityOpenWorldRuleCase          `json:"open_world_rule_cases"`
+	WorldEffectOperations   []WorldEffectOperation           `json:"world_effect_operations"`
+	WorldRuleCases          []WorldRuleCase                  `json:"world_rule_cases"`
+	ServiceFacts            []CityServiceFact                `json:"service_facts"`
+	ServiceAllocations      []CityServiceAllocation          `json:"service_allocations"`
+	ServiceSettlements      []CityServiceSettlement          `json:"service_settlements"`
+	FacilityLifecycleFacts  []CityFacilityLifecycleFact      `json:"facility_lifecycle_facts"`
+	PhysicalNetworkFacts    []CityPhysicalNetworkFact        `json:"physical_network_facts"`
+	PhysicalNetworkBatches  []CityPhysicalNetworkFlowBatch   `json:"physical_network_batches"`
+	PhysicalNetworkPaths    []CityPhysicalNetworkFlowPath    `json:"physical_network_paths"`
+	PhysicalNetworkSegments []CityPhysicalNetworkFlowSegment `json:"physical_network_segments"`
+	Events                  []*CityEvent                     `json:"events"`
 }
 
 type CityCommandSubmitInput struct {
@@ -231,7 +263,7 @@ func (s *CityEconomyService) SubmitCommand(ctx context.Context, input CityComman
 	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("find city command replay: %w", err)
 	}
-	if err = ensureCityWorldWritable(world); err != nil {
+	if err = ensureCityWorldAvailable(world); err != nil {
 		return nil, err
 	}
 	engine, err := cityEngineForVersion(world.simulationVersion)
@@ -242,6 +274,11 @@ func (s *CityEconomyService) SubmitCommand(ctx context.Context, input CityComman
 		return nil, ErrCityCommandVersion.WithMetadata(map[string]string{
 			"version": world.simulationVersion, "command_type": normalized.commandType,
 		})
+	}
+	if err = authorizeCityCommandSubmission(
+		ctx, tx, world, input.UserID, input.WorldID, normalized.commandType, normalized.payload,
+	); err != nil {
+		return nil, err
 	}
 	if input.ExpectedWorldTick != nil && *input.ExpectedWorldTick != world.currentTick {
 		return nil, cityExpectedTickError(*input.ExpectedWorldTick, world.currentTick)
@@ -286,11 +323,21 @@ func (s *CityEconomyService) GetCommand(ctx context.Context, userID, worldID, co
 	if userID <= 0 || worldID <= 0 || commandID <= 0 {
 		return nil, ErrCityInvalidInput
 	}
-	command, err := scanCityCommand(s.db.QueryRowContext(ctx, `
-SELECT `+cityCommandColumns+`
+	query := `
+SELECT ` + cityCommandColumns + `
 FROM city_commands c
 JOIN city_members m ON m.world_id = c.world_id AND m.user_id = $1 AND m.status = 'active'
-WHERE c.world_id = $2 AND c.id = $3`, userID, worldID, commandID))
+WHERE c.world_id = $2 AND c.id = $3
+  AND (m.role = 'owner' OR c.user_id = $1)`
+	args := []any{userID, worldID, commandID}
+	if IsCitySystemAdministrator(ctx) {
+		query = `
+SELECT ` + cityCommandColumns + `
+FROM city_commands c
+WHERE c.world_id = $1 AND c.id = $2`
+		args = []any{worldID, commandID}
+	}
+	command, err := scanCityCommand(s.db.QueryRowContext(ctx, query, args...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrCityCommandNotFound
 	}
@@ -393,6 +440,12 @@ func (s *CityEconomyService) stepWorld(ctx context.Context, input CityStepInput)
 	worldRuntimeFactSequence := int64(1)
 	worldEffectSequence := int64(1)
 	worldRuleCaseSequence := int64(1)
+	openWorldRuntimeFactSequence := int64(1)
+	openWorldRuntimeEffectSequence := int64(1)
+	openWorldRuntimeRuleCaseSequence := int64(1)
+	cityServiceFactSequence := int64(1)
+	cityFacilityLifecycleFactSequence := int64(1)
+	cityPhysicalNetworkFactSequence := int64(1)
 	var ledgerUnit *cityLedgerBaseUnit
 	hasLedgerCommand := false
 	needsLedgerBootstrap := false
@@ -415,6 +468,11 @@ func (s *CityEconomyService) stepWorld(ctx context.Context, input CityStepInput)
 			hasResourceCommand = true
 		}
 		if command.CommandType == CityCommandTypeEnterpriseRelocate {
+			hasResourceCommand = true
+		}
+		if command.CommandType == CityCommandTypeFacilityOperationStart {
+			hasLedgerCommand = true
+			needsLedgerBootstrap = true
 			hasResourceCommand = true
 		}
 	}
@@ -457,6 +515,18 @@ func (s *CityEconomyService) stepWorld(ctx context.Context, input CityStepInput)
 	worldRuntimeFactCount := 0
 	worldEffectOperationCount := 0
 	worldRuleCaseCount := 0
+	openWorldRuntimeFactCount := 0
+	openWorldRuntimeEffectCount := 0
+	openWorldRuntimeRuleCaseCount := 0
+	cityServiceFactCount := 0
+	cityServiceAllocationCount := 0
+	cityServiceSettlementCount := 0
+	cityFacilityLifecycleFactCount := 0
+	cityPhysicalNetworkFactCount := 0
+	cityPhysicalNetworkBatchCount := 0
+	cityPhysicalNetworkPathCount := 0
+	cityPhysicalNetworkSegmentCount := 0
+	worldRuntimeAutomaticEvents := make([]worldRuntimeAutomaticEvent, 0)
 	if engine.hasStage(cityEngineStageWorldRuntime) {
 		automaticRuntime, runtimeErr := expireWorldRuntimeStatuses(
 			ctx, tx, input.WorldID, targetTick, worldRuntimeFactSequence, worldEffectSequence,
@@ -468,6 +538,20 @@ func (s *CityEconomyService) stepWorld(ctx context.Context, input CityStepInput)
 		worldEffectOperationCount += len(automaticRuntime.effects)
 		worldRuntimeFactSequence = automaticRuntime.nextFactSeq
 		worldEffectSequence = automaticRuntime.nextEffectSeq
+		worldRuntimeAutomaticEvents = append(worldRuntimeAutomaticEvents, automaticRuntime.events...)
+	}
+	if cityEngineSupportsOpenWorldRuntime(engine.version) {
+		automaticRuntime, runtimeErr := expireCityOpenWorldRuntimeStatuses(
+			ctx, tx, input.WorldID, targetTick, openWorldRuntimeFactSequence, openWorldRuntimeEffectSequence,
+		)
+		if runtimeErr != nil {
+			return nil, runtimeErr
+		}
+		openWorldRuntimeFactCount += len(automaticRuntime.facts)
+		openWorldRuntimeEffectCount += len(automaticRuntime.effects)
+		openWorldRuntimeFactSequence = automaticRuntime.nextFactSeq
+		openWorldRuntimeEffectSequence = automaticRuntime.nextEffectSeq
+		worldRuntimeAutomaticEvents = append(worldRuntimeAutomaticEvents, automaticRuntime.events...)
 	}
 	for _, command := range commands {
 		var pending cityPendingEvent
@@ -518,6 +602,30 @@ func (s *CityEconomyService) stepWorld(ctx context.Context, input CityStepInput)
 			if movement != nil {
 				householdMovementSequence++
 				householdMovementCount++
+			}
+		} else if isCityOpenWorldRuntimeCommand(command.CommandType) {
+			var execution cityOpenWorldRuntimeExecution
+			execution, err = s.applyCityOpenWorldRuntimeCommand(
+				ctx, tx, input.WorldID, targetTick,
+				openWorldRuntimeFactSequence, openWorldRuntimeEffectSequence,
+				openWorldRuntimeRuleCaseSequence, command,
+			)
+			if err != nil {
+				return nil, err
+			}
+			pending = execution.pending
+			openWorldRuntimeFactCount += len(execution.facts)
+			openWorldRuntimeEffectCount += len(execution.effects)
+			openWorldRuntimeRuleCaseCount += len(execution.cases)
+			openWorldRuntimeFactSequence = execution.nextFactSeq
+			openWorldRuntimeEffectSequence = execution.nextEffectSeq
+			openWorldRuntimeRuleCaseSequence = execution.nextCaseSeq
+		} else if isCityOpenWorldCommand(command.CommandType) {
+			pending, err = s.applyCityOpenWorldCommand(
+				ctx, tx, input.WorldID, targetTick, command,
+			)
+			if err != nil {
+				return nil, err
 			}
 		} else if isCitySpatialCommand(command.CommandType) {
 			var mutation *CitySpatialMutation
@@ -577,6 +685,79 @@ func (s *CityEconomyService) stepWorld(ctx context.Context, input CityStepInput)
 			worldRuntimeFactSequence = execution.nextFactSeq
 			worldEffectSequence = execution.nextEffectSeq
 			worldRuleCaseSequence = execution.nextCaseSeq
+		} else if isCityFacilityLifecycleCommand(command.CommandType) {
+			var execution cityFacilityLifecycleExecution
+			execution, err = s.applyCityFacilityLifecycleCommand(
+				ctx, tx, input.WorldID, targetTick,
+				cityFacilityLifecycleFactSequence, journalSequence,
+				resourceOperationSequence, ledgerUnit, command,
+			)
+			if err != nil {
+				return nil, err
+			}
+			pending = execution.pending
+			cityFacilityLifecycleFactCount += len(execution.facts)
+			cityFacilityLifecycleFactSequence = execution.nextFactSequence
+			journalSequence = execution.nextJournalSequence
+			resourceOperationSequence = execution.nextResourceSequence
+		} else if isCityPhysicalNetworkCommand(command.CommandType) {
+			var execution cityPhysicalNetworkExecution
+			execution, err = s.applyCityPhysicalNetworkCommand(
+				ctx, tx, input.WorldID, targetTick,
+				cityPhysicalNetworkFactSequence, command,
+			)
+			if err != nil {
+				return nil, err
+			}
+			pending = execution.pending
+			if execution.fact != nil {
+				cityPhysicalNetworkFactSequence++
+				cityPhysicalNetworkFactCount++
+			}
+		} else if isCityServiceCommand(command.CommandType) {
+			var execution cityServiceExecution
+			execution, err = s.applyCityServiceCommand(
+				ctx, tx, input.WorldID, targetTick, cityServiceFactSequence, command,
+			)
+			if err != nil {
+				return nil, err
+			}
+			pending = execution.pending
+			if execution.fact != nil {
+				cityServiceFactSequence++
+				cityServiceFactCount++
+				if cityEngineSupportsFacilityLifecycle(engine.version) {
+					var lifecycleFact *CityFacilityLifecycleFact
+					switch command.CommandType {
+					case CityCommandTypeFacilityRegister:
+						payload, decodeErr := decodeStoredCityCommandPayload[cityFacilityRegisterPayload](command)
+						if decodeErr != nil {
+							return nil, decodeErr
+						}
+						lifecycleFact, err = initializeCityFacilityLifecycleForServiceCommand(
+							ctx, tx, input.WorldID, targetTick,
+							cityFacilityLifecycleFactSequence, command, payload.Code,
+						)
+					case CityCommandTypeFacilityCapacityConfigure:
+						payload, decodeErr := decodeStoredCityCommandPayload[cityFacilityCapacityConfigurePayload](command)
+						if decodeErr != nil {
+							return nil, decodeErr
+						}
+						lifecycleFact, err = updateCityFacilityLifecycleCapacityForServiceCommand(
+							ctx, tx, input.WorldID, targetTick,
+							cityFacilityLifecycleFactSequence, command,
+							payload.FacilityCode,
+						)
+					}
+					if err != nil {
+						return nil, err
+					}
+					if lifecycleFact != nil {
+						cityFacilityLifecycleFactSequence++
+						cityFacilityLifecycleFactCount++
+					}
+				}
+			}
 		} else {
 			pending = applyCityControlCommand(candidate, command)
 		}
@@ -586,6 +767,38 @@ func (s *CityEconomyService) stepWorld(ctx context.Context, input CityStepInput)
 			rejectedCount++
 		}
 		pendingEvents = append(pendingEvents, pending)
+	}
+	if cityEngineSupportsWorldNavigationIntents(engine.version) {
+		automaticNavigation, navigationErr := advanceWorldNavigationIntents(
+			ctx, tx, input.WorldID, targetTick, worldRuntimeFactSequence,
+			worldEffectSequence,
+		)
+		if navigationErr != nil {
+			return nil, navigationErr
+		}
+		worldRuntimeFactCount += len(automaticNavigation.facts)
+		worldEffectOperationCount += len(automaticNavigation.effects)
+		worldRuntimeFactSequence = automaticNavigation.nextFactSeq
+		worldEffectSequence = automaticNavigation.nextEffectSeq
+		worldRuntimeAutomaticEvents = append(
+			worldRuntimeAutomaticEvents, automaticNavigation.events...,
+		)
+	}
+	if cityEngineSupportsOpenWorldSocialRuntime(engine.version) {
+		automaticNavigation, navigationErr := advanceCityOpenWorldV5NavigationIntents(
+			ctx, tx, input.WorldID, targetTick, openWorldRuntimeFactSequence,
+			openWorldRuntimeEffectSequence,
+		)
+		if navigationErr != nil {
+			return nil, navigationErr
+		}
+		openWorldRuntimeFactCount += len(automaticNavigation.facts)
+		openWorldRuntimeEffectCount += len(automaticNavigation.effects)
+		openWorldRuntimeFactSequence = automaticNavigation.nextFactSeq
+		openWorldRuntimeEffectSequence = automaticNavigation.nextEffectSeq
+		worldRuntimeAutomaticEvents = append(
+			worldRuntimeAutomaticEvents, automaticNavigation.events...,
+		)
 	}
 	demographyExecution := cityDemographyExecution{events: make([]cityDemographyEvent, 0)}
 	if engine.hasStage(cityEngineStageCalendarDemography) {
@@ -622,6 +835,54 @@ func (s *CityEconomyService) stepWorld(ctx context.Context, input CityStepInput)
 		buildingAdjustmentCount += developmentExecution.adjustmentCount
 		developmentEvents = developmentExecution.events
 	}
+	cityFacilityLifecyclePreEvents := make([]cityPendingEvent, 0)
+	cityFacilityLifecyclePostEvents := make([]cityPendingEvent, 0)
+	if candidate.status == CityWorldStatusRunning && cityEngineSupportsFacilityLifecycle(engine.version) {
+		lifecycleExecution, lifecycleErr := advanceCityFacilityOperations(
+			ctx, tx, input.WorldID, targetTick, cityFacilityLifecycleFactSequence,
+		)
+		if lifecycleErr != nil {
+			return nil, lifecycleErr
+		}
+		cityFacilityLifecycleFactSequence = lifecycleExecution.nextFactSequence
+		cityFacilityLifecycleFactCount += len(lifecycleExecution.facts)
+		cityFacilityLifecyclePreEvents = append(
+			cityFacilityLifecyclePreEvents, lifecycleExecution.events...,
+		)
+	}
+	cityServiceEvents := make([]cityPendingEvent, 0)
+	if candidate.status == CityWorldStatusRunning && engine.hasStage(cityEngineStagePublicServices) {
+		serviceExecution, serviceErr := advanceCityServiceSettlements(
+			ctx, tx, input.WorldID, targetTick, cityServiceFactSequence,
+			cityPhysicalNetworkFactSequence, engine.version,
+		)
+		if serviceErr != nil {
+			return nil, serviceErr
+		}
+		cityServiceFactSequence = serviceExecution.nextFactSequence
+		cityServiceFactCount += len(serviceExecution.facts)
+		cityServiceAllocationCount += len(serviceExecution.allocations)
+		cityServiceSettlementCount += len(serviceExecution.settlements)
+		cityPhysicalNetworkFactCount += len(serviceExecution.physicalNetworkFacts)
+		cityPhysicalNetworkBatchCount += len(serviceExecution.physicalNetworkBatches)
+		cityPhysicalNetworkPathCount += len(serviceExecution.physicalNetworkPaths)
+		cityPhysicalNetworkSegmentCount += len(serviceExecution.physicalNetworkSegments)
+		cityPhysicalNetworkFactSequence = serviceExecution.nextPhysicalNetworkFactSequence
+		cityServiceEvents = serviceExecution.events
+	}
+	if candidate.status == CityWorldStatusRunning && cityEngineSupportsFacilityLifecycle(engine.version) {
+		lifecycleExecution, lifecycleErr := settleCityFacilityWearAndFailures(
+			ctx, tx, input.WorldID, targetTick, cityFacilityLifecycleFactSequence,
+		)
+		if lifecycleErr != nil {
+			return nil, lifecycleErr
+		}
+		cityFacilityLifecycleFactSequence = lifecycleExecution.nextFactSequence
+		cityFacilityLifecycleFactCount += len(lifecycleExecution.facts)
+		cityFacilityLifecyclePostEvents = append(
+			cityFacilityLifecyclePostEvents, lifecycleExecution.events...,
+		)
+	}
 	marketEvents := make([]cityMarketCycleEvent, 0)
 	marketSettlementCount := 0
 	if marketCycleDue {
@@ -639,16 +900,24 @@ func (s *CityEconomyService) stepWorld(ctx context.Context, input CityStepInput)
 	}
 	journalCount := journalSequence - 1
 	resourceOperationCount := resourceOperationSequence - 1
+	nextTickDelayMilliseconds, err := cityRealTickDelayMilliseconds(candidate.status, candidate.speedMilli)
+	if err != nil {
+		return nil, err
+	}
 	if _, err = tx.ExecContext(ctx, `
 UPDATE city_worlds
 SET name = $2,
-    status = $3,
+    status = $3::varchar(16),
     speed_multiplier = ($4::numeric / 1000),
     current_tick = $5,
     simulated_at = $6,
-    next_tick_at = NULL,
+    next_tick_at = CASE WHEN $3::varchar = 'running'
+        THEN clock_timestamp() + ($7 * INTERVAL '1 millisecond')
+        ELSE NULL
+    END,
     updated_at = NOW()
-WHERE id = $1`, input.WorldID, candidate.name, candidate.status, candidate.speedMilli, targetTick, simulatedTo); err != nil {
+WHERE id = $1`, input.WorldID, candidate.name, candidate.status, candidate.speedMilli,
+		targetTick, simulatedTo, nextTickDelayMilliseconds); err != nil {
 		return nil, fmt.Errorf("update city world tick state: %w", err)
 	}
 
@@ -683,7 +952,10 @@ RETURNING `+cityTickColumns,
 		world.simulatedAt, simulatedTo, firstSequence, lastSequence,
 		len(commands), appliedCount, rejectedCount,
 		len(bootstrapEvents)+len(resourceBootstrapEvents)+len(commands)+
-			len(demographyExecution.events)+len(developmentEvents)+len(marketEvents)+1,
+			len(worldRuntimeAutomaticEvents)+len(demographyExecution.events)+
+			len(developmentEvents)+len(cityFacilityLifecyclePreEvents)+
+			len(cityServiceEvents)+len(cityFacilityLifecyclePostEvents)+
+			len(marketEvents)+1,
 		durationMS, startedAt, completedAt))
 	if err != nil {
 		return nil, fmt.Errorf("insert city tick: %w", err)
@@ -726,6 +998,15 @@ WHERE id = $1 AND status = 'pending'`, pending.command.ID, pending.status, targe
 		}
 		eventSequence++
 	}
+	for _, automaticEvent := range worldRuntimeAutomaticEvents {
+		if _, err = insertCityEvent(
+			ctx, tx, input.WorldID, targetTick, eventSequence,
+			nil, automaticEvent.eventType, automaticEvent.payload,
+		); err != nil {
+			return nil, err
+		}
+		eventSequence++
+	}
 	for _, demographicEvent := range demographyExecution.events {
 		if _, err = insertCityEvent(ctx, tx, input.WorldID, targetTick, eventSequence,
 			nil, demographicEvent.eventType, demographicEvent.payload); err != nil {
@@ -740,6 +1021,27 @@ WHERE id = $1 AND status = 'pending'`, pending.command.ID, pending.status, targe
 		}
 		eventSequence++
 	}
+	for _, lifecycleEvent := range cityFacilityLifecyclePreEvents {
+		if _, err = insertCityEvent(ctx, tx, input.WorldID, targetTick, eventSequence,
+			nil, lifecycleEvent.eventType, lifecycleEvent.payload); err != nil {
+			return nil, err
+		}
+		eventSequence++
+	}
+	for _, serviceEvent := range cityServiceEvents {
+		if _, err = insertCityEvent(ctx, tx, input.WorldID, targetTick, eventSequence,
+			nil, serviceEvent.eventType, serviceEvent.payload); err != nil {
+			return nil, err
+		}
+		eventSequence++
+	}
+	for _, lifecycleEvent := range cityFacilityLifecyclePostEvents {
+		if _, err = insertCityEvent(ctx, tx, input.WorldID, targetTick, eventSequence,
+			nil, lifecycleEvent.eventType, lifecycleEvent.payload); err != nil {
+			return nil, err
+		}
+		eventSequence++
+	}
 	for _, marketEvent := range marketEvents {
 		if _, err = insertCityEvent(ctx, tx, input.WorldID, targetTick, eventSequence,
 			nil, marketEvent.eventType, marketEvent.payload); err != nil {
@@ -748,26 +1050,37 @@ WHERE id = $1 AND status = 'pending'`, pending.command.ID, pending.status, targe
 		eventSequence++
 	}
 	completionPayload := map[string]any{
-		"tick":                           targetTick,
-		"simulated_at":                   simulatedTo.UTC().Format(time.RFC3339Nano),
-		"state_hash":                     stateHash,
-		"prng_proof":                     prngProof,
-		"command_count":                  len(commands),
-		"applied_command_count":          appliedCount,
-		"rejected_command_count":         rejectedCount,
-		"journal_count":                  journalCount,
-		"resource_operation_count":       resourceOperationCount,
-		"market_settlement_count":        marketSettlementCount,
-		"population_movement_count":      demographyExecution.movementCount,
-		"population_migration_count":     populationMigrationCount,
-		"household_movement_count":       householdMovementCount,
-		"spatial_mutation_count":         spatialMutationCount,
-		"development_fact_count":         developmentFactCount,
-		"building_adjustment_count":      buildingAdjustmentCount,
-		"enterprise_location_fact_count": enterpriseLocationFactCount,
-		"world_runtime_fact_count":       worldRuntimeFactCount,
-		"world_effect_operation_count":   worldEffectOperationCount,
-		"world_rule_case_count":          worldRuleCaseCount,
+		"tick":                            targetTick,
+		"simulated_at":                    simulatedTo.UTC().Format(time.RFC3339Nano),
+		"state_hash":                      stateHash,
+		"prng_proof":                      prngProof,
+		"command_count":                   len(commands),
+		"applied_command_count":           appliedCount,
+		"rejected_command_count":          rejectedCount,
+		"journal_count":                   journalCount,
+		"resource_operation_count":        resourceOperationCount,
+		"market_settlement_count":         marketSettlementCount,
+		"population_movement_count":       demographyExecution.movementCount,
+		"population_migration_count":      populationMigrationCount,
+		"household_movement_count":        householdMovementCount,
+		"spatial_mutation_count":          spatialMutationCount,
+		"development_fact_count":          developmentFactCount,
+		"building_adjustment_count":       buildingAdjustmentCount,
+		"enterprise_location_fact_count":  enterpriseLocationFactCount,
+		"world_runtime_fact_count":        worldRuntimeFactCount,
+		"world_effect_operation_count":    worldEffectOperationCount,
+		"world_rule_case_count":           worldRuleCaseCount,
+		"open_world_runtime_fact_count":   openWorldRuntimeFactCount,
+		"open_world_runtime_effect_count": openWorldRuntimeEffectCount,
+		"open_world_rule_case_count":      openWorldRuntimeRuleCaseCount,
+		"service_fact_count":              cityServiceFactCount,
+		"service_allocation_count":        cityServiceAllocationCount,
+		"service_settlement_count":        cityServiceSettlementCount,
+		"facility_lifecycle_fact_count":   cityFacilityLifecycleFactCount,
+		"physical_network_fact_count":     cityPhysicalNetworkFactCount,
+		"physical_network_batch_count":    cityPhysicalNetworkBatchCount,
+		"physical_network_path_count":     cityPhysicalNetworkPathCount,
+		"physical_network_segment_count":  cityPhysicalNetworkSegmentCount,
 	}
 	if _, err = insertCityEvent(ctx, tx, input.WorldID, targetTick, eventSequence,
 		nil, "city.tick.completed", completionPayload); err != nil {
@@ -931,6 +1244,23 @@ func normalizeCityCommand(commandType string, rawPayload json.RawMessage, expect
 			return nil, ErrCityInvalidInput.WithCause(err)
 		}
 		payload = value
+	case CityCommandTypeOpenWorldSectorMaterialize,
+		CityCommandTypeOpenWorldActorCreate,
+		CityCommandTypeOpenWorldActorActivityPerform,
+		CityCommandTypeOpenWorldActorRoleTransition,
+		CityCommandTypeOpenWorldActorMove,
+		CityCommandTypeOpenWorldActorPortalUse,
+		CityCommandTypeOpenWorldActorControlGrant,
+		CityCommandTypeOpenWorldActorControlRevoke,
+		CityCommandTypeOpenWorldPortalStateSet,
+		CityCommandTypeOpenWorldPortalAccessSet,
+		CityCommandTypeOpenWorldActorNavigationSet,
+		CityCommandTypeOpenWorldActorNavigationCancel:
+		openWorldPayload, _, openWorldErr := normalizeCityOpenWorldCommand(commandType, rawPayload)
+		if openWorldErr != nil {
+			return nil, openWorldErr
+		}
+		payload = openWorldPayload
 	default:
 		ledgerPayload, handled, ledgerErr := normalizeCityLedgerCommand(commandType, rawPayload)
 		if ledgerErr != nil {
@@ -977,14 +1307,38 @@ func normalizeCityCommand(commandType string, rawPayload json.RawMessage, expect
 								if enterpriseHandled {
 									payload = enterprisePayload
 								} else {
-									runtimePayload, runtimeHandled, runtimeErr := normalizeWorldRuntimeCommand(commandType, rawPayload)
-									if runtimeErr != nil {
-										return nil, runtimeErr
+									lifecyclePayload, lifecycleHandled, lifecycleErr := normalizeCityFacilityLifecycleCommand(commandType, rawPayload)
+									if lifecycleErr != nil {
+										return nil, lifecycleErr
 									}
-									if !runtimeHandled {
-										return nil, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "command_type"})
+									if lifecycleHandled {
+										payload = lifecyclePayload
+									} else {
+										physicalPayload, physicalHandled, physicalErr := normalizeCityPhysicalNetworkCommand(commandType, rawPayload)
+										if physicalErr != nil {
+											return nil, physicalErr
+										}
+										if physicalHandled {
+											payload = physicalPayload
+										} else {
+											servicePayload, serviceHandled, serviceErr := normalizeCityServiceCommand(commandType, rawPayload)
+											if serviceErr != nil {
+												return nil, serviceErr
+											}
+											if serviceHandled {
+												payload = servicePayload
+											} else {
+												runtimePayload, runtimeHandled, runtimeErr := normalizeWorldRuntimeCommand(commandType, rawPayload)
+												if runtimeErr != nil {
+													return nil, runtimeErr
+												}
+												if !runtimeHandled {
+													return nil, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "command_type"})
+												}
+												payload = runtimePayload
+											}
+										}
 									}
-									payload = runtimePayload
 								}
 							}
 						}
@@ -1095,14 +1449,26 @@ func cityExpectedTickError(expected, actual int64) error {
 func lockCityWorld(ctx context.Context, tx *sql.Tx, userID, worldID int64) (*lockedCityWorld, error) {
 	item := &lockedCityWorld{}
 	var stateHash sql.NullString
-	err := tx.QueryRowContext(ctx, `
+	query := `
 SELECT w.name, w.status, w.simulation_version, w.seed, w.current_tick,
        w.simulated_at, ROUND(w.speed_multiplier * 1000)::bigint,
        w.timezone, w.state_hash, m.role
 FROM city_worlds w
 JOIN city_members m ON m.world_id = w.id
 WHERE w.id = $1 AND m.user_id = $2 AND m.status = 'active'
-FOR UPDATE OF w`, worldID, userID).Scan(
+FOR UPDATE OF w`
+	args := []any{worldID, userID}
+	if IsCitySystemAdministrator(ctx) {
+		query = `
+SELECT w.name, w.status, w.simulation_version, w.seed, w.current_tick,
+       w.simulated_at, ROUND(w.speed_multiplier * 1000)::bigint,
+       w.timezone, w.state_hash, 'owner'::varchar(16)
+FROM city_worlds w
+WHERE w.id = $1
+FOR UPDATE OF w`
+		args = []any{worldID}
+	}
+	err := tx.QueryRowContext(ctx, query, args...).Scan(
 		&item.name, &item.status, &item.simulationVersion, &item.seed, &item.currentTick,
 		&item.simulatedAt, &item.speedMilli, &item.timezone, &stateHash, &item.memberRole,
 	)
@@ -1122,6 +1488,10 @@ func ensureCityWorldWritable(world *lockedCityWorld) error {
 	if world.memberRole != CityMemberRoleOwner {
 		return ErrCityPermissionDenied
 	}
+	return ensureCityWorldAvailable(world)
+}
+
+func ensureCityWorldAvailable(world *lockedCityWorld) error {
 	if _, err := cityEngineForVersion(world.simulationVersion); err != nil {
 		return ErrCitySimulationVersion.WithMetadata(map[string]string{"version": world.simulationVersion})
 	}
@@ -1131,11 +1501,211 @@ func ensureCityWorldWritable(world *lockedCityWorld) error {
 	return nil
 }
 
+func authorizeCityCommandSubmission(
+	ctx context.Context,
+	queryer citySQLQueryer,
+	world *lockedCityWorld,
+	userID, worldID int64,
+	commandType string,
+	payload json.RawMessage,
+) error {
+	if IsCitySystemAdministrator(ctx) {
+		return nil
+	}
+	if isCityOpenWorldRuntimeCommand(commandType) {
+		return authorizeCityOpenWorldRuntimeCommandSubmission(ctx, queryer, userID, worldID, commandType, payload)
+	}
+	if commandType == CityCommandTypeActorCreate {
+		return nil
+	}
+	if commandType == CityCommandTypePortalAccessConfigure {
+		if world.memberRole == CityMemberRoleOwner {
+			return nil
+		}
+		return ErrCityPermissionDenied
+	}
+	requiredCapability := ""
+	actorCode := ""
+	switch commandType {
+	case CityCommandTypeActorActivityPerform:
+		var value worldActorActivityPayload
+		if err := json.Unmarshal(payload, &value); err != nil {
+			return ErrCityInvalidInput.WithCause(err)
+		}
+		actorCode, requiredCapability = value.ActorCode, WorldActorCapabilityCommand
+	case CityCommandTypeActorRoleTransition:
+		var value worldActorRoleTransitionPayload
+		if err := json.Unmarshal(payload, &value); err != nil {
+			return ErrCityInvalidInput.WithCause(err)
+		}
+		actorCode, requiredCapability = value.ActorCode, WorldActorCapabilityCommand
+	case CityCommandTypeActorLocationMove:
+		var value worldActorLocationMovePayload
+		if err := json.Unmarshal(payload, &value); err != nil {
+			return ErrCityInvalidInput.WithCause(err)
+		}
+		actorCode, requiredCapability = value.ActorCode, WorldActorCapabilityCommand
+	case CityCommandTypePortalStateTransition:
+		var value worldPortalStateTransitionPayload
+		if err := json.Unmarshal(payload, &value); err != nil {
+			return ErrCityInvalidInput.WithCause(err)
+		}
+		actorCode, requiredCapability = value.ActorCode, WorldActorCapabilityCommand
+	case CityCommandTypeActorControlGrant, CityCommandTypeActorControlRevoke:
+		var value worldActorControlPayload
+		if err := json.Unmarshal(payload, &value); err != nil {
+			return ErrCityInvalidInput.WithCause(err)
+		}
+		actorCode, requiredCapability = value.ActorCode, WorldActorCapabilityManageControl
+	default:
+		if world.memberRole == CityMemberRoleOwner {
+			return nil
+		}
+		return ErrCityPermissionDenied
+	}
+	var authorized bool
+	if err := queryer.QueryRowContext(ctx, `
+SELECT EXISTS (
+    SELECT 1
+    FROM world_actors actor
+    WHERE actor.world_id = $1 AND actor.code = $2 AND actor.status = 'active'
+      AND (actor.owner_user_id = $3 OR EXISTS (
+          SELECT 1
+          FROM world_actor_control_grants grant_value
+          WHERE grant_value.world_id = actor.world_id AND grant_value.actor_id = actor.id
+            AND grant_value.user_id = $3 AND grant_value.capability = $4
+            AND grant_value.status = 'active'
+      ))
+)`, worldID, actorCode, userID, requiredCapability).Scan(&authorized); err != nil {
+		return fmt.Errorf("authorize city actor command submission: %w", err)
+	}
+	if !authorized {
+		return ErrCityPermissionDenied
+	}
+	return nil
+}
+
+// authorizeCityOpenWorldRuntimeCommandSubmission mirrors the reducer's
+// ownership/grant check at enqueue time. The older F7 actor tables cannot be
+// reused here: V4/V5 actors, control grants, and locations deliberately live
+// in the independent open-world runtime domain.
+func authorizeCityOpenWorldRuntimeCommandSubmission(
+	ctx context.Context,
+	queryer citySQLQueryer,
+	userID, worldID int64,
+	commandType string,
+	payload json.RawMessage,
+) error {
+	if commandType == CityCommandTypeOpenWorldActorCreate {
+		var activeMember bool
+		if err := queryer.QueryRowContext(ctx, `
+SELECT EXISTS (
+    SELECT 1 FROM city_members
+    WHERE world_id = $1 AND user_id = $2 AND status = 'active'
+)`, worldID, userID).Scan(&activeMember); err != nil {
+			return fmt.Errorf("authorize open-world actor creation: %w", err)
+		}
+		if !activeMember {
+			return ErrCityPermissionDenied
+		}
+		return nil
+	}
+
+	actorCode := ""
+	requiredCapability := WorldActorCapabilityCommand
+	switch commandType {
+	case CityCommandTypeOpenWorldActorActivityPerform:
+		var value cityOpenWorldActorActivityPayload
+		if err := json.Unmarshal(payload, &value); err != nil {
+			return ErrCityInvalidInput.WithCause(err)
+		}
+		actorCode = value.ActorCode
+	case CityCommandTypeOpenWorldActorRoleTransition:
+		var value cityOpenWorldActorRoleTransitionPayload
+		if err := json.Unmarshal(payload, &value); err != nil {
+			return ErrCityInvalidInput.WithCause(err)
+		}
+		actorCode = value.ActorCode
+	case CityCommandTypeOpenWorldActorMove:
+		var value cityOpenWorldActorMovePayload
+		if err := json.Unmarshal(payload, &value); err != nil {
+			return ErrCityInvalidInput.WithCause(err)
+		}
+		actorCode = value.ActorCode
+	case CityCommandTypeOpenWorldActorPortalUse:
+		var value cityOpenWorldActorPortalUsePayload
+		if err := json.Unmarshal(payload, &value); err != nil {
+			return ErrCityInvalidInput.WithCause(err)
+		}
+		actorCode = value.ActorCode
+	case CityCommandTypeOpenWorldActorNavigationSet:
+		var value cityOpenWorldActorNavigationSetPayload
+		if err := json.Unmarshal(payload, &value); err != nil {
+			return ErrCityInvalidInput.WithCause(err)
+		}
+		actorCode = value.ActorCode
+	case CityCommandTypeOpenWorldActorNavigationCancel:
+		var value cityOpenWorldActorNavigationCancelPayload
+		if err := json.Unmarshal(payload, &value); err != nil {
+			return ErrCityInvalidInput.WithCause(err)
+		}
+		actorCode = value.ActorCode
+	case CityCommandTypeOpenWorldActorControlGrant, CityCommandTypeOpenWorldActorControlRevoke:
+		var value cityOpenWorldActorControlPayload
+		if err := json.Unmarshal(payload, &value); err != nil {
+			return ErrCityInvalidInput.WithCause(err)
+		}
+		actorCode, requiredCapability = value.ActorCode, WorldActorCapabilityManageControl
+	case CityCommandTypeOpenWorldPortalStateSet:
+		var value cityOpenWorldPortalStatePayload
+		if err := json.Unmarshal(payload, &value); err != nil {
+			return ErrCityInvalidInput.WithCause(err)
+		}
+		actorCode, requiredCapability = value.ActorCode, WorldActorCapabilityManageControl
+	case CityCommandTypeOpenWorldPortalAccessSet:
+		var value cityOpenWorldPortalAccessPayload
+		if err := json.Unmarshal(payload, &value); err != nil {
+			return ErrCityInvalidInput.WithCause(err)
+		}
+		actorCode, requiredCapability = value.ActorCode, WorldActorCapabilityManageControl
+	default:
+		return ErrCityInvalidInput.WithMetadata(map[string]string{"field": "command_type"})
+	}
+	var authorized bool
+	if err := queryer.QueryRowContext(ctx, `
+SELECT EXISTS (
+    SELECT 1
+    FROM city_open_world_actors actor
+    JOIN city_members member
+      ON member.world_id = actor.world_id AND member.user_id = $3 AND member.status = 'active'
+    WHERE actor.world_id = $1 AND actor.code = $2 AND actor.status = 'active'
+      AND (actor.owner_user_id = $3 OR EXISTS (
+          SELECT 1
+          FROM city_open_world_actor_controls grant_value
+          WHERE grant_value.world_id = actor.world_id AND grant_value.actor_id = actor.id
+            AND grant_value.user_id = $3 AND grant_value.capability = $4
+            AND grant_value.status = 'active'
+      ))
+)`, worldID, actorCode, userID, requiredCapability).Scan(&authorized); err != nil {
+		return fmt.Errorf("authorize open-world actor command submission: %w", err)
+	}
+	if !authorized {
+		return ErrCityPermissionDenied
+	}
+	return nil
+}
+
 func authorizeCityWorldRead(ctx context.Context, queryer citySQLQueryer, userID, worldID int64) error {
 	var exists int
-	err := queryer.QueryRowContext(ctx, `
+	query := `
 SELECT 1 FROM city_members
-WHERE world_id = $1 AND user_id = $2 AND status = 'active'`, worldID, userID).Scan(&exists)
+WHERE world_id = $1 AND user_id = $2 AND status = 'active'`
+	args := []any{worldID, userID}
+	if IsCitySystemAdministrator(ctx) {
+		query = `SELECT 1 FROM city_worlds WHERE id = $1`
+		args = []any{worldID}
+	}
+	err := queryer.QueryRowContext(ctx, query, args...).Scan(&exists)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrCityWorldNotFound
 	}
@@ -1358,6 +1928,37 @@ ORDER BY c.sequence ASC`, tick.WorldID, tick.Tick)
 	if err != nil {
 		return nil, err
 	}
+	openWorldRuntimeFacts, err := loadCityOpenWorldRuntimeFactsForTick(ctx, queryer, tick.WorldID, tick.Tick)
+	if err != nil {
+		return nil, err
+	}
+	openWorldRuntimeEffects, err := loadCityOpenWorldRuntimeEffectsForTick(ctx, queryer, tick.WorldID, tick.Tick)
+	if err != nil {
+		return nil, err
+	}
+	openWorldRuleCases, err := loadCityOpenWorldRuleCasesForTick(ctx, queryer, tick.WorldID, tick.Tick)
+	if err != nil {
+		return nil, err
+	}
+	serviceFacts, serviceAllocations, serviceSettlements, err := loadCityServiceResultsForTick(
+		ctx, queryer, tick.WorldID, tick.Tick,
+	)
+	if err != nil {
+		return nil, err
+	}
+	facilityLifecycleFacts, err := loadCityFacilityLifecycleFactsForTick(
+		ctx, queryer, tick.WorldID, tick.Tick,
+	)
+	if err != nil {
+		return nil, err
+	}
+	physicalNetworkFacts, physicalNetworkBatches, physicalNetworkPaths,
+		physicalNetworkSegments, err := loadCityPhysicalNetworkResultsForTick(
+		ctx, queryer, tick.WorldID, tick.Tick,
+	)
+	if err != nil {
+		return nil, err
+	}
 
 	eventRows, err := queryer.QueryContext(ctx, `
 SELECT `+cityEventColumns+`
@@ -1394,8 +1995,19 @@ ORDER BY e.sequence ASC`, tick.WorldID, tick.Tick)
 		BuildingAdjustments:     buildingAdjustments,
 		EnterpriseLocationFacts: enterpriseLocationFacts,
 		WorldRuntimeFacts:       worldRuntimeFacts,
+		OpenWorldRuntimeFacts:   openWorldRuntimeFacts,
+		OpenWorldRuntimeEffects: openWorldRuntimeEffects,
+		OpenWorldRuleCases:      openWorldRuleCases,
 		WorldEffectOperations:   worldEffectOperations,
 		WorldRuleCases:          worldRuleCases,
+		ServiceFacts:            serviceFacts,
+		ServiceAllocations:      serviceAllocations,
+		ServiceSettlements:      serviceSettlements,
+		FacilityLifecycleFacts:  facilityLifecycleFacts,
+		PhysicalNetworkFacts:    physicalNetworkFacts,
+		PhysicalNetworkBatches:  physicalNetworkBatches,
+		PhysicalNetworkPaths:    physicalNetworkPaths,
+		PhysicalNetworkSegments: physicalNetworkSegments,
 		Events:                  events,
 	}, nil
 }
@@ -1520,11 +2132,16 @@ type cityHashState struct {
 	Physical           cityPhysicalHashState            `json:"physical"`
 	Markets            cityMarketHashState              `json:"markets"`
 	Demography         cityDemographyHashState          `json:"demography"`
+	OpenWorld          *cityOpenWorldHashState          `json:"open_world,omitempty"`
 	Spatial            *citySpatialHashState            `json:"spatial,omitempty"`
 	Land               *cityLandHashState               `json:"land,omitempty"`
 	Development        *cityDevelopmentHashState        `json:"development,omitempty"`
 	EnterpriseLocation *cityEnterpriseLocationHashState `json:"enterprise_location,omitempty"`
 	WorldRuntime       *worldRuntimeHashState           `json:"world_runtime,omitempty"`
+	OpenWorldRuntime   *cityOpenWorldRuntimeHashState   `json:"open_world_runtime,omitempty"`
+	PublicServices     *cityPublicServiceHashState      `json:"public_services,omitempty"`
+	FacilityLifecycle  *cityFacilityLifecycleHashState  `json:"facility_lifecycle,omitempty"`
+	PhysicalNetworks   *cityPhysicalNetworkHashState    `json:"physical_networks,omitempty"`
 }
 
 type cityHashMonetaryUnit struct {
@@ -1693,6 +2310,18 @@ ORDER BY e.entity_type ASC, e.code ASC, u.code ASC, t.code ASC`, worldID)
 	if err != nil {
 		return state, err
 	}
+	if cityEngineSupportsOpenWorld(state.SimulationVersion) {
+		state.OpenWorld, err = loadCityOpenWorldHashState(ctx, queryer, worldID)
+		if err != nil {
+			return state, err
+		}
+	}
+	if cityEngineSupportsOpenWorldRuntime(state.SimulationVersion) {
+		state.OpenWorldRuntime, err = loadCityOpenWorldRuntimeHashState(ctx, queryer, worldID)
+		if err != nil {
+			return state, err
+		}
+	}
 	if cityEngineSupportsSpatial(state.SimulationVersion) {
 		state.Spatial, err = loadCitySpatialHashState(
 			ctx, queryer, worldID, state.SimulationVersion, state.Seed,
@@ -1727,6 +2356,24 @@ ORDER BY e.entity_type ASC, e.code ASC, u.code ASC, t.code ASC`, worldID)
 	}
 	if cityEngineSupportsWorldRuntime(state.SimulationVersion) {
 		state.WorldRuntime, err = loadWorldRuntimeHashState(ctx, queryer, worldID)
+		if err != nil {
+			return state, err
+		}
+	}
+	if cityEngineSupportsPublicServices(state.SimulationVersion) {
+		state.PublicServices, err = loadCityPublicServiceHashState(ctx, queryer, worldID)
+		if err != nil {
+			return state, err
+		}
+	}
+	if cityEngineSupportsFacilityLifecycle(state.SimulationVersion) {
+		state.FacilityLifecycle, err = loadCityFacilityLifecycleHashState(ctx, queryer, worldID)
+		if err != nil {
+			return state, err
+		}
+	}
+	if cityEngineSupportsPhysicalNetworks(state.SimulationVersion) {
+		state.PhysicalNetworks, err = loadCityPhysicalNetworkHashState(ctx, queryer, worldID)
 		if err != nil {
 			return state, err
 		}

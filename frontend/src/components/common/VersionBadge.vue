@@ -653,8 +653,8 @@ import Icon from '@/components/icons/Icon.vue'
 import { PROJECT_REPOSITORY } from '@/config/project'
 
 const GITHUB_REPO = PROJECT_REPOSITORY
-// Docker Hub image published by CI (tags carry no "v" prefix, e.g. weishaw/sub2api:0.1.146)
-const DOCKER_IMAGE = 'weishaw/sub2api'
+// Fork releases are published to the repository owner's GHCR namespace.
+const DOCKER_IMAGE = 'ghcr.io/galiais/sub2api'
 
 const { t } = useI18n()
 
