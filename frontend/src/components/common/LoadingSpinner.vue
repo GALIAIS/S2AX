@@ -1,11 +1,26 @@
 <template>
-  <div
-    :class="['spinner', sizeClasses, colorClass]"
+  <svg
+    :class="['loading-spinner', 'animate-spin', sizeClasses, colorClass]"
     role="status"
     :aria-label="t('common.loading')"
+    fill="none"
+    viewBox="0 0 24 24"
   >
-    <span class="sr-only">{{ t('common.loading') }}</span>
-  </div>
+    <title>{{ t('common.loading') }}</title>
+    <circle
+      class="opacity-25"
+      cx="12"
+      cy="12"
+      r="10"
+      stroke="currentColor"
+      :stroke-width="strokeWidth"
+    />
+    <path
+      class="opacity-75"
+      fill="currentColor"
+      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+    />
+  </svg>
 </template>
 
 <script setup lang="ts">
@@ -29,12 +44,22 @@ const props = withDefaults(defineProps<Props>(), {
 
 const sizeClasses = computed(() => {
   const sizes: Record<SpinnerSize, string> = {
-    sm: 'w-4 h-4 border-2',
-    md: 'w-8 h-8 border-2',
-    lg: 'w-12 h-12 border-[3px]',
-    xl: 'w-16 h-16 border-4'
+    sm: 'h-4 w-4',
+    md: 'h-8 w-8',
+    lg: 'h-12 w-12',
+    xl: 'h-16 w-16'
   }
   return sizes[props.size]
+})
+
+const strokeWidth = computed(() => {
+  const widths: Record<SpinnerSize, number> = {
+    sm: 3,
+    md: 3,
+    lg: 2.5,
+    xl: 2.25
+  }
+  return widths[props.size]
 })
 
 const colorClass = computed(() => {
@@ -49,17 +74,8 @@ const colorClass = computed(() => {
 </script>
 
 <style scoped>
-.spinner {
-  @apply inline-block rounded-full border-solid border-current border-r-transparent;
-  animation: spin 0.75s linear infinite;
-}
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.loading-spinner {
+  @apply inline-block;
+  animation-duration: 0.75s;
 }
 </style>

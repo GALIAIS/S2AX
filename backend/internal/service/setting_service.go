@@ -50,6 +50,7 @@ type SettingService struct {
 	defaultSubGroupReader       DefaultSubscriptionGroupReader
 	proxyRepo                   ProxyRepository // for resolving websearch provider proxy URLs
 	cfg                         *config.Config
+	ipGeolocationService        *IPGeolocationService
 	onUpdate                    func() // Callback when settings are updated (for cache invalidation)
 	version                     string // Application version
 	webSearchManagerBuilder     WebSearchManagerBuilder

@@ -1,7 +1,7 @@
 import { reactive } from 'vue'
 import { lookupIPGeolocation, type IPGeolocationLookupResult } from '@/api/ipGeolocation'
 
-export type IpGeoStatus = 'idle' | 'loading' | 'success' | 'error' | 'private'
+export type IpGeoStatus = 'idle' | 'loading' | 'success' | 'error' | 'private' | 'unavailable'
 
 export interface IpGeoDetail {
 	country?: string
@@ -171,6 +171,10 @@ function applyBackendResult(raw: IPGeolocationLookupResult): boolean {
 			return false
 		case 'unavailable':
 		case 'not_found':
+			if (raw.fallback_allowed === false) {
+				cache.set(ip, { status: 'unavailable' })
+				return false
+			}
 			return true
 		default:
 			return true

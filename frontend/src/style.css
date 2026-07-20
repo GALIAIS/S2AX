@@ -44,6 +44,17 @@
     border-radius: 0 !important;
   }
 
+  /*
+   * The interface intentionally uses square controls, but a loading indicator
+   * is semantic feedback rather than a panel/control. Keep every border-based
+   * Tailwind spinner circular; otherwise the global hard-edge reset turns the
+   * rotating arc into the angular shape seen during dashboard/chart loading.
+   */
+  .spinner,
+  .animate-spin.rounded-full {
+    border-radius: 9999px !important;
+  }
+
   html {
     @apply scroll-smooth antialiased;
     background: var(--ui-canvas);

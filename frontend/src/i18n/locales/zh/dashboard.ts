@@ -377,6 +377,7 @@ export default {
       fetching: '获取中...',
       failed: '获取失败',
       private: '内网地址',
+      unavailable: '未启用归属地解析',
       refreshTitle: '刷新地区信息',
       batchFetch: '批量获取地区',
       batchFetching: '获取中...',

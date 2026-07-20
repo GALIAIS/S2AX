@@ -110,6 +110,17 @@ describe('fetchOne', () => {
     expect(getEntry('8.8.8.8')).toEqual(expect.objectContaining({ status: 'success', label: 'US · California · Mountain View' }))
   })
 
+  it('does not contact GeoJS when the backend explicitly disables fallback', async () => {
+    lookupIPGeolocation.mockResolvedValue([
+      { ip: '9.9.9.10', status: 'unavailable', fallback_allowed: false },
+    ])
+
+    await fetchOne('9.9.9.10')
+
+    expect(global.fetch).not.toHaveBeenCalled()
+    expect(getEntry('9.9.9.10')).toEqual({ status: 'unavailable' })
+  })
+
   it('marks the entry as error when the response has no country_code', async () => {
     (global.fetch as any).mockResolvedValue({
       ok: true,

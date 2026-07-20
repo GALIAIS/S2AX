@@ -16,6 +16,30 @@ export interface DefaultSubscriptionSetting {
   validity_days: number;
 }
 
+export type IPGeolocationProvider = "ip2region" | "geojs" | "disabled";
+
+export interface IPGeolocationSettings {
+  provider: IPGeolocationProvider;
+  ipv4_xdb_path: string;
+  ipv6_xdb_path: string;
+  cache_policy: string;
+  searchers: number;
+  compatibility_fallback_enabled: boolean;
+  ipv4_database_loaded: boolean;
+  ipv6_database_loaded: boolean;
+  local_resolver_available: boolean;
+}
+
+export type UpdateIPGeolocationSettingsRequest = Pick<
+  IPGeolocationSettings,
+  | "provider"
+  | "ipv4_xdb_path"
+  | "ipv6_xdb_path"
+  | "cache_policy"
+  | "searchers"
+  | "compatibility_fallback_enabled"
+>;
+
 // ── 平台限额类型 ──────────────────────────────────────────────────
 export type PlatformType = "anthropic" | "openai" | "gemini" | "antigravity" | "grok"
 export type QuotaWindowType = "daily" | "weekly" | "monthly"
@@ -943,6 +967,25 @@ export async function getSettings(): Promise<SystemSettings> {
   return data;
 }
 
+/** Returns the independently managed IP attribution provider and runtime readiness. */
+export async function getIPGeolocationSettings(): Promise<IPGeolocationSettings> {
+  const { data } = await apiClient.get<IPGeolocationSettings>(
+    "/admin/settings/ip-geolocation",
+  );
+  return data;
+}
+
+/** Persists IP attribution settings and swaps the local resolver without a restart. */
+export async function updateIPGeolocationSettings(
+  settings: UpdateIPGeolocationSettingsRequest,
+): Promise<IPGeolocationSettings> {
+  const { data } = await apiClient.put<IPGeolocationSettings>(
+    "/admin/settings/ip-geolocation",
+    settings,
+  );
+  return data;
+}
+
 /**
  * Update system settings
  * @param settings - Partial settings to update
@@ -1419,6 +1462,8 @@ export async function resetWebSearchUsage(payload: {
 export const settingsAPI = {
   getSettings,
   updateSettings,
+  getIPGeolocationSettings,
+  updateIPGeolocationSettings,
   testSmtpConnection,
   sendTestEmail,
   getEmailTemplates,

@@ -168,6 +168,38 @@ export default {
         forwardedClientIpHeadersLimit: 'At most {max} custom client-IP headers are allowed.',
         removeForwardedClientIpHeader: 'Remove {header}'
       },
+      ipGeolocation: {
+        title: 'IP Geolocation',
+        description: 'Controls how IP locations are resolved in usage records. It does not change client-IP extraction: source IP, IP ACLs, and audit logs remain managed by API Key IP Access Control above.',
+        provider: 'Resolution provider',
+        providerHint: 'Offline mode requires a readable ip2region .xdb file inside the running container. GeoJS compatibility mode is queried by the browser.',
+        providers: {
+          ip2region: 'ip2region (local offline database)',
+          geojs: 'GeoJS compatibility mode (browser network request)',
+          disabled: 'Do not resolve locations'
+        },
+        ipv4XdbPath: 'IPv4 XDB file path',
+        ipv6XdbPath: 'IPv6 XDB file path',
+        ipv4XdbPlaceholder: '/data/ip2region/ip2region_v4.xdb',
+        ipv6XdbPlaceholder: '/data/ip2region/ip2region_v6.xdb',
+        xdbPathHint: 'The path must be mounted and readable inside the running container. An empty address family is not resolved.',
+        cachePolicy: 'ip2region cache policy',
+        cachePolicies: {
+          vectorindex: 'Vector index (recommended)',
+          content: 'Content cache',
+          file: 'File lookup'
+        },
+        searchers: 'Concurrent searchers',
+        searchersHint: 'Range 1–64; keep the default of 4 in most deployments.',
+        compatibilityFallback: 'Allow GeoJS compatibility fallback when offline lookup is unavailable',
+        compatibilityFallbackHint: 'When enabled, the browser requests GeoJS if the local XDB is missing or has no match. When disabled, only local results are shown and no IP is sent to a third party.',
+        runtimeTitle: 'Current runtime status',
+        runtimeOfflineReady: 'A local ip2region database is loaded; locations are resolved offline by the server.',
+        runtimeFallback: 'No usable local XDB is loaded; GeoJS compatibility fallback is active.',
+        runtimeUnavailable: 'No usable local XDB is loaded and compatibility fallback is disabled; locations will not be shown.',
+        runtimeGeojs: 'GeoJS compatibility mode is active; the browser resolves locations and no local XDB is used.',
+        runtimeDisabled: 'Geolocation is disabled; no local or third-party lookup is performed.'
+      },
       linuxdo: {
         title: 'LinuxDo Connect Login',
         description: 'Configure LinuxDo Connect OAuth for Sub2API end-user login',

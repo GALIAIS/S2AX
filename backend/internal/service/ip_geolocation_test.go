@@ -18,7 +18,35 @@ func TestIPGeolocationLookupClassifiesPrivateAndUnavailableAddresses(t *testing.
 	}
 
 	require.Equal(t, IPGeolocationStatusInvalid, svc.Lookup("not-an-ip").Status)
-	require.Equal(t, IPGeolocationStatusUnavailable, svc.Lookup("8.8.8.8").Status)
+	result := svc.Lookup("8.8.8.8")
+	require.Equal(t, IPGeolocationStatusUnavailable, result.Status)
+	require.True(t, result.FallbackAllowed)
+}
+
+func TestIPGeolocationLookupHonorsRuntimeFallbackSelection(t *testing.T) {
+	svc := NewIPGeolocationService(&config.Config{
+		IPGeolocation: config.IPGeolocationConfig{Provider: "ip2region"},
+	})
+
+	require.NoError(t, svc.Reload(IPGeolocationSettings{
+		Provider:                     IPGeolocationProviderDisabled,
+		CachePolicy:                  "vectorindex",
+		Searchers:                    4,
+		CompatibilityFallbackEnabled: true,
+	}))
+	disabled := svc.Lookup("8.8.8.8")
+	require.Equal(t, IPGeolocationStatusUnavailable, disabled.Status)
+	require.False(t, disabled.FallbackAllowed)
+
+	require.NoError(t, svc.Reload(IPGeolocationSettings{
+		Provider:    IPGeolocationProviderGeoJS,
+		CachePolicy: "vectorindex",
+		Searchers:   4,
+	}))
+	geojs := svc.Lookup("8.8.8.8")
+	require.Equal(t, IPGeolocationStatusUnavailable, geojs.Status)
+	require.True(t, geojs.FallbackAllowed)
+	require.Equal(t, IPGeolocationProviderGeoJS, svc.Settings().Provider)
 }
 
 func TestParseIP2RegionRecord(t *testing.T) {

@@ -639,13 +639,17 @@ func ProvideOpsIngressRejectAggregator(opsRepo OpsRepository, opsService *OpsSer
 	return aggregator
 }
 
-// ProvideSettingService wires SettingService with group reader and proxy repo.
-func ProvideSettingService(settingRepo SettingRepository, groupRepo GroupRepository, proxyRepo ProxyRepository, cfg *config.Config) *SettingService {
+// ProvideSettingService wires SettingService with its live-updatable runtime dependencies.
+func ProvideSettingService(settingRepo SettingRepository, groupRepo GroupRepository, proxyRepo ProxyRepository, cfg *config.Config, ipGeolocationService *IPGeolocationService) *SettingService {
 	svc := NewSettingService(settingRepo, cfg)
 	svc.SetDefaultSubscriptionGroupReader(groupRepo)
 	svc.SetProxyRepository(proxyRepo)
+	svc.SetIPGeolocationService(ipGeolocationService)
 	if err := svc.LoadForwardedClientIPSettings(context.Background()); err != nil {
 		logger.LegacyPrintf("service.setting", "Warning: load forwarded client IP settings failed: %v", err)
+	}
+	if err := svc.LoadIPGeolocationSettings(context.Background()); err != nil {
+		logger.LegacyPrintf("service.setting", "Warning: load IP geolocation settings failed: %v", err)
 	}
 	if err := svc.MigrateOpenAIAllowClaudeCodeCodexPluginSetting(context.Background()); err != nil {
 		logger.LegacyPrintf("service.setting", "Warning: migrate openai allow Claude Code Codex plugin setting failed: %v", err)

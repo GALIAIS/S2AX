@@ -22,6 +22,7 @@ vi.mock('vue-i18n', async () => {
           'usage.ipGeo.fetching': 'Fetching...',
           'usage.ipGeo.failed': 'Failed',
           'usage.ipGeo.private': 'Private address',
+          'usage.ipGeo.unavailable': 'Geolocation disabled',
           'usage.ipGeo.refreshTitle': 'Refresh',
           'usage.ipGeo.detailOrg': 'ISP',
           'usage.ipGeo.detailTimezone': 'Timezone',
@@ -103,6 +104,13 @@ describe('IpGeoCell', () => {
     mocks.getEntry.mockReturnValue({ status: 'private' })
     const wrapper = mount(IpGeoCell, { props: { ip: '192.168.1.1' } })
     expect(wrapper.text()).toContain('Private address')
+    expect(wrapper.find('button').exists()).toBe(false)
+  })
+
+  it('renders disabled geolocation as non-clickable text', () => {
+    mocks.getEntry.mockReturnValue({ status: 'unavailable' })
+    const wrapper = mount(IpGeoCell, { props: { ip: '8.8.8.8' } })
+    expect(wrapper.text()).toContain('Geolocation disabled')
     expect(wrapper.find('button').exists()).toBe(false)
   })
 })

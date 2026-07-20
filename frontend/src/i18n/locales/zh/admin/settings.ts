@@ -167,6 +167,38 @@ export default {
         forwardedClientIpHeadersLimit: '自定义客户端 IP 请求头最多允许 {max} 个。',
         removeForwardedClientIpHeader: '移除 {header}'
       },
+      ipGeolocation: {
+        title: 'IP 归属地解析',
+        description: '控制使用记录中 IP 归属地的解析方式。它不会改变客户端 IP 的提取规则；来源 IP、IP 白名单和审计日志仍由上方 API Key IP 访问控制管理。',
+        provider: '解析来源',
+        providerHint: '离线模式要求容器内存在可读的 ip2region .xdb 文件；GeoJS 兼容模式由浏览器联网查询。',
+        providers: {
+          ip2region: 'ip2region（本地离线库）',
+          geojs: 'GeoJS 兼容模式（浏览器联网）',
+          disabled: '不解析归属地'
+        },
+        ipv4XdbPath: 'IPv4 XDB 文件路径',
+        ipv6XdbPath: 'IPv6 XDB 文件路径',
+        ipv4XdbPlaceholder: '/data/ip2region/ip2region_v4.xdb',
+        ipv6XdbPlaceholder: '/data/ip2region/ip2region_v6.xdb',
+        xdbPathHint: '路径必须是运行中容器可访问的挂载路径。留空的地址族不会解析。',
+        cachePolicy: 'ip2region 缓存策略',
+        cachePolicies: {
+          vectorindex: '向量索引（推荐）',
+          content: '内容缓存',
+          file: '文件查询'
+        },
+        searchers: '并发查询器数量',
+        searchersHint: '范围 1–64；通常保留默认 4 即可。',
+        compatibilityFallback: '离线解析不可用时允许 GeoJS 兼容回退',
+        compatibilityFallbackHint: '开启后，未挂载或未命中本地 XDB 时浏览器会请求 GeoJS。关闭后仅显示本地解析结果，不会向第三方发送 IP。',
+        runtimeTitle: '当前运行状态',
+        runtimeOfflineReady: '本地 ip2region 数据库已加载，归属地在服务端离线解析。',
+        runtimeFallback: '未加载可用的本地 XDB；当前会回退到 GeoJS 兼容服务。',
+        runtimeUnavailable: '未加载可用的本地 XDB，且兼容回退已关闭；不会显示归属地。',
+        runtimeGeojs: '当前使用 GeoJS 兼容模式，由浏览器查询归属地，不使用本地 XDB。',
+        runtimeDisabled: '归属地解析已关闭；不会查询本地或第三方服务。'
+      },
       linuxdo: {
         title: 'LinuxDo Connect 登录',
         description: '配置 LinuxDo Connect OAuth，用于 Sub2API 用户登录',

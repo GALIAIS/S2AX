@@ -5,6 +5,7 @@ export type IPGeolocationLookupStatus = 'success' | 'private' | 'invalid' | 'una
 export interface IPGeolocationLookupResult {
   ip: string
   status: IPGeolocationLookupStatus
+  fallback_allowed?: boolean
   country?: string
   country_code?: string
   region?: string

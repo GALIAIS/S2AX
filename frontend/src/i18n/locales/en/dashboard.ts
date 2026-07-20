@@ -372,6 +372,7 @@ export default {
       fetching: 'Fetching...',
       failed: 'Failed',
       private: 'Private address',
+      unavailable: 'Geolocation disabled',
       refreshTitle: 'Refresh region info',
       batchFetch: 'Batch fetch regions',
       batchFetching: 'Fetching...',

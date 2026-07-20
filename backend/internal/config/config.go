@@ -677,8 +677,8 @@ type ServerConfig struct {
 // IPGeolocationConfig controls server-side IP geolocation. Client-address
 // extraction remains governed exclusively by server.trusted_proxies.
 type IPGeolocationConfig struct {
-	// Provider is currently ip2region or disabled. ip2region is the offline
-	// default; browser GeoJS remains only as a compatibility fallback.
+	// Provider is ip2region, geojs, or disabled. ip2region is the offline
+	// default; geojs intentionally delegates to the browser compatibility path.
 	Provider string `mapstructure:"provider"`
 	// IPv4XDBPath and IPv6XDBPath are optional verified ip2region xdb files.
 	// An unset family is unavailable rather than causing the server to fail.
@@ -2540,8 +2540,8 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("server.trusted_proxies contains invalid IP %q: %w", value, err)
 		}
 	}
-	if provider := strings.ToLower(strings.TrimSpace(c.IPGeolocation.Provider)); provider != "" && provider != "ip2region" && provider != "disabled" {
-		return fmt.Errorf("ip_geolocation.provider must be one of: ip2region/disabled")
+	if provider := strings.ToLower(strings.TrimSpace(c.IPGeolocation.Provider)); provider != "" && provider != "ip2region" && provider != "geojs" && provider != "disabled" {
+		return fmt.Errorf("ip_geolocation.provider must be one of: ip2region/geojs/disabled")
 	}
 	if policy := strings.ToLower(strings.TrimSpace(c.IPGeolocation.CachePolicy)); policy != "" && policy != "file" && policy != "nocache" && policy != "vectorindex" && policy != "vindex" && policy != "vindexcache" && policy != "content" && policy != "buffercache" {
 		return fmt.Errorf("ip_geolocation.cache_policy must be one of: file/vectorindex/content")

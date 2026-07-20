@@ -51,6 +51,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("marshal default forwarded client IP headers: %w", err)
 	}
+	ipGeolocationSettings := defaultIPGeolocationSettings(s.cfg)
 
 	// 初始化默认设置
 	defaults := map[string]string{
@@ -65,6 +66,12 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyAPIKeyACLTrustForwardedIP:                 "true",
 		SettingKeyForwardedClientIPHeaders:                  string(forwardedClientIPHeadersJSON),
 		settingKeyForwardedClientIPModeV2:                   "true",
+		SettingKeyIPGeolocationProvider:                     string(ipGeolocationSettings.Provider),
+		SettingKeyIPGeolocationIPv4XDBPath:                  ipGeolocationSettings.IPv4XDBPath,
+		SettingKeyIPGeolocationIPv6XDBPath:                  ipGeolocationSettings.IPv6XDBPath,
+		SettingKeyIPGeolocationCachePolicy:                  ipGeolocationSettings.CachePolicy,
+		SettingKeyIPGeolocationSearchers:                    strconv.Itoa(ipGeolocationSettings.Searchers),
+		SettingKeyIPGeolocationCompatibilityFallbackEnabled: strconv.FormatBool(ipGeolocationSettings.CompatibilityFallbackEnabled),
 		SettingKeySiteName:                                  "Sub2API",
 		SettingKeySiteLogo:                                  "",
 		SettingKeyPurchaseSubscriptionEnabled:               "false",

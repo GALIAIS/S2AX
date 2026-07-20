@@ -170,6 +170,14 @@ const (
 	SettingKeyForwardedClientIPHeaders  = "forwarded_client_ip_headers"    // 自定义 CDN 客户端 IP 请求头（JSON 数组）
 	settingKeyForwardedClientIPModeV2   = "forwarded_client_ip_mode_v2_migrated"
 
+	// IP 归属地解析设置。客户端 IP 的提取仍由上方 API Key IP 访问控制单独管理。
+	SettingKeyIPGeolocationProvider                     = "ip_geolocation_provider"
+	SettingKeyIPGeolocationIPv4XDBPath                  = "ip_geolocation_ipv4_xdb_path"
+	SettingKeyIPGeolocationIPv6XDBPath                  = "ip_geolocation_ipv6_xdb_path"
+	SettingKeyIPGeolocationCachePolicy                  = "ip_geolocation_cache_policy"
+	SettingKeyIPGeolocationSearchers                    = "ip_geolocation_searchers"
+	SettingKeyIPGeolocationCompatibilityFallbackEnabled = "ip_geolocation_compatibility_fallback_enabled"
+
 	// TOTP 双因素认证设置
 	SettingKeyTotpEnabled = "totp_enabled" // 是否启用 TOTP 2FA 功能
 
