@@ -67,3 +67,15 @@ jobs:
             COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # `edge` is intentionally mutable. When a newer image takes that tag,
+      # GHCR retains the former digest as an untagged package version unless
+      # it is pruned explicitly.
+      - name: Prune superseded untagged image versions
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: s2ax
+          package-type: container
+          min-versions-to-keep: 0
+          delete-only-untagged-versions: 'true'
