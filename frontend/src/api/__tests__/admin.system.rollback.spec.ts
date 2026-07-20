@@ -12,7 +12,14 @@ vi.mock('../client', () => ({
   },
 }))
 
-import { getRollbackVersions, rollback, type RollbackVersionInfo } from '@/api/admin/system'
+import {
+  getRollbackVersions,
+  performUpdate,
+  rollback,
+  type RollbackVersionInfo
+} from '@/api/admin/system'
+
+const UPDATE_REQUEST_TIMEOUT_MS = 15 * 60 * 1000
 
 describe('admin system rollback API', () => {
   beforeEach(() => {
@@ -41,7 +48,9 @@ describe('admin system rollback API', () => {
 
     const result = await rollback('0.1.146')
 
-    expect(post).toHaveBeenCalledWith('/admin/system/rollback', { version: '0.1.146' })
+    expect(post).toHaveBeenCalledWith('/admin/system/rollback', { version: '0.1.146' }, {
+      timeout: UPDATE_REQUEST_TIMEOUT_MS
+    })
     expect(result.need_restart).toBe(true)
   })
 
@@ -50,6 +59,18 @@ describe('admin system rollback API', () => {
 
     await rollback()
 
-    expect(post).toHaveBeenCalledWith('/admin/system/rollback', undefined)
+    expect(post).toHaveBeenCalledWith('/admin/system/rollback', undefined, {
+      timeout: UPDATE_REQUEST_TIMEOUT_MS
+    })
+  })
+
+  it('update uses the extended request timeout', async () => {
+    post.mockResolvedValue({ data: { message: 'ok', need_restart: true } })
+
+    await performUpdate()
+
+    expect(post).toHaveBeenCalledWith('/admin/system/update', undefined, {
+      timeout: UPDATE_REQUEST_TIMEOUT_MS
+    })
   })
 })
