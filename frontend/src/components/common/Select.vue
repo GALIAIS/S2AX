@@ -183,9 +183,12 @@ const triggerRect = ref<DOMRect | null>(null)
 const placeholderText = computed(() => props.placeholder ?? t('common.selectOption'))
 const searchPlaceholderText = computed(() => props.searchPlaceholder ?? t('common.searchPlaceholder'))
 const emptyTextDisplay = computed(() => props.emptyText ?? t('common.noOptionsFound'))
+const AUTO_SEARCH_OPTION_THRESHOLD = 10
 
 const isSearchable = computed(() => {
-  if (props.searchable === 'auto') return props.options.length > 5
+  // Compact filters (status, role, type, etc.) should open as a direct option
+  // list. Searching seven choices adds visual noise without improving lookup.
+  if (props.searchable === 'auto') return props.options.length > AUTO_SEARCH_OPTION_THRESHOLD
   return props.searchable
 })
 
@@ -515,7 +518,7 @@ onUnmounted(() => {
 }
 
 .select-dropdown-portal .select-search {
-  @apply flex items-center gap-2 px-3 py-2;
+  @apply flex items-center gap-2 px-4 py-2;
   @apply border-b border-gray-100 dark:border-dark-700;
 }
 
@@ -527,12 +530,12 @@ onUnmounted(() => {
 }
 
 .select-dropdown-portal .select-options {
-  @apply max-h-80 overflow-y-auto py-1 outline-none;
+  @apply max-h-80 overflow-y-auto p-1 outline-none;
 }
 
 .select-dropdown-portal .select-option {
   @apply flex items-center justify-between gap-2;
-  @apply px-4 py-2.5 text-sm;
+  @apply px-3 py-2.5 text-sm;
   @apply cursor-pointer transition-[background-color,color] duration-150;
   color: var(--ui-label);
   pointer-events: auto !important;

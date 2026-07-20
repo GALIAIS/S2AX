@@ -541,7 +541,6 @@
             :model-value="null"
             :options="copyAccountsGroupSelectOptions"
             :placeholder="t('admin.groups.copyAccounts.selectPlaceholder')"
-            :searchable="copyAccountsGroupOptions.length > 5"
             @change="addCopyAccountsGroup(createForm.copy_accounts_from_group_ids, $event)"
           />
           <p class="input-hint">{{ t("admin.groups.copyAccounts.hint") }}</p>
@@ -2009,7 +2008,6 @@
             :model-value="null"
             :options="copyAccountsGroupSelectOptionsForEdit"
             :placeholder="t('admin.groups.copyAccounts.selectPlaceholder')"
-            :searchable="copyAccountsGroupOptionsForEdit.length > 5"
             @change="addCopyAccountsGroup(editForm.copy_accounts_from_group_ids, $event)"
           />
           <p class="input-hint">

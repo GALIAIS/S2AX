@@ -72,4 +72,44 @@ describe('Select', () => {
 
     wrapper.unmount()
   })
+
+  it('keeps compact filters free of an unnecessary search field', async () => {
+    const compactOptions = Array.from({ length: 7 }, (_, index) => ({
+      value: String(index),
+      label: `Option ${index + 1}`,
+    }))
+    const compact = mount(Select, {
+      attachTo: document.body,
+      props: {
+        modelValue: '0',
+        options: compactOptions,
+      },
+      global: { plugins: [i18n] },
+    })
+
+    await compact.get('.select-trigger').trigger('click')
+    await nextTick()
+    expect(document.body.querySelector('.select-search')).toBeNull()
+
+    compact.unmount()
+    document.body.innerHTML = ''
+
+    const longList = mount(Select, {
+      attachTo: document.body,
+      props: {
+        modelValue: '0',
+        options: Array.from({ length: 11 }, (_, index) => ({
+          value: String(index),
+          label: `Option ${index + 1}`,
+        })),
+      },
+      global: { plugins: [i18n] },
+    })
+
+    await longList.get('.select-trigger').trigger('click')
+    await nextTick()
+    expect(document.body.querySelector('.select-search')).not.toBeNull()
+
+    longList.unmount()
+  })
 })

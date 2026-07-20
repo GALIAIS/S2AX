@@ -46,9 +46,9 @@ jobs:
 
       - id: version
         shell: bash
-        env:
-          IMAGE_TAG: ${{ inputs.image_tag || github.ref_name }}
-        run: echo "value=${IMAGE_TAG#v}" >> "$GITHUB_OUTPUT"
+        # Runtime version is a product value, not a branch or image tag.  Using
+        # github.ref_name made main builds report `vmain` in the application.
+        run: echo "value=$(tr -d '\r\n' < backend/cmd/server/VERSION)" >> "$GITHUB_OUTPUT"
 
       - uses: docker/build-push-action@v6
         with:

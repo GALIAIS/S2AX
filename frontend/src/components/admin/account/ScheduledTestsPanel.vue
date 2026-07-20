@@ -37,7 +37,6 @@
               v-model="newPlan.model_id"
               :options="modelOptions"
               :placeholder="t('admin.scheduledTests.model')"
-              :searchable="modelOptions.length > 5"
             />
           </div>
           <div>
@@ -247,7 +246,6 @@
                   v-model="editForm.model_id"
                   :options="modelOptions"
                   :placeholder="t('admin.scheduledTests.model')"
-                  :searchable="modelOptions.length > 5"
                 />
               </div>
               <div>

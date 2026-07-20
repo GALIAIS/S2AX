@@ -60,7 +60,7 @@
         </label>
         <label>
           <span>{{ t('citySpatial.services.network.filters.network') }}</span>
-          <Select v-model="filters.network" :options="networkOptions" :searchable="networkOptions.length > 8" />
+          <Select v-model="filters.network" :options="networkOptions" />
         </label>
         <label v-if="activeView === 'topology'">
           <span>{{ t('citySpatial.services.network.filters.edgeStatus') }}</span>
@@ -379,7 +379,7 @@
 
       <form v-else-if="operation === 'node'" class="city-network-form" @submit.prevent="submitOperation">
         <label><span>{{ t('citySpatial.services.form.code') }}</span><input v-model.trim="nodeForm.code" class="input font-mono" maxlength="96" :disabled="nodeForm.lockIdentity" required /></label>
-        <label><span>{{ t('citySpatial.services.network.filters.network') }}</span><Select v-model="nodeForm.networkCode" :options="networkIdentityOptions" :searchable="networkIdentityOptions.length > 8" :disabled="nodeForm.lockIdentity" /></label>
+        <label><span>{{ t('citySpatial.services.network.filters.network') }}</span><Select v-model="nodeForm.networkCode" :options="networkIdentityOptions" :disabled="nodeForm.lockIdentity" /></label>
         <label><span>{{ t('citySpatial.services.network.columns.role') }}</span><Select v-model="nodeForm.role" :options="nodeRoleOptions" :searchable="false" /></label>
         <label><span>{{ t('citySpatial.services.form.status') }}</span><Select v-model="nodeForm.status" :options="nodeStatusOptions" :searchable="false" /></label>
         <label v-if="nodeForm.role === 'supply'"><span>{{ t('citySpatial.services.network.form.capacityBinding') }}</span><Select v-model="nodeForm.capacityCode" :options="capacityOptions" searchable /></label>

@@ -196,7 +196,6 @@
               v-else-if="field.options?.length"
               v-model="config[field.key]"
               :options="field.options"
-              :searchable="field.options.length > 5"
             />
             <input
               v-else

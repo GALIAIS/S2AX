@@ -225,7 +225,6 @@
               :placeholder="selectedPolicy.status === 'active' ? t('admin.accountAllocations.selectCandidate') : t('admin.accountAllocations.policyDisabled')"
               :empty-text="t('admin.accountAllocations.noCandidates')"
               :disabled="selectedPolicy.status !== 'active' || detailsLoading"
-              :searchable="candidateOptions.length > 0"
             />
             <button type="button" class="btn btn-primary shrink-0" :disabled="!selectedCandidateID || assigning || selectedPolicy.status !== 'active'" @click="assignCandidate">
               <Icon name="plus" size="sm" />

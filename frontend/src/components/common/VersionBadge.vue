@@ -654,7 +654,7 @@ import { PROJECT_REPOSITORY } from '@/config/project'
 
 const GITHUB_REPO = PROJECT_REPOSITORY
 // Fork releases are published to the repository owner's GHCR namespace.
-const DOCKER_IMAGE = 'ghcr.io/galiais/sub2api'
+const DOCKER_IMAGE = 'ghcr.io/galiais/s2ax'
 
 const { t } = useI18n()
 

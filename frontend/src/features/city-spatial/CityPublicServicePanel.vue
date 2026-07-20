@@ -169,15 +169,15 @@
           </label>
           <label v-if="activeTab === 'facilities' || activeTab === 'demands'">
             <span>{{ t('citySpatial.services.filters.district') }}</span>
-            <Select v-model="filters.district" :options="districtFilterOptions" :searchable="districtFilterOptions.length > 8" />
+            <Select v-model="filters.district" :options="districtFilterOptions" />
           </label>
           <label v-if="activeTab === 'connections'">
             <span>{{ t('citySpatial.services.filters.facility') }}</span>
-            <Select v-model="filters.facility" :options="facilityFilterOptions" :searchable="facilityFilterOptions.length > 8" />
+            <Select v-model="filters.facility" :options="facilityFilterOptions" />
           </label>
           <label v-if="activeTab === 'connections' || activeTab === 'settlements'">
             <span>{{ t('citySpatial.services.filters.demand') }}</span>
-            <Select v-model="filters.demand" :options="demandFilterOptions" :searchable="demandFilterOptions.length > 8" />
+            <Select v-model="filters.demand" :options="demandFilterOptions" />
           </label>
           <button type="button" class="btn btn-secondary btn-sm" :disabled="loading" @click="applyFilters">
             <Icon name="filter" size="sm" />
@@ -392,14 +392,14 @@
         <label><span>{{ t('citySpatial.services.form.code') }}</span><input v-model.trim="registerForm.code" class="input font-mono" maxlength="96" required /></label>
         <label><span>{{ t('citySpatial.services.form.name') }}</span><input v-model.trim="registerForm.name" class="input" maxlength="96" required /></label>
         <label><span>{{ t('citySpatial.services.form.facilityType') }}</span><Select v-model="registerForm.facilityTypeCode" :options="facilityTypeOptions" :searchable="false" /></label>
-        <label><span>{{ t('citySpatial.services.form.building') }}</span><Select v-model="registerForm.buildingCode" :options="eligibleBuildingOptions" :searchable="eligibleBuildingOptions.length > 8" /></label>
+        <label><span>{{ t('citySpatial.services.form.building') }}</span><Select v-model="registerForm.buildingCode" :options="eligibleBuildingOptions" /></label>
         <label><span>{{ t('citySpatial.services.form.ownerEntity') }}</span><Select v-model="registerForm.ownerEntityCode" :options="ownerEntityOptions" searchable creatable clearable /></label>
         <label><span>{{ t('citySpatial.services.form.reliability') }}</span><input v-model.number="registerForm.reliabilityMilli" class="input font-mono" type="number" min="0" max="1000" /></label>
         <p class="city-service-form-note">{{ t('citySpatial.services.form.registerNote') }}</p>
       </form>
 
       <form v-else-if="operation === 'capacity'" class="city-service-form" @submit.prevent="submitOperation">
-        <label><span>{{ t('citySpatial.services.form.facility') }}</span><Select v-model="capacityForm.facilityCode" :options="facilityOptions" :searchable="facilityOptions.length > 8" :disabled="capacityForm.lockIdentity" /></label>
+        <label><span>{{ t('citySpatial.services.form.facility') }}</span><Select v-model="capacityForm.facilityCode" :options="facilityOptions" :disabled="capacityForm.lockIdentity" /></label>
         <label><span>{{ t('citySpatial.services.form.service') }}</span><Select v-model="capacityForm.serviceCode" :options="capacityServiceOptions" :searchable="false" :disabled="capacityForm.lockIdentity" /></label>
         <label><span>{{ t('citySpatial.services.form.installedCapacity') }}</span><input v-model.number="capacityForm.installedCapacityUnits" class="input font-mono" type="number" min="1" max="922337203685477" required /></label>
         <label><span>{{ t('citySpatial.services.form.availability') }}</span><input v-model.number="capacityForm.availabilityMilli" class="input font-mono" type="number" min="0" max="1000" required /></label>
@@ -408,7 +408,7 @@
       </form>
 
       <form v-else-if="operation === 'status'" class="city-service-form" @submit.prevent="submitOperation">
-        <label><span>{{ t('citySpatial.services.form.facility') }}</span><Select v-model="statusForm.facilityCode" :options="facilityOptions" :searchable="facilityOptions.length > 8" @change="syncStatusFacility" /></label>
+        <label><span>{{ t('citySpatial.services.form.facility') }}</span><Select v-model="statusForm.facilityCode" :options="facilityOptions" @change="syncStatusFacility" /></label>
         <label><span>{{ t('citySpatial.services.form.targetStatus') }}</span><Select v-model="statusForm.toStatus" :options="statusTransitionOptions" :searchable="false" /></label>
         <div class="city-service-form-preview"><span>{{ t('citySpatial.services.form.currentStatus') }}</span><strong>{{ selectedStatusFacility ? t(`citySpatial.services.status.${selectedStatusFacility.facility.status}`) : '—' }}</strong><code>v{{ statusForm.expectedVersion }} → v{{ statusForm.expectedVersion + 1 }}</code></div>
         <p class="city-service-form-note">{{ t('citySpatial.services.form.statusNote') }}</p>
@@ -429,8 +429,8 @@
       <form v-else-if="operation === 'connection'" class="city-service-form" @submit.prevent="submitOperation">
         <label><span>{{ t('citySpatial.services.form.code') }}</span><input v-model.trim="connectionForm.code" class="input font-mono" maxlength="96" :disabled="connectionForm.lockIdentity" required /></label>
         <label><span>{{ t('citySpatial.services.form.service') }}</span><Select v-model="connectionForm.serviceCode" :options="serviceOptions" :searchable="false" :disabled="connectionForm.lockIdentity" @change="syncConnectionReferences" /></label>
-        <label><span>{{ t('citySpatial.services.form.facility') }}</span><Select v-model="connectionForm.facilityCode" :options="connectionFacilityOptions" :searchable="connectionFacilityOptions.length > 8" :disabled="connectionForm.lockIdentity" /></label>
-        <label><span>{{ t('citySpatial.services.form.demand') }}</span><Select v-model="connectionForm.demandCode" :options="connectionDemandOptions" :searchable="connectionDemandOptions.length > 8" :disabled="connectionForm.lockIdentity" /></label>
+        <label><span>{{ t('citySpatial.services.form.facility') }}</span><Select v-model="connectionForm.facilityCode" :options="connectionFacilityOptions" :disabled="connectionForm.lockIdentity" /></label>
+        <label><span>{{ t('citySpatial.services.form.demand') }}</span><Select v-model="connectionForm.demandCode" :options="connectionDemandOptions" :disabled="connectionForm.lockIdentity" /></label>
         <label><span>{{ t('citySpatial.services.form.flowLimit') }}</span><input v-model.number="connectionForm.maxFlowUnitsPerTick" class="input font-mono" type="number" min="1" max="922337203685477" required /></label>
         <label><span>{{ t('citySpatial.services.form.loss') }}</span><input v-model.number="connectionForm.lossMilli" class="input font-mono" type="number" min="0" max="999" required /></label>
         <label><span>{{ t('citySpatial.services.form.preference') }}</span><input v-model.number="connectionForm.preference" class="input font-mono" type="number" min="0" max="1000" required /></label>

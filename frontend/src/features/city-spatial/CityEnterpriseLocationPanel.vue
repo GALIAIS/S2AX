@@ -36,7 +36,7 @@
       <div class="city-enterprise-filters">
         <label>
           <span>{{ t('citySpatial.enterprise.filter.firm') }}</span>
-          <Select v-model="firmFilter" :options="firmFilterOptions" :searchable="state.firms.length > 6" />
+          <Select v-model="firmFilter" :options="firmFilterOptions" />
         </label>
         <label>
           <span>{{ t('citySpatial.enterprise.filter.district') }}</span>
@@ -152,7 +152,7 @@
       <form class="city-enterprise-form" @submit.prevent="submitOpen">
         <label>
           <span>{{ t('citySpatial.enterprise.form.firm') }}</span>
-          <Select v-model="openForm.firmID" :options="firmOptions" :searchable="firmOptions.length > 6" />
+          <Select v-model="openForm.firmID" :options="firmOptions" />
         </label>
         <label>
           <span>{{ t('citySpatial.enterprise.form.siteType') }}</span>
@@ -160,7 +160,7 @@
         </label>
         <label class="city-enterprise-form-wide">
           <span>{{ t('citySpatial.enterprise.form.pool') }}</span>
-          <Select v-model="openForm.poolCode" :options="openPoolOptions" :searchable="openPoolOptions.length > 6" />
+          <Select v-model="openForm.poolCode" :options="openPoolOptions" />
         </label>
         <label class="city-enterprise-form-wide">
           <span>{{ t('citySpatial.enterprise.form.name') }}</span>
@@ -239,11 +239,11 @@
         </label>
         <label>
           <span>{{ t('citySpatial.enterprise.form.headquartersPool') }}</span>
-          <Select v-model="relocateForm.headquartersPoolCode" :options="relocationHeadquartersPools" :searchable="relocationHeadquartersPools.length > 6" />
+          <Select v-model="relocateForm.headquartersPoolCode" :options="relocationHeadquartersPools" />
         </label>
         <label>
           <span>{{ t('citySpatial.enterprise.form.productionPool') }}</span>
-          <Select v-model="relocateForm.productionPoolCode" :options="relocationProductionPools" :searchable="relocationProductionPools.length > 6" />
+          <Select v-model="relocateForm.productionPoolCode" :options="relocationProductionPools" />
         </label>
         <label class="city-enterprise-form-wide">
           <span>{{ t('citySpatial.enterprise.form.reason') }}</span>

@@ -133,7 +133,7 @@
           </label>
           <label>
             <span>{{ t('citySpatial.development.developer') }}</span>
-            <Select v-model="submitForm.developerID" :options="developerOptions" :searchable="developerOptions.length > 6" />
+            <Select v-model="submitForm.developerID" :options="developerOptions" />
           </label>
           <label v-if="submitForm.projectType === 'vertical_expansion'">
             <span>{{ t('citySpatial.development.targetFloors') }}</span>
