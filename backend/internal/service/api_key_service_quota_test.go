@@ -198,3 +198,23 @@ func TestAPIKeyService_Update_ReactivatesQuotaExhaustedWhenQuotaUnlimited(t *tes
 	require.Equal(t, StatusActive, repo.updatedKeys[0].Status)
 	require.Equal(t, 0.0, repo.updatedKeys[0].Quota)
 }
+
+func TestAPIKeyService_UpdatePreservesIPListsWhenOmitted(t *testing.T) {
+	repo := &apiKeyRepoStub{
+		apiKey: &APIKey{
+			ID:          10,
+			UserID:      7,
+			Key:         "sk-test-ip-lists",
+			IPWhitelist: []string{"10.0.0.0/8"},
+			IPBlacklist: []string{"192.0.2.1"},
+		},
+	}
+	svc := &APIKeyService{apiKeyRepo: repo}
+	name := "renamed"
+
+	updated, err := svc.Update(context.Background(), 10, 7, UpdateAPIKeyRequest{Name: &name})
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"10.0.0.0/8"}, updated.IPWhitelist)
+	require.Equal(t, []string{"192.0.2.1"}, updated.IPBlacklist)
+}
