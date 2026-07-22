@@ -67,6 +67,7 @@ describe('Select', () => {
     await nextTick()
 
     expect(wrapper.emitted('update:modelValue')?.[0]).toEqual(['admin'])
+    expect(wrapper.emitted('change')).toHaveLength(1)
     await new Promise((resolve) => window.setTimeout(resolve, 220))
     expect(document.body.querySelector('.select-dropdown-portal')).toBeNull()
 

@@ -227,6 +227,38 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(importCodexSessionMock).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps a raw Codex PAT on the generic session importer', async () => {
+    const wrapper = await openCodexImportStep()
+    const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
+
+    flow.vm.$emit('import-codex-session', 'at-test-token')
+    await flushPromises()
+
+    expect(importCodexSessionMock).toHaveBeenCalledWith(expect.objectContaining({
+      content: 'at-test-token'
+    }))
+    expect(createOpenAICodexPATMock).not.toHaveBeenCalled()
+  })
+
+  it('converts a ChatGPT session JSON to Agent Identity when that input mode is selected', async () => {
+    const wrapper = await openCodexImportStep()
+    const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
+    flow.vm.inputMethod = 'agent_identity'
+
+    flow.vm.$emit('import-codex-session', JSON.stringify({
+      accessToken: 'at-session-token',
+      account: { id: 'account-session' },
+      user: { id: 'user-session' }
+    }))
+    await flushPromises()
+
+    expect(importCodexSessionMock).toHaveBeenCalledWith(expect.objectContaining({
+      target_auth_mode: 'agentIdentity',
+      content: expect.stringContaining('at-session-token')
+    }))
+    expect(createOpenAICodexPATMock).not.toHaveBeenCalled()
+  })
+
   it('sends true explicitly when OpenAI long-context billing is enabled', async () => {
     await submitApiKeyAccount('openai', true)
 

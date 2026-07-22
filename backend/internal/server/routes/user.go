@@ -265,6 +265,8 @@ func RegisterUserRoutes(
 		{
 			cityRealtimeCharacter.GET("", h.CityEconomy.GetRealtimeMyCharacter)
 			cityRealtimeCharacter.GET("/events", h.CityEconomy.ListRealtimeMyCharacterEvents)
+			cityRealtimeCharacter.GET("/relations", h.CityEconomy.ListRealtimeMyCharacterSocialRelations)
+			cityRealtimeCharacter.GET("/case-reviews", h.CityEconomy.ListRealtimeMyCharacterCaseReviews)
 			cityRealtimeCharacter.POST("", h.CityEconomy.CreateRealtimeCharacter)
 			cityRealtimeCharacter.POST("/agent", h.CityEconomy.ConfigureRealtimeCharacterAgent)
 			cityRealtimeCharacter.POST("/move", h.CityEconomy.MoveRealtimeCharacter)

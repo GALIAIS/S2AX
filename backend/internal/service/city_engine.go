@@ -1525,6 +1525,25 @@ func marshalCanonicalCityState(state cityHashState) ([]byte, error) {
 				return nil, fmt.Errorf("city realtime v2 canonical agent runtime is invalid: %w", err)
 			}
 		}
+		// Rule/Case response state is optional because pre-1.4 worlds must keep
+		// their historical canonical shape. When the genesis-pinned adapter is
+		// present, validate it before hashing so a malformed acknowledgement
+		// chain can never be silently canonicalized.
+		if state.RealtimeCharacterCases != nil {
+			if err := validateCityRealtimeCharacterCaseResponseHashState(state.RealtimeCharacterCases); err != nil {
+				return nil, fmt.Errorf("city realtime v2 canonical character case-response state is invalid: %w", err)
+			}
+		}
+		if state.RealtimeCharacterCaseReviews != nil {
+			if err := validateCityRealtimeCharacterCaseReviewHashState(state.RealtimeCharacterCaseReviews); err != nil {
+				return nil, fmt.Errorf("city realtime v2 canonical character case-review state is invalid: %w", err)
+			}
+		}
+		if state.RealtimeCharacterSocial != nil {
+			if err := validateCityRealtimeCharacterSocialHashState(state.RealtimeCharacterSocial); err != nil {
+				return nil, fmt.Errorf("city realtime v2 canonical character social state is invalid: %w", err)
+			}
+		}
 		state.Spatial = nil
 		state.Land = nil
 		state.Development = nil

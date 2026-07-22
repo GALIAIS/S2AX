@@ -127,6 +127,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	user := input.User
 	account := input.Account
 	subscription := input.Subscription
+	logSlowGatewayTiming(ctx, "openai", account, result.Model, result.RequestID, result.Duration, result.FirstTokenMs)
 	if !isGrokVideoUsageResult(result, nil) {
 		ApplyOpenAIImageBillingResolution(result)
 	}

@@ -244,4 +244,27 @@ describe('ImportDataModal', () => {
     })
     expect(showSuccess).toHaveBeenCalledWith('admin.accounts.codexImportSuccess')
   })
+
+  it('将单个 Codex PAT 保持通过通用导入接口处理', async () => {
+    const { adminAPI } = await import('@/api/admin')
+    vi.mocked(adminAPI.accounts.importCodexSession).mockResolvedValue({
+      total: 1,
+      created: 1,
+      updated: 0,
+      skipped: 0,
+      failed: 0
+    })
+
+    const wrapper = mountModal()
+    await wrapper.findAll('button[role="tab"]')[1]!.trigger('click')
+    await wrapper.get('textarea').setValue('at-test-token')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(adminAPI.accounts.importCodexSession).toHaveBeenCalledWith({
+      contents: ['at-test-token'],
+      update_existing: true,
+      skip_default_group_bind: false
+    })
+  })
 })

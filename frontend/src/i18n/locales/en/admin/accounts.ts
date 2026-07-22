@@ -36,6 +36,10 @@ export default {
       codexImportPaste: 'Paste JSON or tokens',
       codexImportPlaceholder: 'Paste auth.json, CPA JSON, a Sub2API account export, or one access token per line…',
       codexImportPasteHint: 'Pasted content and uploaded files can be submitted together; entries are parsed and deduplicated individually.',
+      codexImportTargetLabel: 'Import authentication mode',
+      codexImportTargetOAuth: 'OAuth / access token (keep existing import behavior)',
+      codexImportTargetAgentIdentity: 'Agent Identity (ChatGPT session JSON)',
+      codexImportTargetAgentIdentityHint: 'When selected, submitting a ChatGPT /api/auth/session JSON registers Agent Identity; a standalone at- token is not sent to PAT validation.',
       codexImportFile: 'JSON files (multiple allowed)',
       codexImportSelectFile: 'Optional: choose or drop JSON files',
       codexImportEmpty: 'Paste content or select at least one JSON file',
@@ -102,6 +106,12 @@ export default {
       allStatus: 'All Status',
       allGroups: 'All Groups',
       ungroupedGroup: 'Ungrouped',
+      groupFilterSections: {
+        exclusive: 'Exclusive Groups',
+        public: 'Public Groups',
+        subscription: 'Subscription Groups',
+        disabled: 'Disabled Groups'
+      },
       oauthType: 'OAuth',
       setupToken: 'Setup Token',
       apiKey: 'API Key',
@@ -181,6 +191,12 @@ export default {
         createdAt: 'Created',
         expiresAt: 'Expires At',
         actions: 'Actions'
+      },
+      columnSections: {
+        identity: 'Account Information',
+        scheduling: 'Scheduling & Capacity',
+        consumption: 'Usage & Billing',
+        context: 'Connection & History'
       },
       schedulerScore: {
         baseShort: 'Base',
@@ -906,11 +922,11 @@ export default {
           codexSessionImportSuccess: 'Import completed: created {created}, updated {updated}, skipped {skipped}',
           codexSessionImportPartial: 'Partial success: created {created}, updated {updated}, skipped {skipped}, failed {failed}',
           agentIdentityAuth: 'Agent Identity auth.json',
-          agentIdentityDesc: 'Import a Codex Agent Identity auth.json. No OAuth access or refresh token is stored.',
-          agentIdentityInputLabel: 'Agent Identity auth.json',
-          agentIdentityPlaceholder: 'Paste one Agent Identity auth.json object',
-          agentIdentityHint: 'The file must use auth_mode=agentIdentity. Upstream requests are signed dynamically.',
-          agentIdentityInvalid: 'Use a Codex auth.json with auth_mode=agentIdentity.',
+          agentIdentityDesc: 'Import a Codex Agent Identity auth.json or ChatGPT session JSON. No OAuth access or refresh token is stored.',
+          agentIdentityInputLabel: 'Agent Identity auth.json / ChatGPT session JSON',
+          agentIdentityPlaceholder: 'Paste an Agent Identity auth.json or ChatGPT /api/auth/session JSON',
+          agentIdentityHint: 'Paste a complete auth.json or a ChatGPT /api/auth/session JSON. Submitting a session JSON registers Agent Identity and stores only identity keys.',
+          agentIdentityInvalid: 'Use a Codex auth.json with auth_mode=agentIdentity or a ChatGPT session JSON.',
           codexPatAuth: 'Codex Personal Access Token',
           codexPatDesc: 'Enter a Codex at- personal access token. The system validates it with OpenAI whoami before creating the account.',
           codexPatInputLabel: 'Codex PAT',

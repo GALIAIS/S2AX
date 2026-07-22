@@ -36,6 +36,10 @@ export default {
       codexImportPaste: '粘贴 JSON 或令牌',
       codexImportPlaceholder: '粘贴 auth.json、CPA JSON、Sub2API 账号 JSON，或每行一个 access token…',
       codexImportPasteHint: '粘贴内容与上传文件可以同时提交，系统会逐项解析并去重。',
+      codexImportTargetLabel: '导入目标认证模式',
+      codexImportTargetOAuth: 'OAuth / access token（保持原有导入行为）',
+      codexImportTargetAgentIdentity: 'Agent Identity（ChatGPT session JSON）',
+      codexImportTargetAgentIdentityHint: '选择后，提交 ChatGPT /api/auth/session JSON 会注册 Agent Identity；单独 at- token 不会自动调用 PAT 校验。',
       codexImportFile: 'JSON 文件（可多选）',
       codexImportSelectFile: '可选：选择或拖入 JSON 文件',
       codexImportEmpty: '请粘贴内容或选择至少一个 JSON 文件',
@@ -105,6 +109,12 @@ export default {
       allStatus: '全部状态',
       allGroups: '全部分组',
       ungroupedGroup: '未分配分组',
+      groupFilterSections: {
+        exclusive: '专属分组',
+        public: '公共分组',
+        subscription: '订阅分组',
+        disabled: '已停用分组'
+      },
       oauthType: 'OAuth',
       // Schedulable toggle
       schedulable: '参与调度',
@@ -136,6 +146,12 @@ export default {
         createdAt: '创建时间',
         expiresAt: '过期时间',
         actions: '操作'
+      },
+      columnSections: {
+        identity: '账号信息',
+        scheduling: '调度与容量',
+        consumption: '用量与计费',
+        context: '连接与记录'
       },
       schedulerScore: {
         baseShort: '普通',
@@ -993,11 +1009,11 @@ export default {
           codexSessionImportSuccess: '导入完成：新增 {created}，更新 {updated}，跳过 {skipped}',
           codexSessionImportPartial: '部分成功：新增 {created}，更新 {updated}，跳过 {skipped}，失败 {failed}',
           agentIdentityAuth: 'Agent Identity auth.json',
-          agentIdentityDesc: '导入 Codex Agent Identity auth.json，不保存 OAuth access token 或 refresh token。',
-          agentIdentityInputLabel: 'Agent Identity auth.json',
-          agentIdentityPlaceholder: '粘贴一个 Agent Identity auth.json 对象',
-          agentIdentityHint: '文件必须使用 auth_mode=agentIdentity；每次上游请求都会动态签名。',
-          agentIdentityInvalid: '请选择 auth_mode=agentIdentity 的 Codex auth.json。',
+          agentIdentityDesc: '导入 Codex Agent Identity auth.json 或 ChatGPT session JSON，不保存 OAuth access token 或 refresh token。',
+          agentIdentityInputLabel: 'Agent Identity auth.json / ChatGPT session JSON',
+          agentIdentityPlaceholder: '粘贴 Agent Identity auth.json 或 ChatGPT /api/auth/session JSON',
+          agentIdentityHint: '可粘贴完整 auth.json，或 ChatGPT /api/auth/session JSON；提交 session JSON 时会注册 Agent Identity，系统只保存身份密钥。',
+          agentIdentityInvalid: '请粘贴 auth_mode=agentIdentity 的 Codex auth.json，或 ChatGPT session JSON。',
           codexPatAuth: 'Codex Personal Access Token',
           codexPatDesc: '输入 Codex at- Personal Access Token，系统会先调用 OpenAI whoami 校验后再创建账号。',
           codexPatInputLabel: 'Codex PAT',

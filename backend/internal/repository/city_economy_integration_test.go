@@ -35,9 +35,10 @@ func TestCityEconomyFoundationCreatesIsolatedAuthorizedChart(t *testing.T) {
 	require.ErrorIs(t, err, service.ErrCityInvalidInput)
 	scale := 3
 	foundation, err := cityService.CreateWorld(ctx, service.CityWorldCreateInput{
-		OwnerUserID: owner.ID,
-		Name:        "Integration City " + suffix,
-		Timezone:    "Asia/Shanghai",
+		OwnerUserID:       owner.ID,
+		Name:              "Integration City " + suffix,
+		SimulationVersion: service.CitySimulationVersionF5,
+		Timezone:          "Asia/Shanghai",
 		MonetaryUnit: service.CityMonetaryUnitCreateInput{
 			Code: "metro_credit", Name: "Metro Credit", Symbol: "MC", Scale: &scale,
 		},
@@ -65,7 +66,7 @@ func TestCityEconomyFoundationCreatesIsolatedAuthorizedChart(t *testing.T) {
 	})
 
 	require.Equal(t, service.CityWorldStatusPaused, foundation.World.Status)
-	require.Equal(t, service.CitySimulationVersionV1, foundation.World.SimulationVersion)
+	require.Equal(t, service.CitySimulationVersionF5, foundation.World.SimulationVersion)
 	require.Equal(t, "owner", foundation.World.MemberRole)
 	require.Positive(t, foundation.World.Seed)
 	require.Len(t, foundation.MonetaryUnits, 1)
@@ -97,8 +98,9 @@ func TestCityEconomyFoundationCreatesIsolatedAuthorizedChart(t *testing.T) {
 	require.ErrorIs(t, err, service.ErrCityWorldNotFound)
 
 	secondFoundation, err := cityService.CreateWorld(ctx, service.CityWorldCreateInput{
-		OwnerUserID: owner.ID,
-		Name:        "Second Shared City " + suffix,
+		OwnerUserID:       owner.ID,
+		Name:              "Second Shared City " + suffix,
+		SimulationVersion: service.CitySimulationVersionF5,
 	})
 	require.NoError(t, err)
 	secondWorldID := secondFoundation.World.ID

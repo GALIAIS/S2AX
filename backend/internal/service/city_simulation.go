@@ -2524,38 +2524,41 @@ func writeCityHashInt64(writer cityHashWriter, value int64) {
 }
 
 type cityHashState struct {
-	Name                  string                              `json:"name"`
-	Status                string                              `json:"status"`
-	SimulationVersion     string                              `json:"simulation_version"`
-	Seed                  int64                               `json:"seed"`
-	CurrentTick           int64                               `json:"current_tick"`
-	SimulatedAt           string                              `json:"simulated_at"`
-	SpeedMilli            int64                               `json:"speed_milli"`
-	Timezone              string                              `json:"timezone"`
-	Settings              json.RawMessage                     `json:"settings"`
-	MonetaryUnits         []cityHashMonetaryUnit              `json:"monetary_units"`
-	AccountTemplates      []cityHashAccountTemplate           `json:"account_templates"`
-	Entities              []cityHashEntity                    `json:"entities"`
-	Accounts              []cityHashAccount                   `json:"accounts"`
-	Physical              cityPhysicalHashState               `json:"physical"`
-	Markets               cityMarketHashState                 `json:"markets"`
-	Demography            cityDemographyHashState             `json:"demography"`
-	OpenWorld             *cityOpenWorldHashState             `json:"open_world,omitempty"`
-	Spatial               *citySpatialHashState               `json:"spatial,omitempty"`
-	Land                  *cityLandHashState                  `json:"land,omitempty"`
-	Development           *cityDevelopmentHashState           `json:"development,omitempty"`
-	EnterpriseLocation    *cityEnterpriseLocationHashState    `json:"enterprise_location,omitempty"`
-	WorldRuntime          *worldRuntimeHashState              `json:"world_runtime,omitempty"`
-	OpenWorldRuntime      *cityOpenWorldRuntimeHashState      `json:"open_world_runtime,omitempty"`
-	Realtime              *cityRealtimeHashState              `json:"realtime,omitempty"`
-	RealtimeSpatial       *cityRealtimeSpatialHashState       `json:"realtime_spatial,omitempty"`
-	RealtimeActors        *cityRealtimeActorHashState         `json:"realtime_actors,omitempty"`
-	RealtimeAgents        *cityRealtimeAgentHashState         `json:"realtime_agents,omitempty"`
-	RealtimeCharacterLife *cityRealtimeCharacterLifeHashState `json:"realtime_character_life,omitempty"`
-	VersionVector         *CityWorldVersionVector             `json:"version_vector,omitempty"`
-	PublicServices        *cityPublicServiceHashState         `json:"public_services,omitempty"`
-	FacilityLifecycle     *cityFacilityLifecycleHashState     `json:"facility_lifecycle,omitempty"`
-	PhysicalNetworks      *cityPhysicalNetworkHashState       `json:"physical_networks,omitempty"`
+	Name                         string                                      `json:"name"`
+	Status                       string                                      `json:"status"`
+	SimulationVersion            string                                      `json:"simulation_version"`
+	Seed                         int64                                       `json:"seed"`
+	CurrentTick                  int64                                       `json:"current_tick"`
+	SimulatedAt                  string                                      `json:"simulated_at"`
+	SpeedMilli                   int64                                       `json:"speed_milli"`
+	Timezone                     string                                      `json:"timezone"`
+	Settings                     json.RawMessage                             `json:"settings"`
+	MonetaryUnits                []cityHashMonetaryUnit                      `json:"monetary_units"`
+	AccountTemplates             []cityHashAccountTemplate                   `json:"account_templates"`
+	Entities                     []cityHashEntity                            `json:"entities"`
+	Accounts                     []cityHashAccount                           `json:"accounts"`
+	Physical                     cityPhysicalHashState                       `json:"physical"`
+	Markets                      cityMarketHashState                         `json:"markets"`
+	Demography                   cityDemographyHashState                     `json:"demography"`
+	OpenWorld                    *cityOpenWorldHashState                     `json:"open_world,omitempty"`
+	Spatial                      *citySpatialHashState                       `json:"spatial,omitempty"`
+	Land                         *cityLandHashState                          `json:"land,omitempty"`
+	Development                  *cityDevelopmentHashState                   `json:"development,omitempty"`
+	EnterpriseLocation           *cityEnterpriseLocationHashState            `json:"enterprise_location,omitempty"`
+	WorldRuntime                 *worldRuntimeHashState                      `json:"world_runtime,omitempty"`
+	OpenWorldRuntime             *cityOpenWorldRuntimeHashState              `json:"open_world_runtime,omitempty"`
+	Realtime                     *cityRealtimeHashState                      `json:"realtime,omitempty"`
+	RealtimeSpatial              *cityRealtimeSpatialHashState               `json:"realtime_spatial,omitempty"`
+	RealtimeActors               *cityRealtimeActorHashState                 `json:"realtime_actors,omitempty"`
+	RealtimeAgents               *cityRealtimeAgentHashState                 `json:"realtime_agents,omitempty"`
+	RealtimeCharacterLife        *cityRealtimeCharacterLifeHashState         `json:"realtime_character_life,omitempty"`
+	RealtimeCharacterCases       *cityRealtimeCharacterCaseResponseHashState `json:"realtime_character_cases,omitempty"`
+	RealtimeCharacterCaseReviews *cityRealtimeCharacterCaseReviewHashState   `json:"realtime_character_case_reviews,omitempty"`
+	RealtimeCharacterSocial      *cityRealtimeCharacterSocialHashState       `json:"realtime_character_social,omitempty"`
+	VersionVector                *CityWorldVersionVector                     `json:"version_vector,omitempty"`
+	PublicServices               *cityPublicServiceHashState                 `json:"public_services,omitempty"`
+	FacilityLifecycle            *cityFacilityLifecycleHashState             `json:"facility_lifecycle,omitempty"`
+	PhysicalNetworks             *cityPhysicalNetworkHashState               `json:"physical_networks,omitempty"`
 }
 
 type cityHashMonetaryUnit struct {
@@ -2744,6 +2747,18 @@ ORDER BY e.entity_type ASC, e.code ASC, u.code ASC, t.code ASC`, worldID)
 			return state, err
 		}
 		state.RealtimeCharacterLife, err = loadCityRealtimeCharacterLifeHashState(ctx, queryer, worldID)
+		if err != nil {
+			return state, err
+		}
+		state.RealtimeCharacterCases, err = loadCityRealtimeCharacterCaseResponseHashState(ctx, queryer, worldID)
+		if err != nil {
+			return state, err
+		}
+		state.RealtimeCharacterCaseReviews, err = loadCityRealtimeCharacterCaseReviewHashState(ctx, queryer, worldID)
+		if err != nil {
+			return state, err
+		}
+		state.RealtimeCharacterSocial, err = loadCityRealtimeCharacterSocialHashState(ctx, queryer, worldID)
 		if err != nil {
 			return state, err
 		}

@@ -41,9 +41,13 @@ func TestCityBasicMarketsSettleMoneyResourcesLaborHousingAndBudgetsAtomically(t 
 		seed := int64(774411)
 		foundation, err := cityService.CreateWorld(ctx, service.CityWorldCreateInput{
 			OwnerUserID: ownerID, Name: "Market Cycle City", Timezone: "Asia/Shanghai", Seed: &seed,
+			// The market fixture asserts the household demand projection used by
+			// the original default world. Pin that projection explicitly so a
+			// future default-engine change cannot alter its pricing baseline.
+			SimulationVersion: service.CitySimulationVersionF6V3,
 		})
 		require.NoError(t, err)
-		require.Equal(t, service.CitySimulationVersionV1, foundation.World.SimulationVersion)
+		require.Equal(t, service.CitySimulationVersionF6V3, foundation.World.SimulationVersion)
 		require.NotNil(t, foundation.Markets)
 		require.NotNil(t, foundation.Markets.Cycle)
 		require.NotNil(t, foundation.Markets.Policy)

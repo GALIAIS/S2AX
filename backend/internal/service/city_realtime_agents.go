@@ -12,11 +12,15 @@ import (
 const (
 	cityRealtimeAgentRuntimeSchemaVersion = 1
 	cityRealtimeAgentCorePolicyID         = "city-realtime-agent-core"
-	// New worlds bind 1.3.0. Each historical policy remains an explicit
+	// New worlds bind 1.6.0. Each historical policy remains an explicit
 	// compatibility branch: a world pin commits both its authorization hashes
 	// and its canonical decision-state shape, so an upgraded binary must never
 	// reinterpret an old binding as the current policy.
-	cityRealtimeAgentCorePolicyVersion         = "1.3.0"
+	cityRealtimeAgentCorePolicyVersion         = "1.6.0"
+	cityRealtimeAgentCorePolicyVersionReview   = "1.6.0"
+	cityRealtimeAgentCorePolicyVersionCase     = "1.4.0"
+	cityRealtimeAgentCorePolicyVersionSocial   = "1.5.0"
+	cityRealtimeAgentCorePolicyVersionActions  = "1.3.0"
 	cityRealtimeAgentCorePolicyVersionAutonomy = "1.2.0"
 	cityRealtimeAgentCorePolicyVersionDecision = "1.1.0"
 	cityRealtimeAgentCorePolicyVersionLegacy   = "1.0.0"
@@ -427,7 +431,7 @@ func cityRealtimeAgentAuthorizationScopes(binding cityRealtimeAgentPolicyBinding
 			return nil, false
 		}
 	}
-	// Policy 1.2.0 is the sealed A3.1 control/activity catalogue.  It must
+	// Policy 1.2.0 is the sealed A3.1 control/activity catalogue. It must
 	// remain byte-for-byte independent from A3.2 navigation/role scopes so an
 	// upgraded binary continues to validate historical instance hashes.
 	if binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionAutonomy {
@@ -450,6 +454,83 @@ func cityRealtimeAgentAuthorizationScopes(binding cityRealtimeAgentPolicyBinding
 			return nil, false
 		}
 	}
+	// Policy 1.3.0 is the sealed A3.2 navigation/Portal/Role catalogue. Keep
+	// it explicit so a 1.4.0 case-response scope cannot rewrite historical
+	// authorization hashes for worlds that already exist.
+	if binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionActions {
+		switch agentSubtype {
+		case "system.root":
+			return []string{"agent.lifecycle.observe", "agent.lifecycle.supervise", "agent.decision.request"}, true
+		case "system.npc_manager":
+			return []string{"npc.lifecycle.observe", "npc.lifecycle.supervise", "agent.decision.request"}, true
+		case "character.npc":
+			return []string{"actor.patrol.deterministic", "character.observe.public", "character.intent.propose", "agent.decision.request"}, true
+		case "character.user":
+			return []string{
+				"character.observe.private",
+				"character.intent.propose",
+				"character.activity.propose",
+				"character.navigation.propose",
+				"character.role.propose",
+				"character.control.configure",
+				"agent.decision.request",
+			}, true
+		default:
+			return nil, false
+		}
+	}
+	// Policy 1.5.0 intentionally keeps the historical authorization hash that
+	// shipped with the social adapter. The social action remains bounded by its
+	// sealed decision context and reducer; changing this list would rewrite an
+	// already-pinned world's agent instance hashes.
+	if binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionSocial {
+		switch agentSubtype {
+		case "system.root":
+			return []string{"agent.lifecycle.observe", "agent.lifecycle.supervise", "agent.decision.request"}, true
+		case "system.npc_manager":
+			return []string{"npc.lifecycle.observe", "npc.lifecycle.supervise", "agent.decision.request"}, true
+		case "character.npc":
+			return []string{"actor.patrol.deterministic", "character.observe.public", "character.intent.propose", "agent.decision.request"}, true
+		case "character.user":
+			return []string{
+				"character.observe.private",
+				"character.intent.propose",
+				"character.activity.propose",
+				"character.navigation.propose",
+				"character.role.propose",
+				"character.case.acknowledge",
+				"character.control.configure",
+				"agent.decision.request",
+			}, true
+		default:
+			return nil, false
+		}
+	}
+	if binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReview {
+		switch agentSubtype {
+		case "system.root":
+			return []string{"agent.lifecycle.observe", "agent.lifecycle.supervise", "agent.decision.request"}, true
+		case "system.npc_manager":
+			return []string{"npc.lifecycle.observe", "npc.lifecycle.supervise", "agent.decision.request"}, true
+		case "character.npc":
+			return []string{"actor.patrol.deterministic", "character.observe.public", "character.intent.propose", "agent.decision.request"}, true
+		case "character.user":
+			return []string{
+				"character.observe.private",
+				"character.intent.propose",
+				"character.activity.propose",
+				"character.navigation.propose",
+				"character.role.propose",
+				"character.case.acknowledge",
+				"character.case.review.file",
+				"character.social.greet",
+				"character.control.configure",
+				"agent.decision.request",
+			}, true
+		default:
+			return nil, false
+		}
+	}
 	switch agentSubtype {
 	case "system.root":
 		return []string{"agent.lifecycle.observe", "agent.lifecycle.supervise", "agent.decision.request"}, true
@@ -464,6 +545,7 @@ func cityRealtimeAgentAuthorizationScopes(binding cityRealtimeAgentPolicyBinding
 			"character.activity.propose",
 			"character.navigation.propose",
 			"character.role.propose",
+			"character.case.acknowledge",
 			"character.control.configure",
 			"agent.decision.request",
 		}, true

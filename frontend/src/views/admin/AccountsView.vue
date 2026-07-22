@@ -153,17 +153,24 @@
                         <Icon name="grid" size="sm" class="text-gray-400" />
                       </div>
                     </div>
-                    <div class="grid grid-cols-1 gap-1">
-                      <button
-                        v-for="col in toggleableColumns"
-                        :key="col.key"
-                        type="button"
-                        @click="toggleColumn(col.key)"
-                        class="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
-                      >
-                        <span class="truncate">{{ col.label }}</span>
-                        <Icon v-if="isColumnVisible(col.key)" name="check" size="sm" class="text-primary-500" />
-                      </button>
+                    <div class="space-y-2 px-1 pb-1">
+                      <section v-for="section in columnSections" :key="section.key" class="space-y-1">
+                        <div class="px-2 pt-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                          {{ section.label }}
+                        </div>
+                        <div class="grid grid-cols-1 gap-1">
+                          <button
+                            v-for="col in section.columns"
+                            :key="col.key"
+                            type="button"
+                            @click="toggleColumn(col.key)"
+                            class="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+                          >
+                            <span class="truncate">{{ col.label }}</span>
+                            <Icon v-if="isColumnVisible(col.key)" name="check" size="sm" class="text-primary-500" />
+                          </button>
+                        </div>
+                      </section>
                     </div>
                   </div>
                 </div>
@@ -1483,9 +1490,15 @@ function getAntigravityTierClass(row: any): string {
   }
 }
 
+type AccountTableColumn = {
+  key: string
+  label: string
+  sortable: boolean
+}
+
 // All available columns
-const allColumns = computed(() => {
-  const c = [
+const allColumns = computed<AccountTableColumn[]>(() => {
+  const c: AccountTableColumn[] = [
     { key: 'select', label: '', sortable: false },
     { key: 'name', label: t('admin.accounts.columns.name'), sortable: true },
     { key: 'id', label: t('admin.accounts.columns.id'), sortable: true },
@@ -1518,6 +1531,44 @@ const allColumns = computed(() => {
 const toggleableColumns = computed(() =>
   allColumns.value.filter(col => col.key !== 'select' && col.key !== 'name' && col.key !== 'actions')
 )
+
+// Keep the visibility menu usable when an imported account pool adds many optional columns.
+// The table itself remains unchanged; this only gives the controls the same information
+// hierarchy administrators use when reading and operating the rows.
+const columnSections = computed(() => {
+  const columnByKey = new Map(toggleableColumns.value.map((column) => [column.key, column]))
+  const sections = [
+    {
+      key: 'identity',
+      label: t('admin.accounts.columnSections.identity'),
+      columnKeys: ['id', 'platform_type', 'status', 'groups']
+    },
+    {
+      key: 'scheduling',
+      label: t('admin.accounts.columnSections.scheduling'),
+      columnKeys: ['capacity', 'schedulable', 'priority', 'scheduler_score']
+    },
+    {
+      key: 'consumption',
+      label: t('admin.accounts.columnSections.consumption'),
+      columnKeys: ['today_stats', 'usage', 'rate_multiplier', 'upstream_billing_rate']
+    },
+    {
+      key: 'context',
+      label: t('admin.accounts.columnSections.context'),
+      columnKeys: ['proxy', 'last_used_at', 'created_at', 'expires_at', 'notes']
+    }
+  ]
+
+  return sections
+    .map((section) => ({
+      ...section,
+      columns: section.columnKeys
+        .map((key) => columnByKey.get(key))
+        .filter((column): column is AccountTableColumn => Boolean(column))
+    }))
+    .filter((section) => section.columns.length > 0)
+})
 
 // Filtered columns based on visibility
 const cols = computed(() =>

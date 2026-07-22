@@ -1300,6 +1300,69 @@ func (h *CityEconomyHandler) ListRealtimeMyCharacterEvents(c *gin.Context) {
 	response.Success(c, page)
 }
 
+// ListRealtimeMyCharacterSocialRelations returns only the caller's own
+// bounded, public relation projection. It never accepts an Actor code from
+// the browser, so a member cannot enumerate another character's relations.
+func (h *CityEconomyHandler) ListRealtimeMyCharacterSocialRelations(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	limit, ok := parseCityQueryInt(c, "limit", 0)
+	if !ok || limit > int64(^uint(0)>>1) {
+		if ok {
+			response.BadRequest(c, "Invalid realtime character social relation query")
+		}
+		return
+	}
+	page, err := h.service.ListRealtimeMyCharacterSocialRelations(c.Request.Context(), service.CityRealtimeCharacterSocialRelationListInput{
+		UserID: subject.UserID, WorldID: worldID,
+		BeforeCursor: strings.TrimSpace(c.Query("before_cursor")), Limit: int(limit),
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, page)
+}
+
+// ListRealtimeMyCharacterCaseReviews returns the caller's own procedural
+// Law-Case review receipts. Case codes are resolved server-side from the
+// authenticated character, so a member cannot enumerate another actor's law
+// history or Agent data.
+func (h *CityEconomyHandler) ListRealtimeMyCharacterCaseReviews(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	limit, ok := parseCityQueryInt(c, "limit", 0)
+	if !ok || limit > int64(^uint(0)>>1) {
+		if ok {
+			response.BadRequest(c, "Invalid realtime character case review query")
+		}
+		return
+	}
+	page, err := h.service.ListRealtimeMyCharacterCaseReviews(c.Request.Context(), service.CityRealtimeCharacterCaseReviewListInput{
+		UserID: subject.UserID, WorldID: worldID,
+		BeforeCursor: strings.TrimSpace(c.Query("before_cursor")), Limit: int(limit),
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, page)
+}
+
 // ListRealtimePublicCharacterEvents is the member-safe shared activity
 // feed. It deliberately excludes private character life and reward data.
 func (h *CityEconomyHandler) ListRealtimePublicCharacterEvents(c *gin.Context) {

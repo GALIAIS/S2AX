@@ -12,7 +12,7 @@
 - [x] Phase 4 / R2: 共享投影、cursor 与实时补丁
 - [x] Phase 5 / R3: 像素场景渲染器和多人同屏
 - [ ] Phase 6 / R4: 真人角色共享世界游玩闭环（R4.2 角色成长、原型与职业转换已完成）
-- [ ] Phase 7 / R5: Character Agent 与 NPC Agent（A0/A1/A2/A3.1/A3.2 的用户角色受限闭环已完成；NPC 生命周期、外部模型和奖励仍待实现）
+- [ ] Phase 7 / R5: Character Agent 与 NPC Agent（A0/A1/A2/A3.1/A3.2 与 A3.3b 的前三个受限 action slice 已完成；其余 A3.3b、NPC 生命周期、外部模型和奖励仍待实现）
 
 ## Key Questions
 
@@ -41,6 +41,8 @@
 - R4.2 已发布 `city-realtime-character-core@1.3.0`：新 world 选择受限 archetype，schema 3 封存五项属性、category-scoped Role assignment、活动经验和 progression event hash chain；owner projection 显示成长与可转任职业，公共 Actor/map/event 投影不泄漏 progression。Role/经验/属性/活动限制在 world lock 与 SQL guard 中重算，历史目录不被修改。详细契约见[《R4.2 角色成长、原型与职业转换设计》](docs/CITY_SIMULATION_R4_CHARACTER_PROGRESSION_DESIGN_CN.md)。
 - Agent A3.1 已完成：`city-realtime-agent-core@1.2.0` 为新 world 增加 owner-private 人格 immutable revision、`autonomous/suspended` 控制、world-time wakeup 和受限活动 adapter；暂停会撤销未执行工作，已租约结果通过 precondition 变为 stale。
 - Agent A3.2 已完成：迁移 267 发布 `city-realtime-agent-core@1.3.0`，只为新 world 增加有限的 `character.move`、`character.portal.traverse`、`character.role.change` adapter。Observation 发布经过服务端验证、排序、去重的有限 `action_context`，其 hash 进入 precondition；finalizer 验证候选归属，due-event 再重检相邻/地形/室内/占用、Portal 拓扑和 Role progression。旧 1.0/1.1/1.2 policy、授权散列和 canonical 形状不变。
+- Agent A3.3a 已完成第一、第二个独立 action slice：迁移 268 发布 `city-realtime-agent-core@1.4.0` 的既有 Law Case acknowledgement，迁移 269 发布 `@1.5.0` 的 bounded social greeting；新 realtime world 默认绑定 1.5，旧 1.0–1.4 policy 仍按原版本执行。Case 只能确认本人已封存的 open Case，不改变裁决/罚款/城市信用；social 只能选择服务端公布的相邻 active NPC/Character，写入匿名 pair 的粗粒度 affinity/interaction append-only chain，不保存聊天、不发奖励、不改其他领域。Action context v3 兼容保留 v1/v2 wire shape；新增 owner-scoped relation cursor API，已补充纯 reducer/hash、迁移、路由与真实 PostgreSQL Case/social integration 验证。
+- Agent A3.3b 已完成第三个、仅程序性 Case-review slice：迁移 273 发布 `city-realtime-agent-core@1.6.0` 与 action-context v4；只允许 actor 对本人已确认、15 分钟内、尚无 review head 的 Case 从至多 16 个服务端候选中提交 `character.case.review.file`。`filed` 与固定 30 秒后的 `closed_no_change` 都被 binding/state/event hash chain、sealed intent 和唯一系统 due-event 约束；不能改 Law、处罚、city credit、库存、任何账本或平台/虚拟货币。新增 owner-scoped Case-review cursor API，旧 1.0–1.5 world 返回空投影；迁移严格性、reducer/hash、context wire shape、policy compatibility、服务/路由测试已覆盖。真实 PostgreSQL 的 Case-review 端到端集成仍列为后续验证项，不应据此宣称已覆盖该新 slice 的数据库运行时链路。
 
 ## Errors Encountered
 
@@ -48,4 +50,4 @@
 
 ## Status
 
-**Paused after Phase 7 / R5 A3.2** - 用户角色创建、共享可见位置、地表移动、建筑/楼层 Portal、短休/市政工作/进食、库存、私有活动史、公共结果、规则处罚、被动 realtime needs、archetype、属性经验与职业转换，以及 1.3 policy 下的 Agent 有限移动/Portal/Role intent 已进入同一 V2 timeline，并通过真实 PostgreSQL/Redis integration 验证。下一阶段不是继续无边界扩功能：应先实施 A3.3（Rule/Case、关系、任务、交通和规划 action adapter 的逐项契约/回放），再按 A4 接入模型 profile、受控路由、预算和熔断，最后才开始 NPC LOD 与奖励 outbox。
+**Paused after Phase 7 / R5 A3.3b procedural Case-review slice** - 用户角色创建、共享可见位置、地表移动、建筑/楼层 Portal、短休/市政工作/进食、库存、私有活动史、公共结果、规则处罚、被动 realtime needs、archetype、属性经验与职业转换，以及 1.3–1.6 policy 下的 Agent 有限移动/Portal/Role/Case acknowledgement/social greeting/procedural Case-review intent 已进入同一 V2 timeline。下一项应按依赖继续补齐 A3.3b：Case 发起/流程边界、可解释关系投影、结构化任务、交通请求与有限规划，每个动作都要有独立 policy/version、sealed candidate、due-event reducer、回放与 stale/revoke 语义；之后再按 A4 接入模型 profile、受控路由、预算和熔断，最后才开始 NPC LOD 与奖励 outbox。A3.3b 的新 Case-review 仍需要在真实 PostgreSQL 上补一条创建、filed、到期 `closed_no_change` 的端到端回放验证。

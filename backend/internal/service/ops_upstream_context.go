@@ -1,12 +1,15 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
+
+type opsLatencyContextKey string
 
 // Gin context keys used by Ops error logger for capturing upstream error details.
 // These keys are set by gateway services and consumed by handler/ops_error_logger.go.
@@ -69,6 +72,41 @@ func SetOpsLatencyMs(c *gin.Context, key string, value int64) {
 		return
 	}
 	c.Set(key, value)
+	if c.Request != nil {
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), opsLatencyContextKey(key), value))
+	}
+}
+
+// OpsLatencyMsFromContext returns a stage latency copied from the gateway request.
+// Usage recording runs asynchronously, so Gin-only values would otherwise be lost.
+func OpsLatencyMsFromContext(ctx context.Context, key string) (int64, bool) {
+	if ctx == nil || strings.TrimSpace(key) == "" {
+		return 0, false
+	}
+	value, ok := ctx.Value(opsLatencyContextKey(key)).(int64)
+	return value, ok && value >= 0
+}
+
+// CopyOpsLatencyContext preserves request timing when work is moved to an
+// asynchronous usage-recording context.
+func CopyOpsLatencyContext(parent, base context.Context) context.Context {
+	if base == nil {
+		base = context.Background()
+	}
+	for _, key := range []string{
+		OpsAuthLatencyMsKey,
+		OpsRoutingLatencyMsKey,
+		OpsUpstreamLatencyMsKey,
+		OpsResponseLatencyMsKey,
+		OpsTimeToFirstTokenMsKey,
+		OpsOpenAIWSQueueWaitMsKey,
+		OpsOpenAIWSConnPickMsKey,
+	} {
+		if value, ok := OpsLatencyMsFromContext(parent, key); ok {
+			base = context.WithValue(base, opsLatencyContextKey(key), value)
+		}
+	}
+	return base
 }
 
 func MarkOpsClientBusinessLimited(c *gin.Context, reason string) {

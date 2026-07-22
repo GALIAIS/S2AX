@@ -504,6 +504,7 @@ func (s *CityEconomyService) processRealtimeDueEventsWithClock(
 	rejectedCount := 0
 	actorPatrolCount := 0
 	characterMetabolismCount := 0
+	caseReviewClosureCount := 0
 	agentIntentAppliedCount := 0
 	agentIntentRejectedCount := 0
 	agentWakeupAppliedCount := 0
@@ -549,7 +550,7 @@ func (s *CityEconomyService) processRealtimeDueEventsWithClock(
 						agentIntentRejectedCount++
 					}
 				} else {
-					applied, applyErr = applyCityRealtimeCharacterMetabolismDueEvent(
+					applied, applyErr = applyCityRealtimeCharacterCaseReviewCloseDueEvent(
 						ctx, tx, worldID, frameSequence, events[index],
 					)
 					if applyErr != nil {
@@ -558,9 +559,9 @@ func (s *CityEconomyService) processRealtimeDueEventsWithClock(
 					if applied {
 						status = cityRealtimeDueEventStatusApplied
 						appliedCount++
-						characterMetabolismCount++
+						caseReviewClosureCount++
 					} else {
-						applied, applyErr = applyCityRealtimeActorPatrolDueEvent(
+						applied, applyErr = applyCityRealtimeCharacterMetabolismDueEvent(
 							ctx, tx, worldID, frameSequence, events[index],
 						)
 						if applyErr != nil {
@@ -569,9 +570,21 @@ func (s *CityEconomyService) processRealtimeDueEventsWithClock(
 						if applied {
 							status = cityRealtimeDueEventStatusApplied
 							appliedCount++
-							actorPatrolCount++
+							characterMetabolismCount++
 						} else {
-							rejectedCount++
+							applied, applyErr = applyCityRealtimeActorPatrolDueEvent(
+								ctx, tx, worldID, frameSequence, events[index],
+							)
+							if applyErr != nil {
+								return nil, applyErr
+							}
+							if applied {
+								status = cityRealtimeDueEventStatusApplied
+								appliedCount++
+								actorPatrolCount++
+							} else {
+								rejectedCount++
+							}
 						}
 					}
 				}
@@ -668,6 +681,7 @@ WHERE world_id = $1 AND id = $2 AND status = 'pending'`,
 			"rejected_count":              rejectedCount,
 			"actor_patrol_count":          actorPatrolCount,
 			"character_metabolism_count":  characterMetabolismCount,
+			"case_review_closure_count":   caseReviewClosureCount,
 			"agent_intent_applied_count":  agentIntentAppliedCount,
 			"agent_intent_rejected_count": agentIntentRejectedCount,
 			"agent_wakeup_applied_count":  agentWakeupAppliedCount,

@@ -72,6 +72,73 @@ describe('AccountUsageCell', () => {
     })
   })
 
+  it('defers off-screen usage requests until the account row enters the viewport', async () => {
+    const originalObserver = globalThis.IntersectionObserver
+    let observerCallback: IntersectionObserverCallback | null = null
+
+    class FakeIntersectionObserver {
+      readonly root = null
+      readonly rootMargin = '0px'
+      readonly thresholds = []
+
+      constructor(callback: IntersectionObserverCallback) {
+        observerCallback = callback
+      }
+
+      disconnect() {}
+      observe() {}
+      takeRecords(): IntersectionObserverEntry[] { return [] }
+      unobserve() {}
+    }
+
+    Object.defineProperty(globalThis, 'IntersectionObserver', {
+      configurable: true,
+      writable: true,
+      value: FakeIntersectionObserver
+    })
+
+    getUsage.mockResolvedValue({
+      five_hour: {
+        utilization: 12,
+        resets_at: '2026-07-22T12:00:00Z'
+      }
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      attachTo: document.body,
+      props: {
+        account: makeAccount({
+          id: 9991,
+          platform: 'openai',
+          type: 'oauth',
+          extra: {}
+        })
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: true,
+          AccountQuotaInfo: true
+        }
+      }
+    })
+
+    try {
+      await flushPromises()
+      expect(getUsage).not.toHaveBeenCalled()
+
+      observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver)
+      await flushPromises()
+      expect(getUsage).toHaveBeenCalledWith(9991)
+    } finally {
+      wrapper.unmount()
+      Object.defineProperty(globalThis, 'IntersectionObserver', {
+        configurable: true,
+        writable: true,
+        value: originalObserver
+      })
+    }
+  })
+
   it('Antigravity 图片用量会聚合新旧 image 模型', async () => {
     getUsage.mockResolvedValue({
       antigravity_quota: {

@@ -40,16 +40,19 @@ const (
 	cityRealtimeAgentIntentStale     = "stale"
 	cityRealtimeAgentIntentCancelled = "cancelled"
 
-	cityRealtimeAgentOutboxQueued         = "queued"
-	cityRealtimeAgentOutboxLeased         = "leased"
-	cityRealtimeAgentOutboxSucceeded      = "succeeded"
-	cityRealtimeAgentOutboxFailed         = "failed_terminal"
-	cityRealtimeAgentOutboxCancelled      = "cancelled"
-	cityRealtimeAgentIntentActionWait     = "agent.wait"
-	cityRealtimeAgentIntentActionActivity = "character.activity.perform"
-	cityRealtimeAgentIntentActionMove     = "character.move"
-	cityRealtimeAgentIntentActionPortal   = "character.portal.traverse"
-	cityRealtimeAgentIntentActionRole     = "character.role.change"
+	cityRealtimeAgentOutboxQueued           = "queued"
+	cityRealtimeAgentOutboxLeased           = "leased"
+	cityRealtimeAgentOutboxSucceeded        = "succeeded"
+	cityRealtimeAgentOutboxFailed           = "failed_terminal"
+	cityRealtimeAgentOutboxCancelled        = "cancelled"
+	cityRealtimeAgentIntentActionWait       = "agent.wait"
+	cityRealtimeAgentIntentActionActivity   = "character.activity.perform"
+	cityRealtimeAgentIntentActionCase       = "character.case.acknowledge"
+	cityRealtimeAgentIntentActionCaseReview = "character.case.review.file"
+	cityRealtimeAgentIntentActionMove       = "character.move"
+	cityRealtimeAgentIntentActionPortal     = "character.portal.traverse"
+	cityRealtimeAgentIntentActionRole       = "character.role.change"
+	cityRealtimeAgentIntentActionSocial     = "character.social.greet"
 
 	cityRealtimeDueEventTypeAgentIntent         = "system.realtime.agent_intent"
 	cityRealtimeDueEventTypeAgentDecisionWakeup = "system.realtime.agent_wakeup"
@@ -247,6 +250,9 @@ func cityRealtimeAgentPolicyVersionSupported(version string) bool {
 	case cityRealtimeAgentCorePolicyVersionLegacy,
 		cityRealtimeAgentCorePolicyVersionDecision,
 		cityRealtimeAgentCorePolicyVersionAutonomy,
+		cityRealtimeAgentCorePolicyVersionActions,
+		cityRealtimeAgentCorePolicyVersionCase,
+		cityRealtimeAgentCorePolicyVersionSocial,
 		cityRealtimeAgentCorePolicyVersion:
 		return true
 	default:
@@ -258,7 +264,10 @@ func cityRealtimeAgentDecisionRuntimeEnabled(binding cityRealtimeAgentPolicyBind
 	return binding.PolicyID == cityRealtimeAgentCorePolicyID &&
 		(binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionDecision ||
 			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionAutonomy ||
-			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersion)
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionActions ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionCase ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionSocial ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReview)
 }
 
 // cityRealtimeAgentCharacterControlRuntimeEnabled is intentionally pinned to
@@ -268,15 +277,46 @@ func cityRealtimeAgentDecisionRuntimeEnabled(binding cityRealtimeAgentPolicyBind
 func cityRealtimeAgentCharacterControlRuntimeEnabled(binding cityRealtimeAgentPolicyBinding) bool {
 	return binding.PolicyID == cityRealtimeAgentCorePolicyID &&
 		(binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionAutonomy ||
-			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersion)
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionActions ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionCase ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionSocial ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReview)
 }
 
-// cityRealtimeAgentCharacterActionRuntimeEnabled is deliberately 1.3-only.
-// A3.1 worlds remain frozen to their wait/activity action catalogue even after
-// the binary learns later navigation and role adapters.
+// cityRealtimeAgentCharacterActionRuntimeEnabled is deliberately limited to
+// 1.3.0 and later. A3.1 worlds remain frozen to their wait/activity action
+// catalogue even after the binary learns later action adapters.
 func cityRealtimeAgentCharacterActionRuntimeEnabled(binding cityRealtimeAgentPolicyBinding) bool {
 	return binding.PolicyID == cityRealtimeAgentCorePolicyID &&
-		binding.PolicyVersion == cityRealtimeAgentCorePolicyVersion
+		(binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionActions ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionCase ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionSocial ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReview)
+}
+
+// cityRealtimeAgentCharacterCaseRuntimeEnabled is available to the 1.4 Case
+// adapter and to later policies that explicitly retain that adapter. Historical
+// 1.0-1.3 worlds remain unchanged.
+func cityRealtimeAgentCharacterCaseRuntimeEnabled(binding cityRealtimeAgentPolicyBinding) bool {
+	return binding.PolicyID == cityRealtimeAgentCorePolicyID &&
+		(binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionCase ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionSocial ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReview)
+}
+
+func cityRealtimeAgentCharacterSocialRuntimeEnabled(binding cityRealtimeAgentPolicyBinding) bool {
+	return binding.PolicyID == cityRealtimeAgentCorePolicyID &&
+		(binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionSocial ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReview)
+}
+
+// cityRealtimeAgentCharacterCaseReviewRuntimeEnabled is deliberately pinned
+// to 1.6.0. A review is an owner-scoped procedural receipt for an already
+// acknowledged Law Case; historical policies never gain that new action or
+// its state shape after an executable upgrade.
+func cityRealtimeAgentCharacterCaseReviewRuntimeEnabled(binding cityRealtimeAgentPolicyBinding) bool {
+	return binding.PolicyID == cityRealtimeAgentCorePolicyID &&
+		binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReview
 }
 
 func validateCityRealtimeAgentDecisionHashState(
@@ -475,6 +515,74 @@ func cityRealtimeAgentDecisionAllowedActions(
 			return nil, false
 		}
 	}
+	if binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionActions {
+		switch agent.AgentSubtype {
+		case "system.root", "system.npc_manager":
+			return []string{cityRealtimeAgentIntentActionWait}, agent.ControlMode == "system"
+		case "character.npc":
+			return []string{cityRealtimeAgentIntentActionWait}, agent.ControlMode == "autonomous"
+		case "character.user":
+			if agent.ControlMode != "autonomous" {
+				return nil, false
+			}
+			return []string{
+				cityRealtimeAgentIntentActionWait,
+				cityRealtimeAgentIntentActionActivity,
+				cityRealtimeAgentIntentActionMove,
+				cityRealtimeAgentIntentActionPortal,
+				cityRealtimeAgentIntentActionRole,
+			}, true
+		default:
+			return nil, false
+		}
+	}
+	if binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionSocial {
+		switch agent.AgentSubtype {
+		case "system.root", "system.npc_manager":
+			return []string{cityRealtimeAgentIntentActionWait}, agent.ControlMode == "system"
+		case "character.npc":
+			return []string{cityRealtimeAgentIntentActionWait}, agent.ControlMode == "autonomous"
+		case "character.user":
+			if agent.ControlMode != "autonomous" {
+				return nil, false
+			}
+			return []string{
+				cityRealtimeAgentIntentActionWait,
+				cityRealtimeAgentIntentActionActivity,
+				cityRealtimeAgentIntentActionCase,
+				cityRealtimeAgentIntentActionMove,
+				cityRealtimeAgentIntentActionPortal,
+				cityRealtimeAgentIntentActionRole,
+				cityRealtimeAgentIntentActionSocial,
+			}, true
+		default:
+			return nil, false
+		}
+	}
+	if binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReview {
+		switch agent.AgentSubtype {
+		case "system.root", "system.npc_manager":
+			return []string{cityRealtimeAgentIntentActionWait}, agent.ControlMode == "system"
+		case "character.npc":
+			return []string{cityRealtimeAgentIntentActionWait}, agent.ControlMode == "autonomous"
+		case "character.user":
+			if agent.ControlMode != "autonomous" {
+				return nil, false
+			}
+			return []string{
+				cityRealtimeAgentIntentActionWait,
+				cityRealtimeAgentIntentActionActivity,
+				cityRealtimeAgentIntentActionCase,
+				cityRealtimeAgentIntentActionCaseReview,
+				cityRealtimeAgentIntentActionMove,
+				cityRealtimeAgentIntentActionPortal,
+				cityRealtimeAgentIntentActionRole,
+				cityRealtimeAgentIntentActionSocial,
+			}, true
+		default:
+			return nil, false
+		}
+	}
 	switch agent.AgentSubtype {
 	case "system.root", "system.npc_manager":
 		return []string{cityRealtimeAgentIntentActionWait}, agent.ControlMode == "system"
@@ -487,6 +595,7 @@ func cityRealtimeAgentDecisionAllowedActions(
 		return []string{
 			cityRealtimeAgentIntentActionWait,
 			cityRealtimeAgentIntentActionActivity,
+			cityRealtimeAgentIntentActionCase,
 			cityRealtimeAgentIntentActionMove,
 			cityRealtimeAgentIntentActionPortal,
 			cityRealtimeAgentIntentActionRole,
@@ -1553,6 +1662,18 @@ func cityRealtimeAgentFakeDecisionEnvelope(
 				sort.Strings(codes)
 				return map[string]any{"activity_code": codes[0]}, "fake_provider_activity", true
 			}
+		case cityRealtimeAgentIntentActionCase:
+			if snapshot.Character.ActionContext != nil && len(snapshot.Character.ActionContext.AvailableCaseCodes) > 0 {
+				return map[string]any{"case_code": snapshot.Character.ActionContext.AvailableCaseCodes[0]}, "fake_provider_case", true
+			}
+		case cityRealtimeAgentIntentActionCaseReview:
+			if snapshot.Character.ActionContext != nil && len(snapshot.Character.ActionContext.AvailableCaseReviewCodes) > 0 {
+				return map[string]any{"case_code": snapshot.Character.ActionContext.AvailableCaseReviewCodes[0]}, "fake_provider_case_review", true
+			}
+		case cityRealtimeAgentIntentActionSocial:
+			if snapshot.Character.ActionContext != nil && len(snapshot.Character.ActionContext.AvailableSocialTargets) > 0 {
+				return map[string]any{"target_actor_code": snapshot.Character.ActionContext.AvailableSocialTargets[0]}, "fake_provider_social", true
+			}
 		case cityRealtimeAgentIntentActionPortal:
 			if snapshot.Character.ActionContext != nil && len(snapshot.Character.ActionContext.AvailablePortalCodes) > 0 {
 				return map[string]any{"portal_code": snapshot.Character.ActionContext.AvailablePortalCodes[0]}, "fake_provider_portal", true
@@ -1581,6 +1702,9 @@ func cityRealtimeAgentFakeDecisionEnvelope(
 		return envelope, nil
 	}
 	for _, actionCode := range []string{
+		cityRealtimeAgentIntentActionCaseReview,
+		cityRealtimeAgentIntentActionCase,
+		cityRealtimeAgentIntentActionSocial,
 		cityRealtimeAgentIntentActionActivity,
 		cityRealtimeAgentIntentActionPortal,
 		cityRealtimeAgentIntentActionRole,
@@ -1622,6 +1746,9 @@ func cityRealtimeAgentFakePreferredActionValid(actionCode string) bool {
 	case "",
 		cityRealtimeAgentIntentActionWait,
 		cityRealtimeAgentIntentActionActivity,
+		cityRealtimeAgentIntentActionCase,
+		cityRealtimeAgentIntentActionCaseReview,
+		cityRealtimeAgentIntentActionSocial,
 		cityRealtimeAgentIntentActionMove,
 		cityRealtimeAgentIntentActionPortal,
 		cityRealtimeAgentIntentActionRole:
@@ -1678,6 +1805,27 @@ func validateCityRealtimeAgentDecisionEnvelope(
 			return nil, "", ErrCityRealtimeAgentDecisionUnavailable.WithMetadata(map[string]string{"field": "action_arguments"})
 		}
 		if _, err := cityRealtimeAgentDecisionActivityCodeFromArguments(envelope.Intent.Arguments); err != nil {
+			return nil, "", err
+		}
+	case cityRealtimeAgentIntentActionCase:
+		if !cityRealtimeAgentCharacterCaseRuntimeEnabled(binding) || agent.AgentSubtype != "character.user" || agent.ActorCode == nil {
+			return nil, "", ErrCityRealtimeAgentDecisionUnavailable.WithMetadata(map[string]string{"field": "action_arguments"})
+		}
+		if _, err := cityRealtimeAgentDecisionCaseCodeFromArguments(envelope.Intent.Arguments); err != nil {
+			return nil, "", err
+		}
+	case cityRealtimeAgentIntentActionCaseReview:
+		if !cityRealtimeAgentCharacterCaseReviewRuntimeEnabled(binding) || agent.AgentSubtype != "character.user" || agent.ActorCode == nil {
+			return nil, "", ErrCityRealtimeAgentDecisionUnavailable.WithMetadata(map[string]string{"field": "action_arguments"})
+		}
+		if _, err := cityRealtimeAgentDecisionCaseReviewCodeFromArguments(envelope.Intent.Arguments); err != nil {
+			return nil, "", err
+		}
+	case cityRealtimeAgentIntentActionSocial:
+		if !cityRealtimeAgentCharacterSocialRuntimeEnabled(binding) || agent.AgentSubtype != "character.user" || agent.ActorCode == nil {
+			return nil, "", ErrCityRealtimeAgentDecisionUnavailable.WithMetadata(map[string]string{"field": "action_arguments"})
+		}
+		if _, err := cityRealtimeAgentDecisionSocialTargetCodeFromArguments(envelope.Intent.Arguments); err != nil {
 			return nil, "", err
 		}
 	case cityRealtimeAgentIntentActionMove:
@@ -2765,6 +2913,246 @@ func applyCityRealtimeAgentIntentDueEvent(
 			if _, wakeupErr = scheduleCityRealtimeAgentDecisionWakeup(ctx, tx, worldID, agent.AgentCode, nextWakeup, frameSequence); wakeupErr != nil {
 				return true, false, wakeupErr
 			}
+		}
+		return true, true, nil
+	case cityRealtimeAgentIntentActionCase:
+		if !cityRealtimeAgentCharacterCaseRuntimeEnabled(*agentState.Binding) ||
+			agent.AgentSubtype != "character.user" || agent.ActorCode == nil || intent.ActorCode == nil ||
+			*intent.ActorCode != *agent.ActorCode {
+			return markStale()
+		}
+		caseCode, caseCodeErr := cityRealtimeAgentDecisionCaseCodeFromRawArguments(intent.Arguments)
+		if caseCodeErr != nil {
+			return markStale()
+		}
+		profile, profileFound, profileErr := loadCityRealtimeCharacterProfile(ctx, tx, worldID, *agent.ActorCode, true)
+		if profileErr != nil {
+			return true, false, profileErr
+		}
+		if !profileFound {
+			return markStale()
+		}
+		caseRuntime, caseRuntimeErr := loadCityRealtimeCharacterCaseResponseBinding(ctx, tx, worldID)
+		if caseRuntimeErr != nil {
+			return true, false, caseRuntimeErr
+		}
+		if caseRuntime == nil || caseRuntime.AgentBindingHash != agentState.Binding.BindingHash {
+			return markStale()
+		}
+		lawCase, lawCaseFound, lawCaseErr := loadCityRealtimeCharacterOpenLawCase(
+			ctx, tx, worldID, *agent.ActorCode, caseCode, true,
+		)
+		if lawCaseErr != nil {
+			return true, false, lawCaseErr
+		}
+		if !lawCaseFound {
+			return markStale()
+		}
+		head, headFound, headErr := loadCityRealtimeCharacterCaseResponseHead(
+			ctx, tx, worldID, *agent.ActorCode, true,
+		)
+		if headErr != nil {
+			return true, false, headErr
+		}
+		if !headFound {
+			head, headErr = newCityRealtimeCharacterCaseResponseGenesisHead(profile.ActorCode, profile.SpawnedFrameSequence)
+			if headErr != nil {
+				return true, false, headErr
+			}
+		}
+		if historyErr := validateCityRealtimeCharacterCaseResponseHeadHistory(
+			ctx, tx, worldID, profile, head,
+		); historyErr != nil {
+			return true, false, historyErr
+		}
+		nextHead, response, responseErr := cityRealtimeCharacterAcknowledgeLawCase(
+			head, lawCase, intent.IntentCode, frameSequence,
+		)
+		if responseErr != nil {
+			return markStale()
+		}
+		if gateErr := enableCityRealtimeCharacterMutationGates(ctx, tx, worldID, frameSequence, true); gateErr != nil {
+			return true, false, gateErr
+		}
+		if gateErr := enableCityRealtimeCharacterCaseResponseMutationGate(ctx, tx, worldID, frameSequence); gateErr != nil {
+			return true, false, gateErr
+		}
+		if !headFound {
+			if insertErr := insertCityRealtimeCharacterCaseResponseHead(ctx, tx, worldID, head); insertErr != nil {
+				return true, false, insertErr
+			}
+		}
+		if insertErr := insertCityRealtimeCharacterCaseResponseEvent(ctx, tx, worldID, response); insertErr != nil {
+			return true, false, insertErr
+		}
+		if updateErr := updateCityRealtimeCharacterCaseResponseHead(ctx, tx, worldID, head, nextHead); updateErr != nil {
+			return true, false, updateErr
+		}
+		if updateErr := updateCityRealtimeAgentIntentTerminal(ctx, tx, worldID, intent.IntentCode, cityRealtimeAgentIntentApplied, frameSequence); updateErr != nil {
+			return true, false, updateErr
+		}
+		if wakeupErr := cityRealtimeAgentScheduleAutonomousActionWakeup(
+			ctx, tx, worldID, frameSequence, event.DueWorldTimeUS, cityRealtimeTimeQuantumUS, *agentState.Binding, agent,
+		); wakeupErr != nil {
+			return true, false, wakeupErr
+		}
+		return true, true, nil
+	case cityRealtimeAgentIntentActionCaseReview:
+		if !cityRealtimeAgentCharacterCaseReviewRuntimeEnabled(*agentState.Binding) ||
+			agent.AgentSubtype != "character.user" || agent.ActorCode == nil || intent.ActorCode == nil ||
+			*intent.ActorCode != *agent.ActorCode {
+			return markStale()
+		}
+		caseCode, caseCodeErr := cityRealtimeAgentDecisionCaseReviewCodeFromRawArguments(intent.Arguments)
+		if caseCodeErr != nil {
+			return markStale()
+		}
+		reviewBinding, reviewBindingErr := loadCityRealtimeCharacterCaseReviewBinding(ctx, tx, worldID)
+		if reviewBindingErr != nil {
+			return true, false, reviewBindingErr
+		}
+		if reviewBinding == nil || reviewBinding.AgentBindingHash != agentState.Binding.BindingHash {
+			return markStale()
+		}
+		item, itemFound, itemErr := loadCityRealtimeCharacterReviewableLawCase(
+			ctx, tx, worldID, event.DueWorldTimeUS, *agent.ActorCode, caseCode, true,
+		)
+		if itemErr != nil {
+			return true, false, itemErr
+		}
+		if !itemFound {
+			return markStale()
+		}
+		head, headFound, headErr := loadCityRealtimeCharacterCaseReviewHead(
+			ctx, tx, worldID, *agent.ActorCode, caseCode, true,
+		)
+		if headErr != nil {
+			return true, false, headErr
+		}
+		if headFound {
+			return markStale()
+		}
+		head, headErr = newCityRealtimeCharacterCaseReviewGenesisHead(item)
+		if headErr != nil {
+			return true, false, headErr
+		}
+		resolutionDueWorldTimeUS, dueErr := cityRealtimeCharacterCaseReviewResolutionDueWorldTime(event.DueWorldTimeUS)
+		if dueErr != nil {
+			return true, false, dueErr
+		}
+		nextHead, reviewEvent, reviewErr := cityRealtimeCharacterFileCaseReview(
+			head, item, intent.IntentCode, frameSequence, resolutionDueWorldTimeUS,
+		)
+		if reviewErr != nil {
+			return markStale()
+		}
+		if gateErr := enableCityRealtimeCharacterMutationGates(ctx, tx, worldID, frameSequence, true); gateErr != nil {
+			return true, false, gateErr
+		}
+		if gateErr := enableCityRealtimeCharacterCaseReviewMutationGate(ctx, tx, worldID, frameSequence); gateErr != nil {
+			return true, false, gateErr
+		}
+		// The closure is inserted before the filed event so the database-side
+		// fact guard can prove that the review has exactly one sealed next step.
+		if scheduleErr := scheduleCityRealtimeCharacterCaseReviewCloseDueEvent(
+			ctx, tx, worldID, resolutionDueWorldTimeUS, frameSequence, item, intent.IntentCode,
+		); scheduleErr != nil {
+			return true, false, scheduleErr
+		}
+		if insertErr := insertCityRealtimeCharacterCaseReviewHead(ctx, tx, worldID, head); insertErr != nil {
+			return true, false, insertErr
+		}
+		if insertErr := insertCityRealtimeCharacterCaseReviewEvent(ctx, tx, worldID, reviewEvent); insertErr != nil {
+			return true, false, insertErr
+		}
+		if updateErr := updateCityRealtimeCharacterCaseReviewHead(ctx, tx, worldID, head, nextHead); updateErr != nil {
+			return true, false, updateErr
+		}
+		if updateErr := updateCityRealtimeAgentIntentTerminal(ctx, tx, worldID, intent.IntentCode, cityRealtimeAgentIntentApplied, frameSequence); updateErr != nil {
+			return true, false, updateErr
+		}
+		if wakeupErr := cityRealtimeAgentScheduleAutonomousActionWakeup(
+			ctx, tx, worldID, frameSequence, event.DueWorldTimeUS, cityRealtimeTimeQuantumUS, *agentState.Binding, agent,
+		); wakeupErr != nil {
+			return true, false, wakeupErr
+		}
+		return true, true, nil
+	case cityRealtimeAgentIntentActionSocial:
+		if !cityRealtimeAgentCharacterSocialRuntimeEnabled(*agentState.Binding) ||
+			agent.AgentSubtype != "character.user" || agent.ActorCode == nil || intent.ActorCode == nil ||
+			*intent.ActorCode != *agent.ActorCode {
+			return markStale()
+		}
+		targetCode, targetCodeErr := cityRealtimeAgentDecisionSocialTargetCodeFromRawArguments(intent.Arguments)
+		if targetCodeErr != nil {
+			return markStale()
+		}
+		actorState, actorStateErr := loadCityRealtimeAgentDecisionActorState(ctx, tx, worldID, agent)
+		if actorStateErr != nil {
+			return true, false, actorStateErr
+		}
+		target, targetFound, targetErr := loadCityRealtimeCharacterSocialTarget(ctx, tx, worldID, targetCode, true)
+		if targetErr != nil {
+			return true, false, targetErr
+		}
+		if !targetFound || target.ActorCode == actorState.ActorCode ||
+			!cityRealtimeCharacterSocialTargetAllowed(actorState, target) {
+			return markStale()
+		}
+		socialBinding, bindingErr := loadCityRealtimeCharacterSocialBinding(ctx, tx, worldID)
+		if bindingErr != nil {
+			return true, false, bindingErr
+		}
+		if socialBinding == nil || socialBinding.AgentBindingHash != agentState.Binding.BindingHash {
+			return markStale()
+		}
+		lowCode, highCode, pairErr := cityRealtimeCharacterSocialPair(actorState.ActorCode, target.ActorCode)
+		if pairErr != nil {
+			return markStale()
+		}
+		head, headFound, headErr := loadCityRealtimeCharacterSocialHead(ctx, tx, worldID, lowCode, highCode, true)
+		if headErr != nil {
+			return true, false, headErr
+		}
+		if !headFound {
+			head, headErr = newCityRealtimeCharacterSocialGenesisHead(lowCode, highCode)
+			if headErr != nil {
+				return true, false, headErr
+			}
+		}
+		if historyErr := validateCityRealtimeCharacterSocialHeadHistory(ctx, tx, worldID, head); historyErr != nil {
+			return true, false, historyErr
+		}
+		nextHead, socialEvent, transitionErr := cityRealtimeCharacterSocialGreet(
+			head, actorState.ActorCode, target.ActorCode, intent.IntentCode, frameSequence,
+		)
+		if transitionErr != nil {
+			return markStale()
+		}
+		if gateErr := enableCityRealtimeCharacterMutationGates(ctx, tx, worldID, frameSequence, true); gateErr != nil {
+			return true, false, gateErr
+		}
+		if gateErr := enableCityRealtimeCharacterSocialMutationGate(ctx, tx, worldID, frameSequence); gateErr != nil {
+			return true, false, gateErr
+		}
+		if !headFound {
+			if insertErr := insertCityRealtimeCharacterSocialHead(ctx, tx, worldID, head); insertErr != nil {
+				return true, false, insertErr
+			}
+		}
+		if insertErr := insertCityRealtimeCharacterSocialEvent(ctx, tx, worldID, socialEvent); insertErr != nil {
+			return true, false, insertErr
+		}
+		if updateErr := updateCityRealtimeCharacterSocialHead(ctx, tx, worldID, head, nextHead); updateErr != nil {
+			return true, false, updateErr
+		}
+		if updateErr := updateCityRealtimeAgentIntentTerminal(ctx, tx, worldID, intent.IntentCode, cityRealtimeAgentIntentApplied, frameSequence); updateErr != nil {
+			return true, false, updateErr
+		}
+		if wakeupErr := cityRealtimeAgentScheduleAutonomousActionWakeup(
+			ctx, tx, worldID, frameSequence, event.DueWorldTimeUS, cityRealtimeTimeQuantumUS, *agentState.Binding, agent,
+		); wakeupErr != nil {
+			return true, false, wakeupErr
 		}
 		return true, true, nil
 	case cityRealtimeAgentIntentActionMove:

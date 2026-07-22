@@ -48,6 +48,23 @@
         {{ t('admin.accounts.codexImportFormats') }}
       </div>
 
+      <fieldset v-if="mode === 'codex'" class="space-y-2">
+        <legend class="input-label">{{ t('admin.accounts.codexImportTargetLabel') }}</legend>
+        <div class="flex flex-wrap gap-4 text-sm text-gray-700 dark:text-dark-200">
+          <label class="flex cursor-pointer items-center gap-2">
+            <input v-model="codexTargetAuthMode" type="radio" value="oauth" />
+            <span>{{ t('admin.accounts.codexImportTargetOAuth') }}</span>
+          </label>
+          <label class="flex cursor-pointer items-center gap-2">
+            <input v-model="codexTargetAuthMode" type="radio" value="agentIdentity" />
+            <span>{{ t('admin.accounts.codexImportTargetAgentIdentity') }}</span>
+          </label>
+        </div>
+        <p v-if="codexTargetAuthMode === 'agentIdentity'" class="input-hint">
+          {{ t('admin.accounts.codexImportTargetAgentIdentityHint') }}
+        </p>
+      </fieldset>
+
       <div v-if="mode === 'codex'">
         <label class="input-label" for="codex-import-content">{{ t('admin.accounts.codexImportPaste') }}</label>
         <textarea
@@ -180,6 +197,7 @@ const appStore = useAppStore()
 
 const importing = ref(false)
 const mode = ref<'bundle' | 'codex'>('bundle')
+const codexTargetAuthMode = ref<'oauth' | 'agentIdentity'>('oauth')
 const files = ref<File[]>([])
 const codexContent = ref('')
 const dragDepth = ref(0)
@@ -205,6 +223,7 @@ const codexMessages = computed<CodexSessionImportMessage[]>(() => [
 const setMode = (value: 'bundle' | 'codex') => {
   if (importing.value || mode.value === value) return
   mode.value = value
+  codexTargetAuthMode.value = 'oauth'
   files.value = []
   result.value = null
   codexResult.value = null
@@ -217,6 +236,7 @@ watch(
     if (open) {
       files.value = []
       mode.value = 'bundle'
+      codexTargetAuthMode.value = 'oauth'
       codexContent.value = ''
       dragDepth.value = 0
       hasCreatedData.value = false
@@ -434,7 +454,10 @@ const handleCodexImport = async () => {
     const imported = await adminAPI.accounts.importCodexSession({
       contents,
       update_existing: true,
-      skip_default_group_bind: false
+      skip_default_group_bind: false,
+      ...(codexTargetAuthMode.value === 'agentIdentity'
+        ? { target_auth_mode: 'agentIdentity' as const }
+        : {})
     })
     codexResult.value = imported
     result.value = null

@@ -1318,6 +1318,104 @@ func (s *AccountUsageService) GetTodayStatsBatch(ctx context.Context, accountIDs
 	return result, nil
 }
 
+// AccountWindowStatsRequest identifies the active usage window for one account.
+// Different accounts may have different rolling-window start times, so callers
+// provide the exact boundary computed from their account state.
+type AccountWindowStatsRequest struct {
+	AccountID int64
+	StartTime time.Time
+}
+
+// GetAccountWindowCostsBatch returns standard cost for the supplied account windows.
+//
+// Account list rendering previously launched one aggregate SQL query per eligible
+// row. Imported OAuth pools often share the same window boundary, so group requests
+// by that boundary and use the repository's GROUP BY batch query. If a batch query
+// fails, degrade only that window group to bounded single-account reads instead of
+// failing the whole list response.
+func (s *AccountUsageService) GetAccountWindowCostsBatch(
+	ctx context.Context,
+	requests []AccountWindowStatsRequest,
+) map[int64]float64 {
+	result := make(map[int64]float64, len(requests))
+	if s == nil || s.usageLogRepo == nil || len(requests) == 0 {
+		return result
+	}
+
+	type windowGroup struct {
+		startTime  time.Time
+		accountIDs []int64
+	}
+	groupsByStart := make(map[string]*windowGroup)
+	seenAccountIDs := make(map[int64]struct{}, len(requests))
+	for _, request := range requests {
+		if request.AccountID <= 0 || request.StartTime.IsZero() {
+			continue
+		}
+		if _, exists := seenAccountIDs[request.AccountID]; exists {
+			continue
+		}
+		seenAccountIDs[request.AccountID] = struct{}{}
+
+		startTime := request.StartTime.UTC()
+		key := startTime.Format(time.RFC3339Nano)
+		group := groupsByStart[key]
+		if group == nil {
+			group = &windowGroup{startTime: startTime}
+			groupsByStart[key] = group
+		}
+		group.accountIDs = append(group.accountIDs, request.AccountID)
+	}
+	if len(groupsByStart) == 0 {
+		return result
+	}
+
+	fallbackGroups := make([]*windowGroup, 0, len(groupsByStart))
+	batchReader, supportsBatch := s.usageLogRepo.(accountWindowStatsBatchReader)
+	for _, group := range groupsByStart {
+		if supportsBatch {
+			statsByAccount, err := batchReader.GetAccountWindowStatsBatch(ctx, group.accountIDs, group.startTime)
+			if err == nil {
+				for _, accountID := range group.accountIDs {
+					if stats := statsByAccount[accountID]; stats != nil {
+						result[accountID] = stats.StandardCost
+					} else {
+						result[accountID] = 0
+					}
+				}
+				continue
+			}
+		}
+		fallbackGroups = append(fallbackGroups, group)
+	}
+
+	if len(fallbackGroups) == 0 {
+		return result
+	}
+
+	var mu sync.Mutex
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(8)
+	for _, group := range fallbackGroups {
+		for _, accountID := range group.accountIDs {
+			id := accountID
+			startTime := group.startTime
+			g.Go(func() error {
+				stats, err := s.usageLogRepo.GetAccountWindowStats(gctx, id, startTime)
+				if err == nil && stats != nil {
+					mu.Lock()
+					result[id] = stats.StandardCost
+					mu.Unlock()
+				}
+				return nil // The list endpoint remains best-effort on statistics failures.
+			})
+		}
+	}
+	_ = g.Wait()
+
+	return result
+}
+
 func windowStatsFromAccountStats(stats *usagestats.AccountStats) *WindowStats {
 	if stats == nil {
 		return &WindowStats{}

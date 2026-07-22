@@ -1,8 +1,8 @@
 # 城市模拟 Agent 化架构改动设计
 
-版本：v1.4（2026-07-22）
+版本：v1.6（2026-07-22）
 
-状态：设计契约冻结；A0/A1/A2/A3.1/A3.2 已实现。A3.2 已将用户角色的受限相邻移动、Portal 穿越与 Role 变更接入同一条异步 decision/intent/due-event 链，并用版本化有限行动上下文约束目标；Rule/Case、社交、规划、外部模型路由、预算、NPC 微观生命周期与奖励仍未上线。当前 `autonomous` 仍不是可对外承诺的生产 AI 游玩能力。
+状态：设计契约冻结；A0/A1/A2/A3.1/A3.2 已实现，A3.3 已完成三个受限 action slice：既有本人 Law Case 的确认回执、相邻公开 Actor 的无文本问候，以及已确认 Case 的程序性复核回执。三者都已接入版本化 policy、sealed action context、异步 decision/intent/due-event、数据库 hash chain 与 reducer 验证。Case 发起/裁决、复杂关系、任务、交通、有限规划、外部模型路由、预算、NPC 微观生命周期与奖励仍未上线；当前 `autonomous` 仍不是可对外承诺的生产 AI 游玩能力。
 
 适用范围：Sub2API 的城市模拟系统、开放世界 Actor、NPC、第三方模型调用、平台虚拟货币奖励。
 依赖：[《城市模拟游戏总体设计》](CITY_SIMULATION_GAME_DESIGN_CN.md)、[《城市模拟实时世界时钟与像素世界改动设计》](CITY_SIMULATION_REALTIME_PIXEL_WORLD_DESIGN_CN.md)、[《可扩展虚拟货币与权益体系设计》](VIRTUAL_CURRENCY_SYSTEM_DESIGN_CN.md)。
@@ -31,7 +31,7 @@
 
 ### 0.1 当前基线与缺口
 
-当前 `city-openworld-v24` 已具备开放世界 Actor、属性、Role、Status、位置、Portal、导航、Rule/Case、设施、交通、货运、事实、快照和回放等底座；也已有平台虚拟货币钱包、封账账本、分组策略和签名集成入口。`city-openworld-realtime-v2` 现有四代封存 policy：`1.0.0` 为 A0/A1 树和生命周期基线，`1.1.0` 为 A2 的 wait-only 决策链，`1.2.0` 为 A3.1 的用户角色自治活动闭环，`1.3.0` 为 A3.2 的有限移动/Portal/Role action adapter。新建 realtime world 绑定 `city-realtime-agent-core@1.3.0`；既有 `1.0.0/1.1.0/1.2.0` world 保持原 policy、行为、授权散列与 canonical hash，不被自动升级。
+当前 `city-openworld-v24` 已具备开放世界 Actor、属性、Role、Status、位置、Portal、导航、Rule/Case、设施、交通、货运、事实、快照和回放等底座；也已有平台虚拟货币钱包、封账账本、分组策略和签名集成入口。`city-openworld-realtime-v2` 现有七代封存 policy：`1.0.0` 为 A0/A1 树和生命周期基线，`1.1.0` 为 A2 的 wait-only 决策链，`1.2.0` 为 A3.1 的用户角色自治活动闭环，`1.3.0` 为 A3.2 的有限移动/Portal/Role action adapter，`1.4.0` 为 A3.3 的既有 Law Case 确认回执，`1.5.0` 为 A3.3 的有界社交问候 adapter，`1.6.0` 为已确认 Case 的程序性复核回执。新建 realtime world 绑定 `city-realtime-agent-core@1.6.0`；既有 `1.0.0/1.1.0/1.2.0/1.3.0/1.4.0/1.5.0` world 保持原 policy、行为、授权散列与 canonical hash，不被自动升级。
 
 `1.2.0` 在不改变 Actor/账本/Rule 权威边界的前提下，新增了以下可回放能力：
 
@@ -49,7 +49,7 @@
 
 它**尚未**具备以下能力：
 
-- `1.1.0` 仍严格只允许 `agent.wait {}`；`1.2.0` 仍只桥接受限活动；`1.3.0` 已桥接一格移动、现有 Portal 与现有 Role 变更，但尚未桥接 Rule/Case 发起、社交、任务、经济、交通请求或多步导航；
+- `1.1.0` 仍严格只允许 `agent.wait {}`；`1.2.0` 仍只桥接受限活动；`1.3.0` 仍只桥接一格移动、现有 Portal 与现有 Role 变更；`1.4.0` 只能确认服务端已封存且属于本人的 Law Case，不能发起、改写、裁决或撤销 Case；`1.5.0` 只能对服务端公布的相邻 active NPC/Character 生成无自由文本的 greeting 事实，不能聊天、改变对方状态、发奖或改变关系以外的任何领域状态；`1.6.0` 只能在服务端公布的本人、已确认、未曾复核且仍位于 15 分钟 world-time 窗口内的 Case code 上提交一次 `character.case.review.file`，固定 30 秒后只能得到 `closed_no_change`，不能提出新指控、改裁决、减免处罚、改城市信用或平台资产；
 - 没有外部模型路由、模型预算、生产 worker、行为 overlay 或人格演化；当前 fake provider 只是 deterministic 验证 adapter，不是用户可选模型，也不是长期后台 AI 服务；
 - 当前 `city_commands.user_id` 仍假定命令由人类用户提交，不能正确表达系统/NPC Agent 作为既有城市命令来源；
 - 没有城市 `city_reward_event`、奖励 outbox 和城市事实到平台货币的服务端桥接；
@@ -430,14 +430,18 @@ parent 的已封存 trigger
 
 正式产品策略默认仅向普通用户开放 `autonomous` 和 `suspended`；`manual/assisted` 是管理员、测试 world 或明确发布的教学场景能力。这样用户在常规游玩中只能定义人格、选择允许的模型、查看生活和暂停角色，不会与 Character Agent 争夺同一 Actor 的逐步操作权。
 
-#### A3.1 / A3.2 当前落地语义
+#### A3.1 / A3.2 / A3.3 当前落地语义
 
 - `1.2.0` 与 `1.3.0` 的新 realtime world 都获得 owner-scoped `character.agent.configure`。人格每次保存生成新的 immutable revision；前端只在所有者角色面板展示该 seed，普通地图、事件流和其他成员投影绝不携带它。
 - `autonomous → suspended` 在同一权威事务内撤销未执行的 pending request、intent 与 future wakeup；已经被 worker lease 的 request 不强行改写历史，而是在 decision/intent 验证点被标记 stale。这避免了“暂停后仍在下一帧行动”的竞争窗口。
 - `suspended → autonomous` 只注册下一次服务端 world-time wakeup，绝不在 HTTP 请求、浏览器或 reducer 内直接推理。前端的配置保存成功也不表示模型调用已经发生。
 - `1.2.0` 的 action allowlist 仍仅为 `agent.wait` 与 `character.activity.perform`。`1.3.0` 额外允许 `character.move`、`character.portal.traverse` 与 `character.role.change`；后三者的 arguments 只有服务端发布的有限候选，不能提交路径、任意坐标、任意 Portal/Role code 或结果字段。
 - `1.3.0` 的决定必须同时通过 policy allowlist、严格 arguments schema、sealed Observation 的 `action_context`、precondition hash 和执行时的二次领域检查。移动永远是单格相邻步；Portal 永远是当前端点上的不可变拓扑边；Role 永远重新检查现有 progression catalog 的资格。没有任何 Agent 路径可直接改位置、经验、职业、账本、处罚或奖励。
-- Rule/Case、社交、任务、交通、经济、关系和多步导航尚未作为 Agent action adapter 落地；不要把当前一格移动/Portal/Role 支持宣传为完整自动生活系统。
+- `1.4.0` 的 Case adapter 只从 Observation 公布的本人 open law-case code 中选择 `character.case.acknowledge`；due-event 会锁定并重新加载 Law Case、校验 Case event chain，再追加 response event。确认不会改变 ruling、fine、city credit 或 civic standing，也没有自由文本或“同意处罚”之外的模型解释被保存。
+- `1.5.0` 的 Social adapter 只从 Observation 公布的同层、相邻、active 的 NPC/Character code 中选择 `character.social.greet`；Actor pair 以排序后的匿名 code 作为 key，关系 head/event 使用 genesis 与 append-only hash chain。当前 greeting 只增加封顶的粗粒度 affinity/interaction count，不保存聊天文本、不读取对方私有资料、不发奖励、不改法律/钱包/位置/职业。
+- `1.6.0` 的 Case-review adapter 只从 Observation 的 `available_case_review_codes` 选择 `character.case.review.file`。候选由服务端从“本人、已确认、没有 review head、确认 frame 距当前 world time 不超过 15 分钟”的既有 Law Case 得出，最多 16 个且按 case code 排序；模型只回显一个 opaque code，不能写 reason、申诉文本、规则、处罚或期望结果。执行时再次锁定 Law/response/head 并重检候选，再创建 review genesis/head、`filed` event 和唯一的系统 close due event；30 秒后 reducer 仅可追加 `closed_no_change`，不写 Law、Profile、city credit、库存、城市账本、虚拟货币或 provider 数据。
+- `1.6.0` 的 review head 绑定 Law event hash 与 acknowledgement response hash，event/state hash 分别封存 frame、due time、source intent 和前链；`GET /api/v1/city/worlds/:world_id/realtime/character/case-reviews` 只按 session 所属 Character 返回自己的 Case、既有规则/处罚事实和程序状态，不接受 actor 参数、不返回 Agent、人格、模型、prompt、原始输出或平台资产字段。旧 1.0–1.5 world 返回空兼容投影。
+- Rule/Case 发起与裁决、复杂关系/任务、交通、经济和多步导航仍尚未作为 Agent action adapter 落地；不要把当前受限活动/空间/职业/Case acknowledgement/social greeting 支持宣传为完整自动生活系统。
 - 当前 worker 是 deterministic fake-provider 验证路径，用于验证时间隔离、撤销、人格脱敏和活动 reducer；没有 Model Profile、第三方凭据、用户模型选择或 production background inference。因此不得将现有 UI 的“自主”宣传为已经接入大模型的挂机玩法。
 
 ### 6.5 NPC 与用户角色的共同点/差异
@@ -495,17 +499,17 @@ sequenceDiagram
 9. **Tick 执行**：复用现有 command/reducer 权限、位置、Role、Portal、资源、Rule 和 Case 校验。成功产生既有 Fact/Effect；失败产生被拒绝命令和结构化原因。
 10. **反馈**：下一次 Observation 只包含必要的结果摘要（例如 `action_rejected: target_occupied`），模型无需获得数据库错误或别的用户信息。
 
-### 7.2.1 已实现的 A2 / A3.1 / A3.2 受限闭环
+### 7.2.1 已实现的 A2 / A3.1 / A3.2 / A3.3 受限闭环
 
-`city-realtime-agent-core@1.1.0` 保持 A2 的 wait-only 闭环；`1.2.0` 在其上增加用户 Character Agent 的最小自主活动闭环；`1.3.0` 再增加严格有限的空间/职业 adapter，但没有放宽执行边界：
+`city-realtime-agent-core@1.1.0` 保持 A2 的 wait-only 闭环；`1.2.0` 在其上增加用户 Character Agent 的最小自主活动闭环；`1.3.0` 增加严格有限的空间/职业 adapter；`1.4.0`、`1.5.0` 和 `1.6.0` 增加三个互相独立的、版本化的 A3.3 adapter，但没有放宽执行边界：
 
 - Observation 只含 Agent 自身的公开 Actor 状态、自己的角色生命状态、allowlist、人格 revision/hash 与 server-generated precondition hash；不含 owner、平台账户、provider、原始人格、prompt、memory、凭据或其他用户私有数据。
 - `trigger_key` 是服务端 one-shot 因果去重键；同一 Agent 重试同一 key 返回原 request，不新增 Observation 或 Temporal Frame。
-- worker 在事务外运行；`1.1.0` 的 fake provider 只能输出 `agent.wait {}`，`1.2.0` 的 fake provider 只可在服务端公布的当前可用活动中选择 `character.activity.perform`，`1.3.0` 的管理/测试选择器只能从同一 Observation 的有限 `action_context` 中选择活动、移动、Portal 或 Role。三者都经过 lease、attempt、hash、envelope、decision、intent 与 due-event reducer 的完整链路。
+- worker 在事务外运行；`1.1.0` 的 fake provider 只能输出 `agent.wait {}`，`1.2.0` 的 fake provider 只可在服务端公布的当前可用活动中选择 `character.activity.perform`，`1.3.0` 的管理/测试选择器只能从同一 Observation 的有限 `action_context` 中选择活动、移动、Portal 或 Role，`1.4.0/1.5.0/1.6.0` 只能选择已公布的 Case/social/Case-review 候选。所有版本都经过 lease、attempt、hash、envelope、decision、intent 与 due-event reducer 的完整链路。
 - intent 的最早执行时间为下一 world-time quantum，且在 due-event reducer 再次验证 Agent control/precondition；`character.activity.perform` 复用既有活动/生活/进展/库存/规则 reducer，`character.move` 复用相邻、地形/室内与占用检查及 Actor position event，`character.portal.traverse` 复用 Portal 拓扑/占用检查，`character.role.change` 复用资格、assignment、progression event 与 Profile reducer。过期、状态变化或异常 payload 只变为 stale/rejected，不能修改 Actor、账本、Rule 或奖励。
 - 暂停用户角色 Agent 时，未 lease request、pending intent 和 future wakeup 都会被撤销；lease 重试只改变非 canonical worker 审计字段。超过固定尝试上限后封存 `failed_terminal`，不遗留活跃 request/outbox，不创造 decision 或 intent。
 
-该阶段证明了人格私有性、控制撤销、时间隔离、有限行动上下文与受控活动/空间/职业执行可以共同回放；它不代表角色已能自主规划生活、更改法律状态或使用真实大模型。剩余 Character action adapter 与外部 provider/预算分别属于后续 A3.3/A4。
+该阶段证明了人格私有性、控制撤销、时间隔离、有限行动上下文、受控活动/空间/职业执行、既有 Case 回执、无文本社交事实和无裁决权的程序性 Case-review 回执可以共同回放；它不代表角色已能自主规划生活、发起或裁决法律程序、使用真实大模型或获得平台奖励。剩余 Character action adapter 与外部 provider/预算分别属于后续 A3.3/A4。
 
 #### A3.2 实现记录（2026-07-22）
 
@@ -514,6 +518,17 @@ sequenceDiagram
 - `character.move`、`character.portal.traverse`、`character.role.change` 分别桥接至既有相邻移动/室内可通行/占用、Portal 拓扑、Role assignment/progression/profile reducer；所有成功和 stale 分支都保持后续 wakeup 的确定性调度，未新增浏览器“直接让 Agent 行动”的 API。
 - `CityRealtimeAgentFakeDecisionRunInput.PreferredAction` 仅是管理员/集成测试使用的 deterministic adapter 选择器，且仍只能选择 sealed Observation 中的候选；它不是用户设置、模型 profile 或生产执行接口。
 - 已覆盖 policy 兼容、arguments schema、有限候选拒绝、整数边界相邻性、迁移严格性，以及真实世界中 fake-provider 的 `character.move → intent → position event → next wakeup` 链路。Portal/Role 的底层 topology/progression reducer 已有现有测试；后续 A3.3 在扩展动作域时应补充每个新 adapter 的完整集成路径。
+
+#### A3.3 第一至第三个 action slice 实现记录（2026-07-22）
+
+- 迁移 `268_city_realtime_agent_case_response_adapters.sql` 发布 `city-realtime-agent-core@1.4.0` 的 `character.case.acknowledge` 上下文 v2；迁移 `269_city_realtime_agent_social_adapters.sql` 发布 `@1.5.0` 的 `character.social.greet` 上下文 v3。新世界直接绑定 1.5；1.4 仍作为不可变历史 policy 保存。
+- Case response 只允许 actor 自己确认服务端已封存的 open Law Case。响应 head/event 以 genesis、revision、frame 与 hash chain 封存；由于 Case event 必须先存在且 intent 在追加事件时仍为 pending，任意越权 Case code、自由文本、修改法律裁决或绕过 due-event 的写入都会被拒绝。
+- Social response 以排序后的 `(actor_code_low, actor_code_high)` 作为匿名关系 key，只接受同层相邻的 active NPC/Character；每次 greeting 追加不可变 event，affinity 以固定步长增加并封顶，head 的状态 hash 绑定上一事件。该切片没有聊天、关系私密字段、平台钱包、奖励或其他 Actor 的状态写入。
+- 用户角色可通过 owner-scoped `GET /api/v1/city/worlds/:world_id/realtime/character/relations` 读取自己的 bounded relation heads；接口只解析 session 所属 Character，不接受 actor code，不返回对方 owner/Agent 信息，并以 frame/pair cursor 分页。旧 1.0–1.4 world 返回空兼容投影，不合成不存在的 social 状态。
+- action context v3 明确保留 v1/v2 wire shape；v1/v2 world 不会收到 social 字段。迁移测试、纯 reducer/hash 测试、旧 Case v2 兼容测试和真实 PostgreSQL Case acknowledgement integration 已覆盖当前边界。
+- 迁移 `273_city_realtime_agent_case_review_adapters.sql` 发布 `city-realtime-agent-core@1.6.0` 的 `character.case.review.file` 上下文 v4。v4 保留 v1/v2/v3 的所有字段，再增加始终显式出现的 `available_case_review_codes`；旧 policy 的 Observation wire shape、授权散列和 canonical shape 不变。
+- review 只能以一个已确认的本人 Case 为 genesis。`filed` event 必须引用仍为 pending 的同一 intent，并证明唯一的 `system.realtime.character_case_review_close` due event 已按固定 aggregate/dedup/payload/hash 预约；closure event 必须引用相同 intent 与仍 pending 的系统 due event，最终结果固定为 `closed_no_change`。数据库 guard 验证 chain、source、候选历史、due-event 元组与 state/event hash，不能通过直接 SQL 或重放 payload 扩权。
+- 用户角色可通过 owner-scoped `GET /api/v1/city/worlds/:world_id/realtime/character/case-reviews` 读取自己的程序性 Case-review heads，以 `frame|case_code` cursor 分页。该投影仅含已存在的 Law Case 规则/处罚事实与 review status，不接收 actor code，也不返回 Agent、人格、模型、prompt、原始输出、provider 或平台资产数据；旧 1.0–1.5 world 返回空投影。
 
 ### 7.3 Tick phase 的精确扩展
 
@@ -1045,7 +1060,8 @@ Agent runtime 的正确性定义为：给定 genesis/upgrade snapshot、版本�
 | A2 | Observation、Decision request/attempt、fake provider、schema validator、agent-origin no-op intent | A1 | 已实现：同一 trigger 不重复排队；失败无副作用；旧 policy hash 不变 |
 | A3.1 | 用户 Character Agent、人格种子 immutable revision、`autonomous/suspended` 控制、wakeups、受限活动 adapter 与 owner UI | A2 | 已实现：人格不泄露到 Observation；暂停撤销队列；fake-provider 活动在后续 Frame 结算 |
 | A3.2 | 有限相邻移动、Portal、Role action adapter 与 sealed action context | A3.1 | 已实现：新建 `1.3.0` world 的 fake provider 只能从服务端有限候选行动；旧 `1.0/1.1/1.2` policy hash/行为不变 |
-| A3.3 | Rule/Case、关系、任务、社交、交通请求、有限规划与行为 overlay action adapter | A3.2 | 每个动作都有独立 scope/schema/执行时重检/回放与撤销语义；不能将多步路径或结果交给模型生成 |
+| A3.3a | 既有 Law Case acknowledgement 与有界 social greeting action adapter | A3.2 | 已实现：1.4 只能确认本人的 sealed Case；1.5 只能问候服务端公布的相邻 active NPC/Character；两者均有独立 scope/schema/执行时重检/回放语义 |
+| A3.3b | Case 发起/流程、丰富关系、任务、交通请求、有限规划与行为 overlay action adapter | A3.3a | 每个动作都有独立 scope/schema/执行时重检/回放与撤销语义；不能将多步路径或结果交给模型生成 |
 | A4 | Model Profile、受控路由、预算、熔断、隐私保留和管理/用户 UI | A3.2–A3.3（按 action profile 分批开放） | 外部模型故障不影响 tick；权限/预算/脱敏测试通过 |
 | A5 | NPC Manager、NPC Character Agent、LOD bridge、近景 NPC | A1–A4 | 不需每 tick 调用模型，NPC lifecycle/回放/容量通过 |
 | A6 | 系统 Agent 子树与内容定义的系统 proposal | A1–A5 + 对应城市域成熟 | 子 Agent 不能扩权/越界，所有系统 action 可回放 |

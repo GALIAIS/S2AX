@@ -39,6 +39,7 @@ type CodexSessionImportRequest struct {
 	UpdateExisting          *bool          `json:"update_existing"`
 	SkipDefaultGroupBind    *bool          `json:"skip_default_group_bind"`
 	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"`
+	TargetAuthMode          string         `json:"target_auth_mode"`
 }
 
 type CodexSessionImportResult struct {
@@ -72,25 +73,26 @@ type codexImportEntry struct {
 }
 
 type codexImportAccount struct {
-	Name            string
-	AccessToken     string
-	RefreshToken    string
-	IDToken         string
-	Email           string
-	AccountID       string
-	UserID          string
-	PlanType        string
-	Organization    string
-	AgentRuntimeID  string
-	AgentPrivateKey string
-	AgentTaskID     string
-	AgentFedRAMP    bool
-	IsAgentIdentity bool
-	Credentials     map[string]any
-	Extra           map[string]any
-	TokenExpiresAt  *time.Time
-	IdentityKeys    []string
-	WarningTexts    []string
+	Name             string
+	AccessToken      string
+	RefreshToken     string
+	IDToken          string
+	Email            string
+	AccountID        string
+	UserID           string
+	PlanType         string
+	Organization     string
+	AgentRuntimeID   string
+	AgentPrivateKey  string
+	AgentTaskID      string
+	AgentFedRAMP     bool
+	IsAgentIdentity  bool
+	IsChatGPTSession bool
+	Credentials      map[string]any
+	Extra            map[string]any
+	TokenExpiresAt   *time.Time
+	IdentityKeys     []string
+	WarningTexts     []string
 }
 
 type codexJWTClaims struct {
@@ -169,6 +171,7 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 		return result, err
 	}
 	index := buildCodexAccountIndex(existingAccounts)
+	targetAgentIdentity := strings.EqualFold(strings.TrimSpace(req.TargetAuthMode), service.OpenAIAuthModeAgentIdentity)
 
 	updateExisting := true
 	if req.UpdateExisting != nil {
@@ -205,6 +208,21 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 			})
 			continue
 		}
+		if targetAgentIdentity {
+			if err := h.prepareCodexAgentIdentityImport(ctx, item, req.ProxyID); err != nil {
+				result.Failed++
+				result.Items = append(result.Items, CodexSessionImportItem{
+					Index:   entry.Index,
+					Action:  "failed",
+					Message: err.Error(),
+				})
+				result.Errors = append(result.Errors, CodexSessionImportMessage{
+					Index:   entry.Index,
+					Message: err.Error(),
+				})
+				continue
+			}
+		}
 		accountName := buildCodexCreateAccountName(req.Name, item, entry.Index, len(entries))
 		effectiveExpiresAt, credentialExpiresAt, autoPauseOnExpired, expiryWarnings, expiryErr := resolveCodexImportExpiry(req, item)
 		if expiryErr != nil {
@@ -228,6 +246,9 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 		}
 		credentials := mergeCodexImportMap(item.Credentials, credentialExtras)
 		extra := mergeCodexImportMap(req.Extra, item.Extra)
+		if targetAgentIdentity {
+			extra = sanitizeCodexImportCredentialExtras(extra)
+		}
 		for _, warning := range item.WarningTexts {
 			result.Warnings = append(result.Warnings, CodexSessionImportMessage{
 				Index:   entry.Index,
@@ -381,6 +402,60 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 	return result, nil
 }
 
+func (h *AccountHandler) prepareCodexAgentIdentityImport(ctx context.Context, item *codexImportAccount, proxyID *int64) error {
+	if item == nil {
+		return errors.New("导入项为空")
+	}
+	if item.IsAgentIdentity {
+		return nil
+	}
+	if !item.IsChatGPTSession {
+		return errors.New("Agent Identity 模式需要 ChatGPT session JSON，不接受单独的 at- token")
+	}
+	if strings.TrimSpace(item.AccessToken) == "" {
+		return errors.New("ChatGPT session JSON 中缺少 accessToken")
+	}
+	if h.openaiOAuthService == nil {
+		return errors.New("OpenAI Agent Identity 服务不可用")
+	}
+
+	proxyURL := ""
+	if proxyID != nil {
+		proxy, err := h.adminService.GetProxy(ctx, *proxyID)
+		if err != nil {
+			return err
+		}
+		if proxy != nil {
+			proxyURL = proxy.URL()
+		}
+	}
+	provision, tokenInfo, err := h.openaiOAuthService.ProvisionCodexAgentIdentity(ctx, item.AccessToken, proxyURL)
+	if err != nil {
+		return err
+	}
+
+	item.IsAgentIdentity = true
+	item.AgentRuntimeID = codexCredentialString(provision.Credentials, "agent_runtime_id")
+	item.AgentPrivateKey = codexCredentialString(provision.Credentials, "agent_private_key")
+	item.AgentTaskID = codexCredentialString(provision.Credentials, "task_id")
+	item.AgentFedRAMP, _ = provision.Credentials["chatgpt_account_is_fedramp"].(bool)
+	item.AccountID = tokenInfo.ChatGPTAccountID
+	item.UserID = tokenInfo.ChatGPTUserID
+	item.Email = tokenInfo.Email
+	item.PlanType = tokenInfo.PlanType
+	item.Credentials = mergeCodexImportMap(provision.Credentials, nil)
+	item.AccessToken = ""
+	item.RefreshToken = ""
+	item.IDToken = ""
+	item.TokenExpiresAt = nil
+	item.IdentityKeys = buildCodexAgentIdentityKeys(item.AccountID)
+	item.Extra["import_source"] = "chatgpt_session_agent_identity"
+	item.Extra["auth_provider"] = "codex_agent_identity"
+	item.Extra["access_token_sha256"] = codexTokenFingerprint(tokenInfo.AccessToken)
+	item.Name = buildCodexImportAccountName(item, 1)
+	return nil
+}
+
 func parseCodexSessionImportEntries(req CodexSessionImportRequest) ([]codexImportEntry, error) {
 	contents := make([]string, 0, 1+len(req.Contents))
 	if strings.TrimSpace(req.Content) != "" {
@@ -515,7 +590,13 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 		item.AccessToken = strings.TrimSpace(raw)
 	case map[string]any:
 		item.Extra["import_source"] = codexImportSource(raw)
-		if agentIdentity, ok := firstCodexMap(raw, []string{"agent_identity"}, []string{"agentIdentity"}); ok || strings.EqualFold(firstCodexString(raw, []string{"auth_mode"}, []string{"authMode"}), service.OpenAIAuthModeAgentIdentity) {
+		agentIdentity, ok := firstCodexMap(raw, []string{"agent_identity"}, []string{"agentIdentity"})
+		credentials, hasCredentials := firstCodexMap(raw, []string{"credentials"})
+		if !ok && hasCredentials && strings.EqualFold(firstCodexString(credentials, []string{"auth_mode"}, []string{"authMode"}), service.OpenAIAuthModeAgentIdentity) {
+			agentIdentity = credentials
+			ok = true
+		}
+		if ok || strings.EqualFold(firstCodexString(raw, []string{"auth_mode"}, []string{"authMode"}), service.OpenAIAuthModeAgentIdentity) || strings.EqualFold(firstCodexString(credentials, []string{"auth_mode"}, []string{"authMode"}), service.OpenAIAuthModeAgentIdentity) {
 			if !ok {
 				agentIdentity = raw
 			}
@@ -523,8 +604,8 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 			item.AgentRuntimeID = firstCodexString(agentIdentity, []string{"agent_runtime_id"}, []string{"agentRuntimeId"})
 			item.AgentPrivateKey = firstCodexString(agentIdentity, []string{"agent_private_key"}, []string{"agentPrivateKey"})
 			item.AgentTaskID = firstCodexString(agentIdentity, []string{"task_id"}, []string{"taskId"})
-			item.AccountID = firstCodexString(agentIdentity, []string{"account_id"}, []string{"accountId"})
-			item.UserID = firstCodexString(agentIdentity, []string{"chatgpt_user_id"}, []string{"chatgptUserId"})
+			item.AccountID = firstCodexString(agentIdentity, []string{"account_id"}, []string{"accountId"}, []string{"chatgpt_account_id"}, []string{"chatgptAccountId"})
+			item.UserID = firstCodexString(agentIdentity, []string{"chatgpt_user_id"}, []string{"chatgptUserId"}, []string{"user_id"}, []string{"userId"})
 			item.Email = firstCodexString(agentIdentity, []string{"email"})
 			item.PlanType = firstCodexString(agentIdentity, []string{"plan_type"}, []string{"planType"})
 			item.AgentFedRAMP = firstCodexBool(agentIdentity, []string{"chatgpt_account_is_fedramp"}, []string{"chatgptAccountIsFedramp"})
@@ -550,6 +631,7 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 			item.Name = buildCodexImportAccountName(item, entry.Index)
 			return item, nil
 		}
+		item.IsChatGPTSession = isCodexChatGPTSession(raw)
 		item.AccessToken = firstCodexString(raw,
 			[]string{"tokens", "access_token"},
 			[]string{"tokens", "accessToken"},
@@ -1105,6 +1187,12 @@ func mergeCodexImportCredentials(existing, incoming map[string]any, item *codexI
 	if item == nil {
 		return out
 	}
+	if item.IsAgentIdentity {
+		for _, key := range []string{"access_token", "refresh_token", "id_token", "client_id", "expires_at", "openai_auth_mode", "token_type"} {
+			delete(out, key)
+		}
+		return out
+	}
 	if strings.TrimSpace(item.RefreshToken) == "" {
 		if codexCredentialString(existing, "refresh_token") == "" {
 			delete(out, "refresh_token")
@@ -1157,6 +1245,15 @@ func codexImportSource(raw map[string]any) string {
 		return "sub2api_export"
 	}
 	return "codex_session"
+}
+
+func isCodexChatGPTSession(raw map[string]any) bool {
+	return firstCodexString(raw,
+		[]string{"accessToken"},
+		[]string{"access_token"},
+		[]string{"tokens", "accessToken"},
+		[]string{"tokens", "access_token"},
+	) != ""
 }
 
 func firstCodexString(obj map[string]any, paths ...[]string) string {

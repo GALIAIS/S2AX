@@ -254,6 +254,7 @@ func TestCityHouseholdMovementSerializesConcurrentIdempotentSteps(t *testing.T) 
 	seed := int64(6300302)
 	foundation, err := cityService.CreateWorld(ctx, service.CityWorldCreateInput{
 		OwnerUserID: owner.ID, Name: "Concurrent Household City", Seed: &seed,
+		SimulationVersion: service.CitySimulationVersionF6V3,
 	})
 	require.NoError(t, err)
 	expected := int64(0)

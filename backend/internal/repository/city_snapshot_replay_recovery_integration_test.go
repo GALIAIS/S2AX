@@ -29,9 +29,10 @@ func TestCitySnapshotsReplayAndProjectionRecoveryCloseTheF5Loop(t *testing.T) {
 	seed := int64(551177)
 	foundation, err := cityService.CreateWorld(ctx, service.CityWorldCreateInput{
 		OwnerUserID: owner.ID, Name: "Recoverable City", Timezone: "Asia/Shanghai", Seed: &seed,
+		SimulationVersion: service.CitySimulationVersionF5,
 	})
 	require.NoError(t, err)
-	require.Equal(t, service.CitySimulationVersionV1, foundation.World.SimulationVersion)
+	require.Equal(t, service.CitySimulationVersionF5, foundation.World.SimulationVersion)
 	require.NotNil(t, foundation.World.StateHash)
 	worldID := foundation.World.ID
 

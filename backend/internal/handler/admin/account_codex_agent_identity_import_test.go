@@ -47,6 +47,73 @@ func TestNormalizeCodexImportEntryAcceptsAgentIdentityAuthJSON(t *testing.T) {
 	require.NotEmpty(t, item.WarningTexts)
 }
 
+func TestNormalizeCodexImportEntryRecognizesChatGPTSessionJSON(t *testing.T) {
+	item, err := normalizeCodexImportEntry(codexImportEntry{
+		Index: 1,
+		Value: map[string]any{
+			"accessToken": "at-session-token",
+			"account":     map[string]any{"id": "account-session"},
+			"user":        map[string]any{"id": "user-session"},
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, item)
+	require.True(t, item.IsChatGPTSession)
+	require.False(t, item.IsAgentIdentity)
+	require.Equal(t, "at-session-token", item.AccessToken)
+}
+
+func TestNormalizeCodexImportEntryAcceptsNestedSub2APIAgentIdentityCredentials(t *testing.T) {
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	der, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	require.NoError(t, err)
+
+	item, err := normalizeCodexImportEntry(codexImportEntry{
+		Index: 1,
+		Value: map[string]any{
+			"credentials": map[string]any{
+				"auth_mode":                  "agentIdentity",
+				"agent_runtime_id":           "runtime-nested",
+				"agent_private_key":          base64.StdEncoding.EncodeToString(der),
+				"chatgpt_account_id":         "account-nested",
+				"chatgpt_user_id":            "user-nested",
+				"chatgpt_account_is_fedramp": false,
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, item.IsAgentIdentity)
+	require.Equal(t, "runtime-nested", item.Credentials["agent_runtime_id"])
+	require.Equal(t, "account-nested", item.Credentials["chatgpt_account_id"])
+}
+
+func TestMergeCodexImportCredentialsRemovesOAuthCredentialsForAgentIdentity(t *testing.T) {
+	merged := mergeCodexImportCredentials(
+		map[string]any{
+			"access_token":     "old-access-token",
+			"refresh_token":    "old-refresh-token",
+			"id_token":         "old-id-token",
+			"client_id":        "old-client",
+			"expires_at":       "old-expiry",
+			"auth_mode":        "personal_access_token",
+			"agent_runtime_id": "runtime-old",
+		},
+		map[string]any{
+			"auth_mode":        "agentIdentity",
+			"agent_runtime_id": "runtime-new",
+		},
+		&codexImportAccount{IsAgentIdentity: true},
+	)
+	require.NotContains(t, merged, "access_token")
+	require.NotContains(t, merged, "refresh_token")
+	require.NotContains(t, merged, "id_token")
+	require.NotContains(t, merged, "client_id")
+	require.NotContains(t, merged, "expires_at")
+	require.Equal(t, "agentIdentity", merged["auth_mode"])
+	require.Equal(t, "runtime-new", merged["agent_runtime_id"])
+}
+
 func TestBuildCodexAgentIdentityKeysUseChatGPTAccountOnly(t *testing.T) {
 	keys := buildCodexAgentIdentityKeys("team-a")
 	require.Equal(t, []string{"account:team-a"}, keys)

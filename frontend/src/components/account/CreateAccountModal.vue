@@ -5539,8 +5539,25 @@ const isAgentIdentityImportContent = (content: string) => {
     const record = value as Record<string, unknown>
     const authMode = record.auth_mode ?? record.authMode
     const agentIdentity = record.agent_identity ?? record.agentIdentity
+    const credentials = record.credentials
+    const credentialAuthMode =
+      credentials && typeof credentials === 'object'
+        ? (credentials as Record<string, unknown>).auth_mode ??
+          (credentials as Record<string, unknown>).authMode
+        : undefined
+    const accounts = record.accounts
+    const sessionAccessToken =
+      record.accessToken ??
+      record.access_token ??
+      (record.tokens && typeof record.tokens === 'object'
+        ? (record.tokens as Record<string, unknown>).accessToken ??
+          (record.tokens as Record<string, unknown>).access_token
+        : undefined)
     return (typeof authMode === 'string' && authMode.toLowerCase() === 'agentidentity')
       || (!!agentIdentity && typeof agentIdentity === 'object')
+      || (typeof credentialAuthMode === 'string' && credentialAuthMode.toLowerCase() === 'agentidentity')
+      || typeof sessionAccessToken === 'string'
+      || (Array.isArray(accounts) && accounts.length > 0 && accounts.every(isAgentIdentityValue))
   }
 
   try {
@@ -5592,6 +5609,9 @@ const handleOpenAIImportCodexSession = async (content: string) => {
       auto_pause_on_expired: autoPauseOnExpired.value,
       credential_extras: Object.keys(credentialExtras).length > 0 ? credentialExtras : undefined,
       extra,
+      ...(oauthFlowRef.value?.inputMethod === 'agent_identity'
+        ? { target_auth_mode: 'agentIdentity' as const }
+        : {}),
       update_existing: true
     })
 

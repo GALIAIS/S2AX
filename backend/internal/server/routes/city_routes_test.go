@@ -40,6 +40,8 @@ func TestRegisterUserRoutesIncludesCitySimulationKernel(t *testing.T) {
 		"GET /api/v1/city/worlds/:world_id/realtime/pixel-chunks/:chunk_x/:chunk_y/:z":                 false,
 		"GET /api/v1/city/worlds/:world_id/realtime/character":                                         false,
 		"GET /api/v1/city/worlds/:world_id/realtime/character/events":                                  false,
+		"GET /api/v1/city/worlds/:world_id/realtime/character/relations":                               false,
+		"GET /api/v1/city/worlds/:world_id/realtime/character/case-reviews":                            false,
 		"POST /api/v1/city/worlds/:world_id/realtime/character":                                        false,
 		"POST /api/v1/city/worlds/:world_id/realtime/character/agent":                                  false,
 		"POST /api/v1/city/worlds/:world_id/realtime/character/move":                                   false,

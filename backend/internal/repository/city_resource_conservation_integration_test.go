@@ -41,9 +41,10 @@ func TestCityEntityResourceConservationPostsDeterministicallyAndProtectsFacts(t 
 		seed := int64(662211)
 		foundation, err := cityService.CreateWorld(ctx, service.CityWorldCreateInput{
 			OwnerUserID: ownerID, Name: "Conserved Resource City", Timezone: "Asia/Shanghai", Seed: &seed,
+			SimulationVersion: service.CitySimulationVersionF5,
 		})
 		require.NoError(t, err)
-		require.Equal(t, service.CitySimulationVersionV1, foundation.World.SimulationVersion)
+		require.Equal(t, service.CitySimulationVersionF5, foundation.World.SimulationVersion)
 		require.NotNil(t, foundation.Physical)
 		require.Len(t, foundation.Physical.Districts, 6)
 		require.Len(t, foundation.Physical.HouseholdCohorts, 18)

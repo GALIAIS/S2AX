@@ -42,6 +42,7 @@ func TestCityDoubleEntryLedgerPostsBalancesReversesAndProtectsFacts(t *testing.T
 		seed := int64(771122)
 		foundation, err := cityService.CreateWorld(ctx, service.CityWorldCreateInput{
 			OwnerUserID: ownerID, Name: "Balanced Ledger City", Timezone: "Asia/Shanghai", Seed: &seed,
+			SimulationVersion: service.CitySimulationVersionF5,
 			MonetaryUnit: service.CityMonetaryUnitCreateInput{
 				Code: "city_credit", Name: "City Credit", Symbol: "CC", Scale: &scale,
 			},

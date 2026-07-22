@@ -39,10 +39,11 @@ func TestCitySimulationTickKernelIsDeterministicIdempotentAndSerialized(t *testi
 
 	createWorld := func(ownerID int64) *service.CityWorldFoundation {
 		foundation, err := cityService.CreateWorld(ctx, service.CityWorldCreateInput{
-			OwnerUserID: ownerID,
-			Name:        "Deterministic Seed City",
-			Timezone:    "Asia/Shanghai",
-			Seed:        &seed,
+			OwnerUserID:       ownerID,
+			Name:              "Deterministic Seed City",
+			Timezone:          "Asia/Shanghai",
+			Seed:              &seed,
+			SimulationVersion: service.CitySimulationVersionF5,
 			MonetaryUnit: service.CityMonetaryUnitCreateInput{
 				Code: "city_credit", Name: "City Credit", Symbol: "CC",
 			},
@@ -273,7 +274,7 @@ INSERT INTO city_ticks
      simulation_version, state_hash, prng_proof, simulated_from, simulated_to,
      command_count, applied_command_count, rejected_command_count, event_count)
 VALUES ($1, 999, 'invalid-summary', $2, $3, $4, $2, $2, $5, $6, 0, 0, 0, 1)`,
-		worldA.World.ID, invalidHash, ownerA.ID, service.CitySimulationVersionV1,
+		worldA.World.ID, invalidHash, ownerA.ID, service.CitySimulationVersionF5,
 		service.CityTickEpoch(), service.CityTickEpoch().Add(time.Hour))
 	require.NoError(t, err)
 	require.ErrorContains(t, invalidSummaryTx.Commit(), "event summary does not match")

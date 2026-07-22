@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"sort"
 	"strings"
@@ -20,15 +21,100 @@ type cityRealtimeAgentMoveTarget struct {
 }
 
 // cityRealtimeAgentDecisionActionContext is the complete, finite action
-// surface published to a 1.3 Character Agent decision.  It is intentionally
+// surface published to a 1.3+ Character Agent decision. It is intentionally
 // data-only: the provider gets no route, database identifier, private seed,
-// owner identity, or authority to synthesize a new target.
+// owner identity, or authority to synthesize a new target. Schema v1 is frozen
+// for 1.3 worlds; schema v2 adds only owner-scoped Rule/Case candidates and
+// schema v3 adds only server-derived public social target candidates, and
+// schema v4 adds only acknowledged, owner-scoped Case-review candidates.
 type cityRealtimeAgentDecisionActionContext struct {
-	SchemaVersion          int                           `json:"schema_version"`
-	AvailableActivityCodes []string                      `json:"available_activity_codes"`
-	AvailableMoveTargets   []cityRealtimeAgentMoveTarget `json:"available_move_targets"`
-	AvailablePortalCodes   []string                      `json:"available_portal_codes"`
-	AvailableRoleCodes     []string                      `json:"available_role_codes"`
+	SchemaVersion            int                           `json:"schema_version"`
+	AvailableActivityCodes   []string                      `json:"available_activity_codes"`
+	AvailableMoveTargets     []cityRealtimeAgentMoveTarget `json:"available_move_targets"`
+	AvailablePortalCodes     []string                      `json:"available_portal_codes"`
+	AvailableRoleCodes       []string                      `json:"available_role_codes"`
+	AvailableCaseCodes       []string                      `json:"available_case_codes,omitempty"`
+	AvailableSocialTargets   []string                      `json:"available_social_target_codes,omitempty"`
+	AvailableCaseReviewCodes []string                      `json:"available_case_review_codes,omitempty"`
+}
+
+// MarshalJSON keeps the 1.3 observation wire shape frozen while making the
+// 1.4 Case and 1.5 social catalogues explicit even when they are empty. A
+// plain `omitempty` would erase an empty later array and make a valid
+// observation fail its own strict decoder.
+func (contextPayload cityRealtimeAgentDecisionActionContext) MarshalJSON() ([]byte, error) {
+	switch contextPayload.SchemaVersion {
+	case 1:
+		return json.Marshal(struct {
+			SchemaVersion          int                           `json:"schema_version"`
+			AvailableActivityCodes []string                      `json:"available_activity_codes"`
+			AvailableMoveTargets   []cityRealtimeAgentMoveTarget `json:"available_move_targets"`
+			AvailablePortalCodes   []string                      `json:"available_portal_codes"`
+			AvailableRoleCodes     []string                      `json:"available_role_codes"`
+		}{
+			SchemaVersion:          contextPayload.SchemaVersion,
+			AvailableActivityCodes: contextPayload.AvailableActivityCodes,
+			AvailableMoveTargets:   contextPayload.AvailableMoveTargets,
+			AvailablePortalCodes:   contextPayload.AvailablePortalCodes,
+			AvailableRoleCodes:     contextPayload.AvailableRoleCodes,
+		})
+	case 2:
+		return json.Marshal(struct {
+			SchemaVersion          int                           `json:"schema_version"`
+			AvailableActivityCodes []string                      `json:"available_activity_codes"`
+			AvailableMoveTargets   []cityRealtimeAgentMoveTarget `json:"available_move_targets"`
+			AvailablePortalCodes   []string                      `json:"available_portal_codes"`
+			AvailableRoleCodes     []string                      `json:"available_role_codes"`
+			AvailableCaseCodes     []string                      `json:"available_case_codes"`
+		}{
+			SchemaVersion:          contextPayload.SchemaVersion,
+			AvailableActivityCodes: contextPayload.AvailableActivityCodes,
+			AvailableMoveTargets:   contextPayload.AvailableMoveTargets,
+			AvailablePortalCodes:   contextPayload.AvailablePortalCodes,
+			AvailableRoleCodes:     contextPayload.AvailableRoleCodes,
+			AvailableCaseCodes:     contextPayload.AvailableCaseCodes,
+		})
+	case 3:
+		return json.Marshal(struct {
+			SchemaVersion          int                           `json:"schema_version"`
+			AvailableActivityCodes []string                      `json:"available_activity_codes"`
+			AvailableMoveTargets   []cityRealtimeAgentMoveTarget `json:"available_move_targets"`
+			AvailablePortalCodes   []string                      `json:"available_portal_codes"`
+			AvailableRoleCodes     []string                      `json:"available_role_codes"`
+			AvailableCaseCodes     []string                      `json:"available_case_codes"`
+			AvailableSocialTargets []string                      `json:"available_social_target_codes"`
+		}{
+			SchemaVersion:          contextPayload.SchemaVersion,
+			AvailableActivityCodes: contextPayload.AvailableActivityCodes,
+			AvailableMoveTargets:   contextPayload.AvailableMoveTargets,
+			AvailablePortalCodes:   contextPayload.AvailablePortalCodes,
+			AvailableRoleCodes:     contextPayload.AvailableRoleCodes,
+			AvailableCaseCodes:     contextPayload.AvailableCaseCodes,
+			AvailableSocialTargets: contextPayload.AvailableSocialTargets,
+		})
+	case 4:
+		return json.Marshal(struct {
+			SchemaVersion            int                           `json:"schema_version"`
+			AvailableActivityCodes   []string                      `json:"available_activity_codes"`
+			AvailableMoveTargets     []cityRealtimeAgentMoveTarget `json:"available_move_targets"`
+			AvailablePortalCodes     []string                      `json:"available_portal_codes"`
+			AvailableRoleCodes       []string                      `json:"available_role_codes"`
+			AvailableCaseCodes       []string                      `json:"available_case_codes"`
+			AvailableSocialTargets   []string                      `json:"available_social_target_codes"`
+			AvailableCaseReviewCodes []string                      `json:"available_case_review_codes"`
+		}{
+			SchemaVersion:            contextPayload.SchemaVersion,
+			AvailableActivityCodes:   contextPayload.AvailableActivityCodes,
+			AvailableMoveTargets:     contextPayload.AvailableMoveTargets,
+			AvailablePortalCodes:     contextPayload.AvailablePortalCodes,
+			AvailableRoleCodes:       contextPayload.AvailableRoleCodes,
+			AvailableCaseCodes:       contextPayload.AvailableCaseCodes,
+			AvailableSocialTargets:   contextPayload.AvailableSocialTargets,
+			AvailableCaseReviewCodes: contextPayload.AvailableCaseReviewCodes,
+		})
+	default:
+		return nil, fmt.Errorf("unsupported realtime agent action context schema %d", contextPayload.SchemaVersion)
+	}
 }
 
 func cityRealtimeAgentActionContextSortedUnique(values []string, valid func(string) bool) bool {
@@ -41,7 +127,7 @@ func cityRealtimeAgentActionContextSortedUnique(values []string, valid func(stri
 }
 
 func cityRealtimeAgentDecisionActionContextValid(contextPayload cityRealtimeAgentDecisionActionContext) bool {
-	if contextPayload.SchemaVersion != 1 ||
+	if contextPayload.SchemaVersion < 1 || contextPayload.SchemaVersion > 4 ||
 		contextPayload.AvailableActivityCodes == nil ||
 		contextPayload.AvailableMoveTargets == nil ||
 		contextPayload.AvailablePortalCodes == nil ||
@@ -57,6 +143,40 @@ func cityRealtimeAgentDecisionActionContextValid(contextPayload cityRealtimeAgen
 			return err == nil && normalized == code
 		}) {
 		return false
+	}
+	if contextPayload.SchemaVersion == 1 {
+		// `omitempty` keeps this field absent from the immutable 1.3 wire
+		// shape. Reject a supplied empty array as well, so a malformed v1
+		// Observation cannot masquerade as the v2 contract.
+		if contextPayload.AvailableCaseCodes != nil || contextPayload.AvailableSocialTargets != nil ||
+			contextPayload.AvailableCaseReviewCodes != nil {
+			return false
+		}
+	} else {
+		if contextPayload.AvailableCaseCodes == nil ||
+			!cityRealtimeAgentActionContextSortedUnique(contextPayload.AvailableCaseCodes, cityRealtimeCharacterLawCaseCodeValid) {
+			return false
+		}
+		if contextPayload.SchemaVersion == 2 {
+			if contextPayload.AvailableSocialTargets != nil || contextPayload.AvailableCaseReviewCodes != nil {
+				return false
+			}
+		} else {
+			if contextPayload.AvailableSocialTargets == nil ||
+				!cityRealtimeAgentActionContextSortedUnique(contextPayload.AvailableSocialTargets, func(code string) bool {
+					return cityRealtimeAgentIdentifierValid(code, 96)
+				}) {
+				return false
+			}
+			if contextPayload.SchemaVersion == 3 {
+				if contextPayload.AvailableCaseReviewCodes != nil {
+					return false
+				}
+			} else if contextPayload.AvailableCaseReviewCodes == nil ||
+				!cityRealtimeAgentActionContextSortedUnique(contextPayload.AvailableCaseReviewCodes, cityRealtimeCharacterLawCaseCodeValid) {
+				return false
+			}
+		}
 	}
 	for index, target := range contextPayload.AvailableMoveTargets {
 		if err := cityspatial.ValidateZ(target.Z, cityspatial.MinimumZ, cityspatial.MaximumZ); err != nil {
@@ -105,7 +225,7 @@ func cityRealtimeAgentDecisionActionContextContainsMoveTarget(
 }
 
 // cityRealtimeAgentDecisionActionContextFromObservation parses only the
-// server-sealed A3.2 observation shape. A malformed stored observation is an
+// server-sealed A3.2/A3.3 observation shape. A malformed stored observation is an
 // invariant violation rather than a recoverable provider response.
 func cityRealtimeAgentDecisionActionContextFromObservation(
 	payload json.RawMessage,
@@ -133,6 +253,22 @@ func cityRealtimeAgentDecisionActionContextFromObservation(
 	return *snapshot.Character.ActionContext, snapshot.AllowedActions, nil
 }
 
+func cityRealtimeAgentDecisionActionContextSchemaVersion(binding cityRealtimeAgentPolicyBinding) int {
+	if cityRealtimeAgentCharacterCaseReviewRuntimeEnabled(binding) {
+		return 4
+	}
+	if cityRealtimeAgentCharacterSocialRuntimeEnabled(binding) {
+		return 3
+	}
+	if cityRealtimeAgentCharacterCaseRuntimeEnabled(binding) {
+		return 2
+	}
+	if cityRealtimeAgentCharacterActionRuntimeEnabled(binding) {
+		return 1
+	}
+	return 0
+}
+
 // cityRealtimeAgentDecisionValidatePublishedAction prevents a model adapter
 // from replacing a sealed, finite proposal with an arbitrary coordinate,
 // portal, or role.  The due-event reducer repeats topology and domain checks
@@ -151,6 +287,9 @@ func cityRealtimeAgentDecisionValidatePublishedAction(
 	if err != nil {
 		return err
 	}
+	if contextPayload.SchemaVersion != cityRealtimeAgentDecisionActionContextSchemaVersion(binding) {
+		return ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "realtime_agent_action_context_schema"})
+	}
 	expectedActions, available := cityRealtimeAgentDecisionAllowedActions(binding, agent)
 	if !available || !cityRealtimeAgentActionContextStringSlicesEqual(observedActions, expectedActions) {
 		return ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "realtime_agent_action_scope"})
@@ -168,6 +307,24 @@ func cityRealtimeAgentDecisionValidatePublishedAction(
 		code, parseErr := cityRealtimeAgentDecisionActivityCodeFromArguments(arguments)
 		if parseErr != nil || !cityRealtimeAgentActionContextContains(contextPayload.AvailableActivityCodes, code) {
 			return ErrCityRealtimeAgentDecisionUnavailable.WithMetadata(map[string]string{"field": "published_activity"})
+		}
+		return nil
+	case cityRealtimeAgentIntentActionCase:
+		code, parseErr := cityRealtimeAgentDecisionCaseCodeFromArguments(arguments)
+		if parseErr != nil || !cityRealtimeAgentActionContextContains(contextPayload.AvailableCaseCodes, code) {
+			return ErrCityRealtimeAgentDecisionUnavailable.WithMetadata(map[string]string{"field": "published_case"})
+		}
+		return nil
+	case cityRealtimeAgentIntentActionCaseReview:
+		code, parseErr := cityRealtimeAgentDecisionCaseReviewCodeFromArguments(arguments)
+		if parseErr != nil || !cityRealtimeAgentActionContextContains(contextPayload.AvailableCaseReviewCodes, code) {
+			return ErrCityRealtimeAgentDecisionUnavailable.WithMetadata(map[string]string{"field": "published_case_review"})
+		}
+		return nil
+	case cityRealtimeAgentIntentActionSocial:
+		code, parseErr := cityRealtimeAgentDecisionSocialTargetCodeFromArguments(arguments)
+		if parseErr != nil || !cityRealtimeAgentActionContextContains(contextPayload.AvailableSocialTargets, code) {
+			return ErrCityRealtimeAgentDecisionUnavailable.WithMetadata(map[string]string{"field": "published_social_target"})
 		}
 		return nil
 	case cityRealtimeAgentIntentActionMove:
@@ -329,10 +486,11 @@ func cityRealtimeAgentDecisionAvailableMoveTargets(
 }
 
 // cityRealtimeAgentDecisionCharacterActionContext is emitted only by the
-// A3.2 policy.  It contains server-derived, finite choices and its canonical
-// hash becomes part of the decision precondition.  A model therefore cannot
-// expand a one-cell movement choice into an arbitrary coordinate, portal, or
-// role transition after the observation was sealed.
+// A3.2/A3.3 policies. It contains server-derived, finite choices and its
+// canonical hash becomes part of the decision precondition. A model therefore
+// cannot expand a one-cell movement choice into an arbitrary coordinate,
+// portal, role transition, or Case identifier after the observation was
+// sealed.
 func cityRealtimeAgentDecisionCharacterActionContext(
 	ctx context.Context,
 	queryer citySQLQueryer,
@@ -349,12 +507,25 @@ func cityRealtimeAgentDecisionCharacterActionContext(
 		!cityRealtimeCharacterProfileMatchesRuntime(profile, runtime) {
 		return cityRealtimeAgentDecisionActionContext{}, ErrCityInvalidInput
 	}
+	schemaVersion := cityRealtimeAgentDecisionActionContextSchemaVersion(binding)
+	if schemaVersion == 0 {
+		return cityRealtimeAgentDecisionActionContext{}, ErrCityInvalidInput
+	}
 	contextPayload := cityRealtimeAgentDecisionActionContext{
-		SchemaVersion:          1,
+		SchemaVersion:          schemaVersion,
 		AvailableActivityCodes: make([]string, 0),
 		AvailableMoveTargets:   make([]cityRealtimeAgentMoveTarget, 0),
 		AvailablePortalCodes:   make([]string, 0),
 		AvailableRoleCodes:     make([]string, 0),
+	}
+	if cityRealtimeAgentCharacterCaseRuntimeEnabled(binding) {
+		contextPayload.AvailableCaseCodes = make([]string, 0)
+	}
+	if cityRealtimeAgentCharacterSocialRuntimeEnabled(binding) {
+		contextPayload.AvailableSocialTargets = make([]string, 0)
+	}
+	if cityRealtimeAgentCharacterCaseReviewRuntimeEnabled(binding) {
+		contextPayload.AvailableCaseReviewCodes = make([]string, 0)
 	}
 	if cityRealtimeAgentDecisionActionAllowed(binding, agent, cityRealtimeAgentIntentActionActivity) {
 		availability, err := cityRealtimeCharacterActivityAvailability(
@@ -405,6 +576,31 @@ func cityRealtimeAgentDecisionCharacterActionContext(
 		}
 		sort.Strings(codes)
 		contextPayload.AvailableRoleCodes = codes
+	}
+	if cityRealtimeAgentDecisionActionAllowed(binding, agent, cityRealtimeAgentIntentActionCase) {
+		codes, err := cityRealtimeAgentDecisionAvailableCaseCodes(ctx, queryer, worldID, *agent.ActorCode, binding)
+		if err != nil {
+			return cityRealtimeAgentDecisionActionContext{}, err
+		}
+		contextPayload.AvailableCaseCodes = codes
+	}
+	if cityRealtimeAgentDecisionActionAllowed(binding, agent, cityRealtimeAgentIntentActionSocial) {
+		codes, err := cityRealtimeAgentDecisionAvailableSocialTargetCodes(
+			ctx, queryer, worldID, *agent.ActorCode, actorState, binding,
+		)
+		if err != nil {
+			return cityRealtimeAgentDecisionActionContext{}, err
+		}
+		contextPayload.AvailableSocialTargets = codes
+	}
+	if cityRealtimeAgentDecisionActionAllowed(binding, agent, cityRealtimeAgentIntentActionCaseReview) {
+		codes, err := cityRealtimeAgentDecisionAvailableCaseReviewCodes(
+			ctx, queryer, worldID, worldTimeUS, *agent.ActorCode, binding,
+		)
+		if err != nil {
+			return cityRealtimeAgentDecisionActionContext{}, err
+		}
+		contextPayload.AvailableCaseReviewCodes = codes
 	}
 	if !cityRealtimeAgentDecisionActionContextValid(contextPayload) {
 		return cityRealtimeAgentDecisionActionContext{}, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "realtime_agent_action_context"})

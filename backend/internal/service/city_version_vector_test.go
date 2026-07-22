@@ -34,6 +34,15 @@ func TestNormalizeCityWorldCreateInputDefaultsToOpenWorldV24(t *testing.T) {
 	require.Equal(t, CityWorldStatusPaused, legacy.initialStatus)
 	require.Equal(t, cityDefaultInitialSpeedMilli, legacy.initialSpeedMilli)
 
+	historicalOpenWorld, err := normalizeCityWorldCreateInput(CityWorldCreateInput{
+		OwnerUserID:       17,
+		Name:              "Historical open-world compatibility city",
+		SimulationVersion: CitySimulationVersionOpenWorldV23,
+	})
+	require.NoError(t, err)
+	require.Equal(t, CityWorldStatusPaused, historicalOpenWorld.initialStatus)
+	require.Equal(t, cityDefaultInitialSpeedMilli, historicalOpenWorld.initialSpeedMilli)
+
 	realtime, err := normalizeCityWorldCreateInput(CityWorldCreateInput{
 		OwnerUserID:       17,
 		Name:              "Realtime diagnostic city",

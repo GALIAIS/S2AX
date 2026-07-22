@@ -373,6 +373,15 @@ VALUES ($1, $2, $3, $4, $5, $6, 0, 0, 'active', '{}'::jsonb)`,
 		if err = initializeCityRealtimeCharacterActivityFoundation(ctx, tx, worldID, normalized.simulationVersion); err != nil {
 			return nil, err
 		}
+		if err = initializeCityRealtimeCharacterCaseResponseFoundation(ctx, tx, worldID, normalized.simulationVersion); err != nil {
+			return nil, err
+		}
+		if err = initializeCityRealtimeCharacterCaseReviewFoundation(ctx, tx, worldID, normalized.simulationVersion); err != nil {
+			return nil, err
+		}
+		if err = initializeCityRealtimeCharacterSocialFoundation(ctx, tx, worldID, normalized.simulationVersion); err != nil {
+			return nil, err
+		}
 		if err = initializeCityRealtimeVisualBinding(ctx, tx, worldID); err != nil {
 			return nil, err
 		}
@@ -935,7 +944,13 @@ func cityWorldInitialLifecycle(simulationVersion string) (status string, speedMi
 		// legacy column at a neutral value until it is removed from this view.
 		return CityWorldStatusRunning, cityDefaultInitialSpeedMilli
 	}
-	if cityEngineSupportsOpenWorld(simulationVersion) {
+	if simulationVersion == CurrentCitySimulationVersion && cityEngineSupportsOpenWorld(simulationVersion) {
+		// Only the current player-facing open-world contract starts live. A
+		// caller that explicitly selects a historical engine is constructing a
+		// compatibility or upgrade fixture, whose frozen lifecycle contract is
+		// paused until it is intentionally resumed. This prevents a future
+		// scheduler change from mutating legacy world state before its upgrade
+		// baseline is sealed.
 		return CityWorldStatusRunning, cityOpenWorldInitialSpeedMilli
 	}
 	return CityWorldStatusPaused, cityDefaultInitialSpeedMilli

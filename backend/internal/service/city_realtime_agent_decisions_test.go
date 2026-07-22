@@ -119,10 +119,55 @@ func TestCityRealtimeCharacterActionPoliciesPreserveHistoricalCatalogues(t *test
 	require.Equal(t, []string{
 		cityRealtimeAgentIntentActionWait,
 		cityRealtimeAgentIntentActionActivity,
+		cityRealtimeAgentIntentActionCase,
+		cityRealtimeAgentIntentActionCaseReview,
 		cityRealtimeAgentIntentActionMove,
 		cityRealtimeAgentIntentActionPortal,
 		cityRealtimeAgentIntentActionRole,
+		cityRealtimeAgentIntentActionSocial,
 	}, actions)
+
+	socialAdapters := binding
+	socialAdapters.PolicyVersion = cityRealtimeAgentCorePolicyVersionSocial
+	socialAdapters.BindingHash = cityRealtimeAgentBindingHash(socialAdapters)
+	actions, available = cityRealtimeAgentDecisionAllowedActions(socialAdapters, agent)
+	require.True(t, available)
+	require.Equal(t, []string{
+		cityRealtimeAgentIntentActionWait,
+		cityRealtimeAgentIntentActionActivity,
+		cityRealtimeAgentIntentActionCase,
+		cityRealtimeAgentIntentActionMove,
+		cityRealtimeAgentIntentActionPortal,
+		cityRealtimeAgentIntentActionRole,
+		cityRealtimeAgentIntentActionSocial,
+	}, actions, "1.5.0 stays byte-for-byte scoped to the social catalogue")
+
+	caseAdapters := binding
+	caseAdapters.PolicyVersion = cityRealtimeAgentCorePolicyVersionCase
+	caseAdapters.BindingHash = cityRealtimeAgentBindingHash(caseAdapters)
+	actions, available = cityRealtimeAgentDecisionAllowedActions(caseAdapters, agent)
+	require.True(t, available)
+	require.Equal(t, []string{
+		cityRealtimeAgentIntentActionWait,
+		cityRealtimeAgentIntentActionActivity,
+		cityRealtimeAgentIntentActionCase,
+		cityRealtimeAgentIntentActionMove,
+		cityRealtimeAgentIntentActionPortal,
+		cityRealtimeAgentIntentActionRole,
+	}, actions, "1.4.0 stays byte-for-byte scoped to the Case catalogue")
+
+	actionAdapters := binding
+	actionAdapters.PolicyVersion = cityRealtimeAgentCorePolicyVersionActions
+	actionAdapters.BindingHash = cityRealtimeAgentBindingHash(actionAdapters)
+	actions, available = cityRealtimeAgentDecisionAllowedActions(actionAdapters, agent)
+	require.True(t, available)
+	require.Equal(t, []string{
+		cityRealtimeAgentIntentActionWait,
+		cityRealtimeAgentIntentActionActivity,
+		cityRealtimeAgentIntentActionMove,
+		cityRealtimeAgentIntentActionPortal,
+		cityRealtimeAgentIntentActionRole,
+	}, actions, "1.3.0 stays byte-for-byte scoped to its A3.2 catalogue")
 
 	autonomy := binding
 	autonomy.PolicyVersion = cityRealtimeAgentCorePolicyVersionAutonomy
@@ -141,8 +186,11 @@ func TestCityRealtimeCharacterActionPoliciesPreserveHistoricalCatalogues(t *test
 	require.True(t, cityRealtimeAgentPolicyVersionSupported(cityRealtimeAgentCorePolicyVersionLegacy))
 	require.True(t, cityRealtimeAgentPolicyVersionSupported(cityRealtimeAgentCorePolicyVersionDecision))
 	require.True(t, cityRealtimeAgentPolicyVersionSupported(cityRealtimeAgentCorePolicyVersionAutonomy))
+	require.True(t, cityRealtimeAgentPolicyVersionSupported(cityRealtimeAgentCorePolicyVersionActions))
+	require.True(t, cityRealtimeAgentPolicyVersionSupported(cityRealtimeAgentCorePolicyVersionCase))
+	require.True(t, cityRealtimeAgentPolicyVersionSupported(cityRealtimeAgentCorePolicyVersionSocial))
 	require.True(t, cityRealtimeAgentPolicyVersionSupported(cityRealtimeAgentCorePolicyVersion))
-	require.False(t, cityRealtimeAgentPolicyVersionSupported("1.4.0"))
+	require.False(t, cityRealtimeAgentPolicyVersionSupported("9.9.0"))
 }
 
 func TestCityRealtimeCharacterActivityEnvelopeRequiresOnePublishedActionArgument(t *testing.T) {
@@ -208,6 +256,22 @@ func TestCityRealtimeCharacterActionEnvelopeRequiresStrictFiniteArguments(t *tes
 			SchemaVersion: cityRealtimeAgentDecisionEnvelopeVersion, RequestCode: request.RequestCode,
 			ObservationHash: request.ObservationHash, PreconditionHash: request.PreconditionHash,
 			Intent: cityRealtimeAgentEnvelopeIntent{
+				ActionCode: cityRealtimeAgentIntentActionCase,
+				Arguments:  map[string]any{"case_code": "law.0123456789abcdef.1"},
+			}, ReasonCode: "fake_provider_case",
+		},
+		{
+			SchemaVersion: cityRealtimeAgentDecisionEnvelopeVersion, RequestCode: request.RequestCode,
+			ObservationHash: request.ObservationHash, PreconditionHash: request.PreconditionHash,
+			Intent: cityRealtimeAgentEnvelopeIntent{
+				ActionCode: cityRealtimeAgentIntentActionCaseReview,
+				Arguments:  map[string]any{"case_code": "law.0123456789abcdef.1"},
+			}, ReasonCode: "fake_provider_case_review",
+		},
+		{
+			SchemaVersion: cityRealtimeAgentDecisionEnvelopeVersion, RequestCode: request.RequestCode,
+			ObservationHash: request.ObservationHash, PreconditionHash: request.PreconditionHash,
+			Intent: cityRealtimeAgentEnvelopeIntent{
 				ActionCode: cityRealtimeAgentIntentActionMove,
 				Arguments:  map[string]any{"x": int64(41), "y": int64(-7), "z": int32(0)},
 			}, ReasonCode: "fake_provider_move",
@@ -254,6 +318,8 @@ func TestCityRealtimeCharacterActionEnvelopeRequiresStrictFiniteArguments(t *tes
 
 func TestCityRealtimeCharacterActionMustComeFromSealedFiniteContext(t *testing.T) {
 	binding := cityRealtimeAgentTestBinding()
+	binding.PolicyVersion = cityRealtimeAgentCorePolicyVersionCase
+	binding.BindingHash = cityRealtimeAgentBindingHash(binding)
 	actorCode := "character.player.0123456789abcdef0123456789abcdef"
 	agent := cityRealtimeAgentInstance{
 		AgentCode:       "agent.user.0123456789abcdef0123456789abcdef",
@@ -263,18 +329,20 @@ func TestCityRealtimeCharacterActionMustComeFromSealedFiniteContext(t *testing.T
 		ActorCode:       &actorCode,
 	}
 	contextPayload := cityRealtimeAgentDecisionActionContext{
-		SchemaVersion:          1,
+		SchemaVersion:          2,
 		AvailableActivityCodes: []string{"rest.short"},
 		AvailableMoveTargets: []cityRealtimeAgentMoveTarget{
 			{X: 12, Y: 7, Z: 0},
 		},
 		AvailablePortalCodes: []string{"building.market.entrance"},
 		AvailableRoleCodes:   []string{"profession.civic_worker"},
+		AvailableCaseCodes:   []string{"law.0123456789abcdef.1"},
 	}
 	payload, err := json.Marshal(map[string]any{
 		"allowed_actions": []string{
 			cityRealtimeAgentIntentActionWait,
 			cityRealtimeAgentIntentActionActivity,
+			cityRealtimeAgentIntentActionCase,
 			cityRealtimeAgentIntentActionMove,
 			cityRealtimeAgentIntentActionPortal,
 			cityRealtimeAgentIntentActionRole,
@@ -296,6 +364,10 @@ func TestCityRealtimeCharacterActionMustComeFromSealedFiniteContext(t *testing.T
 		binding, agent, observation, cityRealtimeAgentIntentActionRole,
 		map[string]any{"role_code": "profession.civic_worker"},
 	))
+	require.NoError(t, cityRealtimeAgentDecisionValidatePublishedAction(
+		binding, agent, observation, cityRealtimeAgentIntentActionCase,
+		map[string]any{"case_code": "law.0123456789abcdef.1"},
+	))
 	require.ErrorIs(t, cityRealtimeAgentDecisionValidatePublishedAction(
 		binding, agent, observation, cityRealtimeAgentIntentActionMove,
 		map[string]any{"x": int64(13), "y": int64(7), "z": int32(0)},
@@ -303,6 +375,39 @@ func TestCityRealtimeCharacterActionMustComeFromSealedFiniteContext(t *testing.T
 	require.ErrorIs(t, cityRealtimeAgentDecisionValidatePublishedAction(
 		binding, agent, observation, cityRealtimeAgentIntentActionPortal,
 		map[string]any{"portal_code": "building.secret.entrance"},
+	), ErrCityRealtimeAgentDecisionUnavailable)
+	require.ErrorIs(t, cityRealtimeAgentDecisionValidatePublishedAction(
+		binding, agent, observation, cityRealtimeAgentIntentActionCase,
+		map[string]any{"case_code": "law.0123456789abcdef.2"},
+	), ErrCityRealtimeAgentDecisionUnavailable)
+
+	// 1.3.0 accepts the frozen schema-v1 context and never receives a Case
+	// candidate just because a later executable supports 1.4.0.
+	actionAdapters := binding
+	actionAdapters.PolicyVersion = cityRealtimeAgentCorePolicyVersionActions
+	actionAdapters.BindingHash = cityRealtimeAgentBindingHash(actionAdapters)
+	legacyContext := contextPayload
+	legacyContext.SchemaVersion = 1
+	legacyContext.AvailableCaseCodes = nil
+	legacyPayload, err := json.Marshal(map[string]any{
+		"allowed_actions": []string{
+			cityRealtimeAgentIntentActionWait,
+			cityRealtimeAgentIntentActionActivity,
+			cityRealtimeAgentIntentActionMove,
+			cityRealtimeAgentIntentActionPortal,
+			cityRealtimeAgentIntentActionRole,
+		},
+		"character": map[string]any{"action_context": legacyContext},
+	})
+	require.NoError(t, err)
+	legacyObservation := cityRealtimeAgentObservationRecord{Payload: legacyPayload}
+	require.NoError(t, cityRealtimeAgentDecisionValidatePublishedAction(
+		actionAdapters, agent, legacyObservation, cityRealtimeAgentIntentActionActivity,
+		map[string]any{"activity_code": "rest.short"},
+	))
+	require.ErrorIs(t, cityRealtimeAgentDecisionValidatePublishedAction(
+		actionAdapters, agent, legacyObservation, cityRealtimeAgentIntentActionCase,
+		map[string]any{"case_code": "law.0123456789abcdef.1"},
 	), ErrCityRealtimeAgentDecisionUnavailable)
 
 	legacy := binding
@@ -312,6 +417,149 @@ func TestCityRealtimeCharacterActionMustComeFromSealedFiniteContext(t *testing.T
 		legacy, agent, observation, cityRealtimeAgentIntentActionActivity,
 		map[string]any{"activity_code": "rest.short"},
 	), "A3.1 keeps its original observation boundary")
+}
+
+func TestCityRealtimeCharacterActionContextKeepsVersionedWireShape(t *testing.T) {
+	base := cityRealtimeAgentDecisionActionContext{
+		AvailableActivityCodes: make([]string, 0),
+		AvailableMoveTargets:   make([]cityRealtimeAgentMoveTarget, 0),
+		AvailablePortalCodes:   make([]string, 0),
+		AvailableRoleCodes:     make([]string, 0),
+	}
+	v1 := base
+	v1.SchemaVersion = 1
+	v1Raw, err := json.Marshal(v1)
+	require.NoError(t, err)
+	require.NotContains(t, string(v1Raw), "available_case_codes")
+
+	v2 := base
+	v2.SchemaVersion = 2
+	v2.AvailableCaseCodes = make([]string, 0)
+	v2Raw, err := json.Marshal(v2)
+	require.NoError(t, err)
+	require.Contains(t, string(v2Raw), `"available_case_codes":[]`)
+	var decoded cityRealtimeAgentDecisionActionContext
+	require.NoError(t, json.Unmarshal(v2Raw, &decoded))
+	require.True(t, cityRealtimeAgentDecisionActionContextValid(decoded))
+
+	v3 := base
+	v3.SchemaVersion = 3
+	v3.AvailableCaseCodes = make([]string, 0)
+	v3.AvailableSocialTargets = make([]string, 0)
+	v3Raw, err := json.Marshal(v3)
+	require.NoError(t, err)
+	require.Contains(t, string(v3Raw), `"available_case_codes":[]`)
+	require.Contains(t, string(v3Raw), `"available_social_target_codes":[]`)
+	require.NoError(t, json.Unmarshal(v3Raw, &decoded))
+	require.True(t, cityRealtimeAgentDecisionActionContextValid(decoded))
+
+	v4 := base
+	v4.SchemaVersion = 4
+	v4.AvailableCaseCodes = make([]string, 0)
+	v4.AvailableSocialTargets = make([]string, 0)
+	v4.AvailableCaseReviewCodes = make([]string, 0)
+	v4Raw, err := json.Marshal(v4)
+	require.NoError(t, err)
+	require.Contains(t, string(v4Raw), `"available_case_codes":[]`)
+	require.Contains(t, string(v4Raw), `"available_social_target_codes":[]`)
+	require.Contains(t, string(v4Raw), `"available_case_review_codes":[]`)
+	require.NoError(t, json.Unmarshal(v4Raw, &decoded))
+	require.True(t, cityRealtimeAgentDecisionActionContextValid(decoded))
+}
+
+func TestCityRealtimeCharacterSocialActionMustUsePublishedTarget(t *testing.T) {
+	binding := cityRealtimeAgentTestBinding()
+	binding.PolicyVersion = cityRealtimeAgentCorePolicyVersionSocial
+	binding.BindingHash = cityRealtimeAgentBindingHash(binding)
+	actorCode := "character.player.0123456789abcdef0123456789abcdef"
+	otherActorCode := "npc.citizen.0123456789abcdef0123456789abcdef"
+	agent := cityRealtimeAgentInstance{
+		AgentCode:       "agent.user.0123456789abcdef0123456789abcdef",
+		AgentSubtype:    "character.user",
+		LifecycleStatus: "active",
+		ControlMode:     "autonomous",
+		ActorCode:       &actorCode,
+	}
+	contextPayload := cityRealtimeAgentDecisionActionContext{
+		SchemaVersion:          3,
+		AvailableActivityCodes: []string{},
+		AvailableMoveTargets:   []cityRealtimeAgentMoveTarget{},
+		AvailablePortalCodes:   []string{},
+		AvailableRoleCodes:     []string{},
+		AvailableCaseCodes:     []string{},
+		AvailableSocialTargets: []string{otherActorCode},
+	}
+	payload, err := json.Marshal(map[string]any{
+		"allowed_actions": []string{
+			cityRealtimeAgentIntentActionWait,
+			cityRealtimeAgentIntentActionActivity,
+			cityRealtimeAgentIntentActionCase,
+			cityRealtimeAgentIntentActionMove,
+			cityRealtimeAgentIntentActionPortal,
+			cityRealtimeAgentIntentActionRole,
+			cityRealtimeAgentIntentActionSocial,
+		},
+		"character": map[string]any{"action_context": contextPayload},
+	})
+	require.NoError(t, err)
+	observation := cityRealtimeAgentObservationRecord{Payload: payload}
+	require.NoError(t, cityRealtimeAgentDecisionValidatePublishedAction(
+		binding, agent, observation, cityRealtimeAgentIntentActionSocial,
+		map[string]any{"target_actor_code": otherActorCode},
+	))
+	require.ErrorIs(t, cityRealtimeAgentDecisionValidatePublishedAction(
+		binding, agent, observation, cityRealtimeAgentIntentActionSocial,
+		map[string]any{"target_actor_code": "npc.other.0123456789abcdef0123456789abcdef"},
+	), ErrCityRealtimeAgentDecisionUnavailable)
+}
+
+func TestCityRealtimeCharacterCaseReviewMustUsePublishedAcknowledgement(t *testing.T) {
+	binding := cityRealtimeAgentTestBinding()
+	actorCode := "character.player.0123456789abcdef0123456789abcdef"
+	agent := cityRealtimeAgentInstance{
+		AgentCode:       "agent.user.0123456789abcdef0123456789abcdef",
+		AgentSubtype:    "character.user",
+		LifecycleStatus: "active",
+		ControlMode:     "autonomous",
+		ActorCode:       &actorCode,
+	}
+	contextPayload := cityRealtimeAgentDecisionActionContext{
+		SchemaVersion:            4,
+		AvailableActivityCodes:   []string{},
+		AvailableMoveTargets:     []cityRealtimeAgentMoveTarget{},
+		AvailablePortalCodes:     []string{},
+		AvailableRoleCodes:       []string{},
+		AvailableCaseCodes:       []string{},
+		AvailableSocialTargets:   []string{},
+		AvailableCaseReviewCodes: []string{"law.0123456789abcdef.1"},
+	}
+	payload, err := json.Marshal(map[string]any{
+		"allowed_actions": []string{
+			cityRealtimeAgentIntentActionWait,
+			cityRealtimeAgentIntentActionActivity,
+			cityRealtimeAgentIntentActionCase,
+			cityRealtimeAgentIntentActionCaseReview,
+			cityRealtimeAgentIntentActionMove,
+			cityRealtimeAgentIntentActionPortal,
+			cityRealtimeAgentIntentActionRole,
+			cityRealtimeAgentIntentActionSocial,
+		},
+		"character": map[string]any{"action_context": contextPayload},
+	})
+	require.NoError(t, err)
+	observation := cityRealtimeAgentObservationRecord{Payload: payload}
+	require.NoError(t, cityRealtimeAgentDecisionValidatePublishedAction(
+		binding, agent, observation, cityRealtimeAgentIntentActionCaseReview,
+		map[string]any{"case_code": "law.0123456789abcdef.1"},
+	))
+	require.ErrorIs(t, cityRealtimeAgentDecisionValidatePublishedAction(
+		binding, agent, observation, cityRealtimeAgentIntentActionCaseReview,
+		map[string]any{"case_code": "law.0123456789abcdef.2"},
+	), ErrCityRealtimeAgentDecisionUnavailable)
+	require.ErrorIs(t, cityRealtimeAgentDecisionValidatePublishedAction(
+		binding, agent, observation, cityRealtimeAgentIntentActionCaseReview,
+		map[string]any{"case_code": "law.0123456789abcdef.1", "outcome": "dismiss"},
+	), ErrCityRealtimeAgentDecisionUnavailable)
 }
 
 func TestCityRealtimeAgentDecisionCodesAreStableAndBounded(t *testing.T) {

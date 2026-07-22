@@ -34,10 +34,10 @@ func TestCityCalendarDemographyClosesTheF61Loop(t *testing.T) {
 	createWorld := func(ownerID int64) *service.CityWorldFoundation {
 		foundation, err := cityService.CreateWorld(ctx, service.CityWorldCreateInput{
 			OwnerUserID: ownerID, Name: "Calendar City", Timezone: "Asia/Shanghai",
-			Seed: &seed, StartAt: &startAt,
+			Seed: &seed, StartAt: &startAt, SimulationVersion: service.CitySimulationVersionF6,
 		})
 		require.NoError(t, err)
-		require.Equal(t, service.CitySimulationVersionV1, foundation.World.SimulationVersion)
+		require.Equal(t, service.CitySimulationVersionF6, foundation.World.SimulationVersion)
 		return foundation
 	}
 	worldA := createWorld(ownerA.ID)
@@ -68,7 +68,7 @@ func TestCityCalendarDemographyClosesTheF61Loop(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, int64(1), stepA.Tick.Tick)
-	require.Equal(t, service.CitySimulationVersionV1, stepA.Tick.SimulationVersion)
+	require.Equal(t, service.CitySimulationVersionF6, stepA.Tick.SimulationVersion)
 	require.Equal(t, stepA.Tick.StateHash, stepB.Tick.StateHash)
 	require.Equal(t, stepA.Tick.PRNGProof, stepB.Tick.PRNGProof)
 	require.Equal(t, startAt.Add(time.Hour), stepA.Tick.SimulatedTo)
@@ -170,7 +170,7 @@ func TestCityCalendarDemographyClosesTheF61Loop(t *testing.T) {
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `
 SELECT id, state_hash FROM city_snapshots
 WHERE world_id = $1 AND tick = 1 AND simulation_version = $2`,
-		worldA.World.ID, service.CitySimulationVersionV1).Scan(&snapshotID, &targetStateHash))
+		worldA.World.ID, service.CitySimulationVersionF6).Scan(&snapshotID, &targetStateHash))
 	driftCityF61Projection(t, ctx, worldA.World.ID, ownerA.ID, replay.ID, snapshotID, targetStateHash)
 
 	driftedCalendar, err := cityService.GetCalendarState(ctx, ownerA.ID, worldA.World.ID)

@@ -127,6 +127,67 @@ func TestRegisterAgentIdentityTaskAcceptsPlaintextAndEncryptedResponses(t *testi
 	require.Equal(t, "task-encrypted", taskID)
 }
 
+func TestProvisionCodexAgentIdentityBootstrapsFromPATWithoutPersistingBearerToken(t *testing.T) {
+	whoamiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method)
+		require.Equal(t, "Bearer at-bootstrap", r.Header.Get("Authorization"))
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"email":"identity@example.com",
+			"chatgpt_user_id":"user-bootstrap",
+			"chatgpt_account_id":"acct-bootstrap",
+			"chatgpt_plan_type":"plus",
+			"chatgpt_account_is_fedramp":false
+		}`))
+	}))
+	defer whoamiServer.Close()
+
+	registrationServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/agent/register":
+			require.Equal(t, http.MethodPost, r.Method)
+			require.Equal(t, "Bearer at-bootstrap", r.Header.Get("Authorization"))
+			var request agentIdentityRegistrationRequest
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+			require.Equal(t, "codex-cli", request.ABOM.AgentHarnessID)
+			require.Equal(t, []string{"responsesapi"}, request.Capabilities)
+			require.True(t, strings.HasPrefix(request.AgentPublicKey, "ssh-ed25519 "))
+			_, _ = w.Write([]byte(`{"agent_runtime_id":"runtime-bootstrap"}`))
+		case "/v1/agent/runtime-bootstrap/task/register":
+			require.Equal(t, http.MethodPost, r.Method)
+			var request map[string]string
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+			require.NotEmpty(t, request["timestamp"])
+			require.NotEmpty(t, request["signature"])
+			_, _ = w.Write([]byte(`{"task_id":"task-bootstrap"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer registrationServer.Close()
+
+	originalWhoamiURL := openAICodexPATWhoamiURL
+	originalAgentIdentityURL := openAIAgentIdentityAuthAPIBaseURL
+	openAICodexPATWhoamiURL = whoamiServer.URL
+	openAIAgentIdentityAuthAPIBaseURL = registrationServer.URL
+	defer func() {
+		openAICodexPATWhoamiURL = originalWhoamiURL
+		openAIAgentIdentityAuthAPIBaseURL = originalAgentIdentityURL
+	}()
+
+	svc := NewOpenAIOAuthService(nil, nil)
+	defer svc.Stop()
+	provision, tokenInfo, err := svc.ProvisionCodexAgentIdentity(context.Background(), "at-bootstrap", "")
+	require.NoError(t, err)
+	require.NotNil(t, tokenInfo)
+	require.Equal(t, "identity@example.com", tokenInfo.Email)
+	require.NotContains(t, provision.Credentials, "access_token")
+	require.Equal(t, OpenAIAuthModeAgentIdentity, provision.Credentials["auth_mode"])
+	require.Equal(t, "runtime-bootstrap", provision.Credentials["agent_runtime_id"])
+	require.Equal(t, "task-bootstrap", provision.Credentials["task_id"])
+	require.NoError(t, ValidateOpenAIAgentIdentityPrivateKey(provision.Credentials["agent_private_key"].(string)))
+}
+
 func TestEnsureAgentIdentityTaskPersistsAndRedactsCredentials(t *testing.T) {
 	key, privateKey := newTestAgentIdentityKey(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

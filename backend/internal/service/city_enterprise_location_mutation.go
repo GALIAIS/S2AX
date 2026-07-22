@@ -881,7 +881,14 @@ WHERE world_id = $1 AND developer_entity_id = $2 AND status = 'under_constructio
 			firm, headquartersPool, resourceBalances,
 		)
 		if operationErr != nil {
-			return cityEnterpriseLocationExecution{}, cityEnterpriseReject(cityEnterpriseRejectionInventoryTransfer)
+			// Only expected resource-domain rejections are safe to surface as a
+			// user-level relocation rejection. Constraint or projection failures
+			// must retain their cause so they cannot be silently misreported as
+			// an ordinary inventory problem.
+			if cityResourceBusinessRejectionCode(operationErr) != "" {
+				return cityEnterpriseLocationExecution{}, cityEnterpriseReject(cityEnterpriseRejectionInventoryTransfer)
+			}
+			return cityEnterpriseLocationExecution{}, fmt.Errorf("post enterprise relocation inventory: %w", operationErr)
 		}
 		operations = append(operations, operation)
 	}

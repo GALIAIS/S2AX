@@ -13,6 +13,7 @@ const messages: Record<string, string> = {
   'admin.settings.payment.customMethodType': 'Payment type',
   'admin.settings.payment.customMethodUpstreamType': 'Upstream type',
   'admin.settings.payment.customMethodDisplayName': 'Display name',
+  'admin.settings.payment.customMethodDisplayNamePlaceholder': 'Credit card',
   'admin.settings.payment.paymentGuideTrigger': 'View payment guide',
   'admin.settings.payment.alipayGuideSummary': 'Desktop prefers QR precreate and falls back to cashier; mobile prefers WAP checkout.',
   'admin.settings.payment.wxpayGuideSummary': 'Desktop prefers Native QR; mobile routes to JSAPI or H5 based on browser context.',
@@ -190,7 +191,7 @@ describe('PaymentProviderDialog payment guide', () => {
     const customTypeInputs = inputs.filter(input => (input.element as HTMLInputElement).placeholder === 'credit_card')
     const ldcTypeInput = customTypeInputs[0]
     const upstreamTypeInput = customTypeInputs[1]
-    const displayNameInput = inputs.find(input => (input.element as HTMLInputElement).placeholder === '信用卡')
+    const displayNameInput = inputs.find(input => (input.element as HTMLInputElement).placeholder === messages['admin.settings.payment.customMethodDisplayNamePlaceholder'])
     if (!ldcTypeInput || !upstreamTypeInput || !displayNameInput) {
       throw new Error('custom method inputs not found')
     }
@@ -233,7 +234,7 @@ describe('PaymentProviderDialog payment guide', () => {
     const customTypeInputs = inputs.filter(input => (input.element as HTMLInputElement).placeholder === 'credit_card')
     const typeInput = customTypeInputs[0]
     const upstreamTypeInput = customTypeInputs[1]
-    const displayNameInput = inputs.find(input => (input.element as HTMLInputElement).placeholder === '信用卡')
+    const displayNameInput = inputs.find(input => (input.element as HTMLInputElement).placeholder === messages['admin.settings.payment.customMethodDisplayNamePlaceholder'])
     if (!typeInput || !upstreamTypeInput || !displayNameInput) {
       throw new Error('custom method inputs not found')
     }

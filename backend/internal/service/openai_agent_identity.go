@@ -4,14 +4,17 @@ import (
 	"context"
 	"crypto"
 	"crypto/ed25519"
+	crand "crypto/rand"
 	"crypto/sha512"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -24,10 +27,14 @@ import (
 const (
 	OpenAIAuthModeAgentIdentity          = "agentIdentity"
 	agentIdentityAuthAPIBaseURL          = "https://auth.openai.com/api/accounts"
+	agentIdentityRegistrationTimeout     = 15 * time.Second
 	agentIdentityTaskRegistrationTimeout = 30 * time.Second
+	agentIdentityKeySeedBytes            = 64
 )
 
 var openAIAgentIdentityAuthAPIBaseURL = agentIdentityAuthAPIBaseURL
+
+const agentIdentityKeyDerivationContext = "codex-agent-identity-ed25519-v1"
 
 var agentIdentityTaskLocks sync.Map // map[int64]*sync.Mutex
 
@@ -46,6 +53,30 @@ type agentIdentityTaskRegistrationResponse struct {
 	TaskIDCamel          string `json:"taskId"`
 	EncryptedTaskID      string `json:"encrypted_task_id"`
 	EncryptedTaskIDCamel string `json:"encryptedTaskId"`
+}
+
+// OpenAIAgentIdentityProvision contains the durable credentials created by
+// the official Codex Agent Identity bootstrap flow. The source at-* token is
+// deliberately not part of the result and is never persisted.
+type OpenAIAgentIdentityProvision struct {
+	Credentials map[string]any
+}
+
+type agentIdentityRegistrationRequest struct {
+	ABOM           agentIdentityBillOfMaterials `json:"abom"`
+	AgentPublicKey string                       `json:"agent_public_key"`
+	Capabilities   []string                     `json:"capabilities"`
+	TTL            *int                         `json:"ttl"`
+}
+
+type agentIdentityBillOfMaterials struct {
+	AgentVersion    string `json:"agent_version"`
+	AgentHarnessID  string `json:"agent_harness_id"`
+	RunningLocation string `json:"running_location"`
+}
+
+type agentIdentityRegistrationResponse struct {
+	AgentRuntimeID string `json:"agent_runtime_id"`
 }
 
 type agentIdentityTaskRecoveredError struct{}
@@ -172,7 +203,154 @@ func decryptAgentTaskID(key agentIdentityKey, encoded string) (string, error) {
 	return taskID, nil
 }
 
+// ProvisionCodexAgentIdentity performs the same managed ChatGPT Agent
+// Identity bootstrap used by the current Codex client: validate the at-* PAT,
+// generate a local Ed25519 key, register the public key with OpenAI, and
+// register the first task. The PAT is used only for the registration request;
+// the returned credentials contain no bearer token.
+func (s *OpenAIOAuthService) ProvisionCodexAgentIdentity(ctx context.Context, accessToken, proxyURL string) (*OpenAIAgentIdentityProvision, *OpenAITokenInfo, error) {
+	accessToken = strings.TrimSpace(accessToken)
+	tokenInfo, err := s.ValidateCodexPersonalAccessToken(ctx, accessToken, proxyURL)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	_, privateKeyBase64, publicKeySSH, err := generateAgentIdentityKeyMaterial()
+	if err != nil {
+		return nil, nil, err
+	}
+	runtimeID, err := registerAgentIdentityRuntime(ctx, accessToken, proxyURL, tokenInfo.ChatGPTAccountFedRAMP, publicKeySSH)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	credentials := map[string]any{
+		"auth_mode":                  OpenAIAuthModeAgentIdentity,
+		"agent_runtime_id":           runtimeID,
+		"agent_private_key":          privateKeyBase64,
+		"chatgpt_account_id":         tokenInfo.ChatGPTAccountID,
+		"chatgpt_user_id":            tokenInfo.ChatGPTUserID,
+		"chatgpt_account_is_fedramp": tokenInfo.ChatGPTAccountFedRAMP,
+	}
+	if tokenInfo.Email != "" {
+		credentials["email"] = tokenInfo.Email
+	}
+	if tokenInfo.PlanType != "" {
+		credentials["plan_type"] = tokenInfo.PlanType
+	}
+
+	temporaryAccount := &Account{
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Credentials: credentials,
+	}
+	// Keep this explicit instead of calling ensureAgentIdentityTaskForAccount:
+	// the account does not exist in the repository until all upstream bootstrap
+	// steps have succeeded.
+	taskID, err := registerAgentIdentityTaskWithProxyURL(ctx, temporaryAccount, proxyURL)
+	if err != nil {
+		return nil, nil, err
+	}
+	credentials["task_id"] = taskID
+
+	return &OpenAIAgentIdentityProvision{Credentials: credentials}, tokenInfo, nil
+}
+
+func generateAgentIdentityKeyMaterial() (ed25519.PrivateKey, string, string, error) {
+	seedMaterial := make([]byte, agentIdentityKeySeedBytes)
+	if _, err := crand.Read(seedMaterial); err != nil {
+		return nil, "", "", errors.New("failed to generate agent identity key material")
+	}
+	digestInput := make([]byte, 0, len(agentIdentityKeyDerivationContext)+len(seedMaterial))
+	digestInput = append(digestInput, agentIdentityKeyDerivationContext...)
+	digestInput = append(digestInput, seedMaterial...)
+	digest := sha512.Sum512(digestInput)
+	privateKey := ed25519.NewKeyFromSeed(digest[:ed25519.SeedSize])
+	der, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	if err != nil {
+		return nil, "", "", errors.New("failed to encode agent identity private key")
+	}
+	return privateKey,
+		base64.StdEncoding.EncodeToString(der),
+		encodeAgentIdentityPublicKeySSH(privateKey.Public().(ed25519.PublicKey)),
+		nil
+}
+
+func encodeAgentIdentityPublicKeySSH(publicKey ed25519.PublicKey) string {
+	const keyType = "ssh-ed25519"
+	blob := make([]byte, 0, 4+len(keyType)+4+len(publicKey))
+	var length [4]byte
+	binary.BigEndian.PutUint32(length[:], uint32(len(keyType)))
+	blob = append(blob, length[:]...)
+	blob = append(blob, keyType...)
+	binary.BigEndian.PutUint32(length[:], uint32(len(publicKey)))
+	blob = append(blob, length[:]...)
+	blob = append(blob, publicKey...)
+	return keyType + " " + base64.StdEncoding.EncodeToString(blob)
+}
+
+func registerAgentIdentityRuntime(ctx context.Context, accessToken, proxyURL string, isFedRAMP bool, publicKeySSH string) (string, error) {
+	client, err := httpclient.GetClient(httpclient.Options{
+		ProxyURL:              proxyURL,
+		Timeout:               agentIdentityRegistrationTimeout,
+		ResponseHeaderTimeout: 10 * time.Second,
+	})
+	if err != nil {
+		return "", errors.New("invalid proxy configuration for agent identity registration")
+	}
+	body, err := json.Marshal(agentIdentityRegistrationRequest{
+		ABOM: agentIdentityBillOfMaterials{
+			AgentVersion:    codexCLIVersion,
+			AgentHarnessID:  "codex-cli",
+			RunningLocation: "sub2api-" + runtime.GOOS + "-" + runtime.GOARCH,
+		},
+		AgentPublicKey: publicKeySSH,
+		Capabilities:   []string{"responsesapi"},
+	})
+	if err != nil {
+		return "", errors.New("failed to serialize agent identity registration")
+	}
+	url := strings.TrimRight(strings.TrimSpace(openAIAgentIdentityAuthAPIBaseURL), "/") + "/v1/agent/register"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(body)))
+	if err != nil {
+		return "", errors.New("failed to build agent identity registration request")
+	}
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(accessToken))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Originator", "codex_cli_rs")
+	req.Header.Set("User-Agent", codexCLIUserAgent)
+	if isFedRAMP {
+		req.Header.Set("X-OpenAI-Fedramp", "true")
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", errors.New("agent identity registration request failed")
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return "", fmt.Errorf("agent identity registration returned status %d", resp.StatusCode)
+	}
+	var result agentIdentityRegistrationResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64*1024)).Decode(&result); err != nil {
+		return "", errors.New("agent identity registration response is invalid")
+	}
+	runtimeID := strings.TrimSpace(result.AgentRuntimeID)
+	if runtimeID == "" {
+		return "", errors.New("agent identity registration response omitted runtime id")
+	}
+	return runtimeID, nil
+}
+
 func registerAgentIdentityTask(ctx context.Context, account *Account) (string, error) {
+	proxyURL := ""
+	if account != nil && account.ProxyID != nil && account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
+	}
+	return registerAgentIdentityTaskWithProxyURL(ctx, account, proxyURL)
+}
+
+func registerAgentIdentityTaskWithProxyURL(ctx context.Context, account *Account, proxyURL string) (string, error) {
 	key, err := agentIdentityKeyFromAccount(account)
 	if err != nil {
 		return "", err
@@ -180,10 +358,6 @@ func registerAgentIdentityTask(ctx context.Context, account *Account) (string, e
 	timestamp, signature, err := signAgentTaskRegistration(key, time.Now())
 	if err != nil {
 		return "", err
-	}
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
 	}
 	client, err := httpclient.GetClient(httpclient.Options{
 		ProxyURL:              proxyURL,

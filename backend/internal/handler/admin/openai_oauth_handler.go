@@ -125,6 +125,62 @@ type OpenAICodexPATCreateRequest struct {
 	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"`
 }
 
+func validateOpenAICodexCreateRequest(c *gin.Context, req OpenAICodexPATCreateRequest) bool {
+	if err := service.ValidateOpenAILongContextBillingExtra(service.PlatformOpenAI, req.Extra); err != nil {
+		response.ErrorFrom(c, err)
+		return false
+	}
+	if req.Concurrency != nil && *req.Concurrency < 0 {
+		response.BadRequest(c, "concurrency must be >= 0")
+		return false
+	}
+	if req.Priority != nil && *req.Priority < 0 {
+		response.BadRequest(c, "priority must be >= 0")
+		return false
+	}
+	if req.RateMultiplier != nil {
+		if err := service.ValidateRateMultiplier(*req.RateMultiplier, true); err != nil {
+			response.BadRequest(c, err.Error())
+			return false
+		}
+	}
+	if req.LoadFactor != nil && *req.LoadFactor > 10000 {
+		response.BadRequest(c, "load_factor must be <= 10000")
+		return false
+	}
+	return true
+}
+
+func (h *OpenAIOAuthHandler) resolveCodexProxyURL(c *gin.Context, proxyID *int64) (string, bool) {
+	if proxyID == nil {
+		return "", true
+	}
+	proxy, err := h.adminService.GetProxy(c.Request.Context(), *proxyID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return "", false
+	}
+	if proxy == nil {
+		return "", true
+	}
+	return proxy.URL(), true
+}
+
+func codexCreateDefaults(req OpenAICodexPATCreateRequest) (concurrency, priority int, skipDefaultGroupBind bool) {
+	concurrency = 3
+	if req.Concurrency != nil {
+		concurrency = *req.Concurrency
+	}
+	priority = 50
+	if req.Priority != nil {
+		priority = *req.Priority
+	}
+	if req.SkipDefaultGroupBind != nil {
+		skipDefaultGroupBind = *req.SkipDefaultGroupBind
+	}
+	return concurrency, priority, skipDefaultGroupBind
+}
+
 // RefreshToken refreshes an OpenAI OAuth token
 // POST /api/v1/admin/openai/refresh-token
 func (h *OpenAIOAuthHandler) RefreshToken(c *gin.Context) {
@@ -304,39 +360,12 @@ func (h *OpenAIOAuthHandler) CreateAccountFromCodexPAT(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
-	if err := service.ValidateOpenAILongContextBillingExtra(service.PlatformOpenAI, req.Extra); err != nil {
-		response.ErrorFrom(c, err)
+	if !validateOpenAICodexCreateRequest(c, req) {
 		return
 	}
-	if req.Concurrency != nil && *req.Concurrency < 0 {
-		response.BadRequest(c, "concurrency must be >= 0")
+	proxyURL, ok := h.resolveCodexProxyURL(c, req.ProxyID)
+	if !ok {
 		return
-	}
-	if req.Priority != nil && *req.Priority < 0 {
-		response.BadRequest(c, "priority must be >= 0")
-		return
-	}
-	if req.RateMultiplier != nil {
-		if err := service.ValidateRateMultiplier(*req.RateMultiplier, true); err != nil {
-			response.BadRequest(c, err.Error())
-			return
-		}
-	}
-	if req.LoadFactor != nil && *req.LoadFactor > 10000 {
-		response.BadRequest(c, "load_factor must be <= 10000")
-		return
-	}
-
-	var proxyURL string
-	if req.ProxyID != nil {
-		proxy, err := h.adminService.GetProxy(c.Request.Context(), *req.ProxyID)
-		if err != nil {
-			response.ErrorFrom(c, err)
-			return
-		}
-		if proxy != nil {
-			proxyURL = proxy.URL()
-		}
 	}
 
 	tokenInfo, err := h.openaiOAuthService.ValidateCodexPersonalAccessToken(c.Request.Context(), req.AccessToken, proxyURL)
@@ -356,18 +385,7 @@ func (h *OpenAIOAuthHandler) CreateAccountFromCodexPAT(c *gin.Context) {
 		"access_token_sha256": codexTokenFingerprint(req.AccessToken),
 	})
 
-	concurrency := 3
-	if req.Concurrency != nil {
-		concurrency = *req.Concurrency
-	}
-	priority := 50
-	if req.Priority != nil {
-		priority = *req.Priority
-	}
-	skipDefaultGroupBind := false
-	if req.SkipDefaultGroupBind != nil {
-		skipDefaultGroupBind = *req.SkipDefaultGroupBind
-	}
+	concurrency, priority, skipDefaultGroupBind := codexCreateDefaults(req)
 
 	account, err := h.adminService.CreateAccount(c.Request.Context(), &service.CreateAccountInput{
 		Name:                  buildOpenAICodexPATAccountName(req.Name, tokenInfo),

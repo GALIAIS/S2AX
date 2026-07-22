@@ -1,8 +1,11 @@
 package service
 
 import (
+	"context"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,4 +28,20 @@ func TestSafeUpstreamURL(t *testing.T) {
 			require.Equal(t, tt.want, safeUpstreamURL(tt.input))
 		})
 	}
+}
+
+func TestSetOpsLatencyMsPersistsForAsyncUsageRecording(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("GET", "/", nil)
+
+	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, 123)
+
+	value, ok := OpsLatencyMsFromContext(c.Request.Context(), OpsUpstreamLatencyMsKey)
+	require.True(t, ok)
+	require.EqualValues(t, 123, value)
+
+	copyCtx := CopyOpsLatencyContext(c.Request.Context(), context.Background())
+	copied, ok := OpsLatencyMsFromContext(copyCtx, OpsUpstreamLatencyMsKey)
+	require.True(t, ok)
+	require.EqualValues(t, 123, copied)
 }
