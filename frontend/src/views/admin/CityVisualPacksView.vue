@@ -528,7 +528,6 @@ import type {
   CityVisualGenerationJob,
   CityVisualGenerationJobReviewRequest,
   CityVisualPackDetail,
-  CityVisualPackStatus,
   CityVisualPackSummary,
   CityVisualProceduralManifest,
   CityVisualReleasePolicy,
@@ -541,7 +540,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import RowActionMenu, { type RowActionMenuItem } from '@/components/common/RowActionMenu.vue'
-import Select from '@/components/common/Select.vue'
+import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import type { Column } from '@/components/common/types'
 
@@ -550,11 +549,6 @@ type PackActionKind = 'publish' | 'retire'
 interface PackAction {
   kind: PackActionKind
   pack: CityVisualPackSummary
-}
-
-interface SelectOption {
-  value: string
-  label: string
 }
 
 const { t } = useI18n()
