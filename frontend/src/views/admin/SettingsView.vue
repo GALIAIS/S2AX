@@ -840,7 +840,7 @@
                     </span>
                   </div>
 
-                  <div class="grid grid-cols-2 gap-4">
+                  <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <!-- Action -->
                     <div>
                       <label
@@ -6226,7 +6226,50 @@
                   {{ t('admin.settings.features.citySimulation.enabledHint') }}
                 </p>
               </div>
-              <Toggle v-model="form.city_simulation_enabled" />
+              <Toggle
+                v-model="form.city_simulation_enabled"
+                @update:model-value="handleCitySimulationEnabledChange"
+              />
+            </div>
+            <div class="flex items-center justify-between border-t border-gray-100 pt-5 dark:border-dark-700">
+              <div>
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.features.citySimulation.pixelRenderer') }}
+                </label>
+                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.features.citySimulation.pixelRendererHint') }}
+                </p>
+              </div>
+              <Toggle
+                v-model="form.city_pixel_renderer_enabled"
+                :disabled="!form.city_simulation_enabled"
+                @update:model-value="handleCityPixelRendererEnabledChange"
+              />
+            </div>
+            <div class="flex items-center justify-between border-t border-gray-100 pt-5 dark:border-dark-700">
+              <div>
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.features.citySimulation.visualPackPublish') }}
+                </label>
+                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.features.citySimulation.visualPackPublishHint') }}
+                </p>
+              </div>
+              <Toggle
+                v-model="form.city_visual_pack_publish_enabled"
+                :disabled="!form.city_simulation_enabled || !form.city_pixel_renderer_enabled"
+              />
+            </div>
+            <div class="flex items-center justify-between border-t border-gray-100 pt-5 dark:border-dark-700">
+              <div>
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.features.citySimulation.realtimeScheduler') }}
+                </label>
+                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.features.citySimulation.realtimeSchedulerHint') }}
+                </p>
+              </div>
+              <Toggle v-model="form.city_realtime_scheduler_enabled" />
             </div>
           </div>
         </div>
@@ -6376,7 +6419,7 @@
                   </button>
                 </div>
 
-                <div class="relative overflow-hidden rounded-lg border border-gray-200 dark:border-dark-700" :aria-busy="affiliateState.loading">
+                <div class="relative overflow-x-auto rounded-lg border border-gray-200 dark:border-dark-700" :aria-busy="affiliateState.loading">
                   <div v-if="affiliateState.loading && affiliateState.entries.length > 0" class="absolute right-3 top-3 z-10 rounded-md bg-white/95 px-2.5 py-1 text-xs text-gray-500 shadow-sm ring-1 ring-gray-200 backdrop-blur dark:bg-dark-800/95 dark:text-gray-300 dark:ring-dark-600" role="status">
                     {{ t('common.refreshing') }}
                   </div>
@@ -6699,7 +6742,7 @@
               </div>
               <template v-if="form.payment_enabled">
                 <!-- Row 1: Product name -->
-                <div class="grid grid-cols-3 gap-3">
+                <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <div>
                     <label class="input-label">{{
                       t("admin.settings.payment.productNamePrefix")
@@ -7118,7 +7161,7 @@
                   </p>
                 </div>
                 <!-- Row 5: Help image + text -->
-                <div class="grid grid-cols-2 gap-3">
+                <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div>
                     <label class="input-label">{{
                       t("admin.settings.payment.helpImage")
@@ -8444,6 +8487,9 @@ const form = reactive<SettingsForm>({
   payment_enabled: false,
   risk_control_enabled: false,
   city_simulation_enabled: false,
+  city_pixel_renderer_enabled: false,
+  city_visual_pack_publish_enabled: false,
+  city_realtime_scheduler_enabled: false,
   cyber_session_block_enabled: false,
   cyber_session_block_ttl_seconds: 3600,
   payment_min_amount: 1,
@@ -9438,6 +9484,17 @@ function formatTablePageSizeOptions(options: number[]): string {
   return (Array.isArray(options) ? options : []).join(", ");
 }
 
+function handleCitySimulationEnabledChange(enabled: boolean): void {
+  if (enabled) return
+  form.city_pixel_renderer_enabled = false
+  form.city_visual_pack_publish_enabled = false
+  form.city_realtime_scheduler_enabled = false
+}
+
+function handleCityPixelRendererEnabledChange(enabled: boolean): void {
+  if (!enabled) form.city_visual_pack_publish_enabled = false
+}
+
 function parseTablePageSizeOptionsInput(raw: string): number[] | null {
   const tokens = raw
     .split(",")
@@ -10109,6 +10166,9 @@ async function saveSettings() {
       payment_enabled: form.payment_enabled,
       risk_control_enabled: form.risk_control_enabled,
       city_simulation_enabled: form.city_simulation_enabled,
+      city_pixel_renderer_enabled: form.city_pixel_renderer_enabled,
+      city_visual_pack_publish_enabled: form.city_visual_pack_publish_enabled,
+      city_realtime_scheduler_enabled: form.city_realtime_scheduler_enabled,
       cyber_session_block_enabled: form.cyber_session_block_enabled,
       cyber_session_block_ttl_seconds:
         Number(form.cyber_session_block_ttl_seconds) || 3600,

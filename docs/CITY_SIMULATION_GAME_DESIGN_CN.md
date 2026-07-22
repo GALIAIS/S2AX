@@ -1,7 +1,7 @@
 # 城市模拟游戏总体设计
 
-版本：v1.0（2026-07-19）
-状态：总体架构草案已修订，等待 worldgen-v2 示例验收后冻结；当前实现基线为 `city-f8-v3`，下一实现入口为 F8.3/F8.4
+版本：v2.7（2026-07-21）
+状态：总体契约已冻结；新世界当前基线为 `city-openworld-v24`。V7 服务协同、V8 跨域滞后 effect、V9 聚合出行、V10 受审计的跨尺度到达桥接、V11 的版本化自动 OD source/封存交通周期指标、V12 的容量受限住宅—就业绑定、V13 双向设施在场域通勤 source、V14 append-only assignment lifecycle、V15 F10.0 企业订单/库存保留/交付/结算、V16 企业货运 source→V9 证据适配、V17 F10.1 在途 custody/显式 receipt gate、V18 F10.2 的超额订单确定性拆批与全量收货门槛、V19 F9.3.0 的 profile 选定静态节点/走廊身份、V20 F9.3.1 的通用可变基础设施资产/维护/施工状态机、V21 F9.3.2 的有效容量准入/动态替代路径、V22 F10.3.0 的按行分批收货/货损拒收/退款/承运责任 claim、V23 F10.3.1a 的人工承运准备金和一对一 claim 追偿，以及 V24 F10.3.1b 的版本化服务合同和现金运费结算均已落地；后续才评审报价输入扩展、SLA、保险、在途库存与多企业生产。
 适用范围：Sub2API 内的开放世界城市模拟、城市经济、角色/NPC、平台虚拟货币奖励，以及后续可选金融分支
 
 本文件是城市模拟系统的产品与架构事实来源。它定义边界、权威状态、版本、阶段和依赖；各 F 阶段文档只补充本文件中的一个纵向切片，不能改变本文件的领域归属或顺序。审查过程和已消除的问题见[《城市模拟系统总体设计审查与冻结前问题清单》](CITY_SIMULATION_SYSTEM_DESIGN_AUDIT_CN.md)。
@@ -15,6 +15,8 @@
 | 本文 | 产品边界、领域关系、版本向量、阶段顺序与总门禁 | 最高 |
 | 《城市模拟基础内核实施设计》 | F0–F8.2 的实现/数据/测试索引 | 次级 |
 | F3–F8.2 单阶段设计 | 各阶段的命令、事实、投影与恢复细节 | 次级 |
+| [《城市模拟 Agent 化架构改动设计》](CITY_SIMULATION_AGENT_ARCHITECTURE_DESIGN_CN.md) | 模拟系统 Agent、角色 Agent、NPC 管理、模型调用、人格、奖励与运行时安全边界 | 8–10 节的专项权威 |
+| [《城市模拟实时世界时钟与像素世界改动设计》](CITY_SIMULATION_REALTIME_PIXEL_WORLD_DESIGN_CN.md) | 可信实时世界时钟、Temporal Frame、像素地图、素材图集、角色外观、CSP 与实时 Agent 时间接口 | 新 realtime world 的专项权威 |
 | [《开放世界生成器 V2 设计》](CITY_OPENWORLD_GENERATOR_V2_CN.md) | 新 worldgen plan 的实现细节 | 仅在阶段 C 生效 |
 | 审查清单 | v0.7 的问题记录和本版决策依据 | 记录，不再替代本文 |
 
@@ -28,16 +30,26 @@
 | F6.1–F6.3 | 已实现 | 日历、人口自然变化、迁移、家庭生命周期 | 个体级社会模拟 |
 | F7.0–F7.11 | 已实现 | 空间规则、地块/建筑、Actor、控制权、Portal、导航、移动意图 | 无限世界生成、NPC AI、交通系统 |
 | F8.0–F8.2 | 已实现 | 设施、生命周期、服务结算、物理网络与流量 | 社会服务可达性和跨域城市反馈 |
-| A：总体契约固化 | 当前 | 本文定义的权威图、时序、版本向量、旧世界策略 | 新玩法或新 world state |
-| B：F8.3/F8.4 | 下一步 | 社会服务可达性、排队/响应、跨域滞后效果 | 交通和多企业供应链 |
-| C：worldgen-v2 | B 后 | 新世界的宏观地理、城市原型、Sector/Chunk 生成 | 自动迁移旧 F7 世界 |
-| D：F9 | C 后 | 交通、通勤、货运和可达性 | 银行、证券市场 |
-| E：F10 | D 后 | 多企业、行业、投入产出、破产和供应链 | 自动可信的股票基本面 |
-| F：社会运行层 | E 并完成所需空间/经济接口后 | NPC、组织、物品、职业、任务和法律产品层 | 把 Rule/Role 固化成某一种玩法 |
+| A：总体契约固化 | 已完成 | `city-openworld-v6` 将引擎、场景、经济政策、空间、worldgen、内容和规则封存为版本向量 | 新玩法或新 world state |
+| B：F8.3/F8.4 | 已完成（V7/V8） | 在开放世界设施之上实现服务可达性、有限队列/响应与下一 tick 跨域 effect | 完整交通需求或多企业供应链 |
+| C：worldgen-v2 | 已完成并纳入 V6 | 新世界的宏观地理、城市原型、Region/Sector/Chunk 生成 | 自动迁移旧 F7 世界 |
+| R：实时世界时钟与像素世界 | 已设计，未实现 | 新 world 的可信 UTC/单调时钟、Temporal Frame、共享在线世界、像素渲染、视觉包、角色外观与素材发布 | 覆盖 V24/旧 world、为每位成员复制世界、把浏览器帧或图像变成状态权威 |
+| D：F9.0 / V9–V18 | 已完成 | 封存设施—区域—换乘枢纽图、容量预约、可审计路线、跨 tick 到达桥接、版本化自动 OD、闭合周期指标、住宅—就业绑定、双向设施在场域通勤、append-only assignment lifecycle 与企业货运 evidence adapter | 微观车道仿真、无事实的位置瞬移或可变基础设施 |
+| D：F9.3.0 / V19 | 已完成 | 将每个冻结 V9 hub/edge 映射为 profile 选定的 static node/corridor，封存交通风格内容包并接入版本向量、快照、回放、恢复与只读 API | 逐车道路径、时刻表、动态容量、维护、施工、车队或票价 |
+| D：F9.3.1 / V20 | 已完成 | 在 V19 immutable node/corridor 上建立通用 asset definition、状态/容量投影、append-only lifecycle fact、SQL guard、版本向量、回放恢复与成员只读 API；V9 调度仍不消费它 | 已接受路线重算、动态 route feasibility、施工成本/工期、逐车道路径或时刻表 |
+| D：F9.3.2 / V21 | 已完成 | 让未来 V9 allocation 在调度时消费 V20 的 effective capacity；封存 per-edge admission、状态来源 transition 和版本化 policy，容量不足时按既有确定性 tie-break 重算可达替代路径 | 对已接受 allocation 追溯改写、逐车道/逐车仿真、施工成本/工期或多 segment 节点网络 |
+| E：F10.0 / V15 | 已完成 | 企业订单、库存 ownership、保留、acceptance settlement、交付、失败/取消/过期 reversal、回放与恢复 | 多企业生产、行业投入产出、破产或股票基本面 |
+| E：F10.1 / V17 | 已完成 | V16 source 的 shipment custody、到达观察、V15 delivery gate、显式 receipt 与 legacy baseline 隔离 | 部分收货、货损、车队、独立在途库存或多企业生产 |
+| E：F10.2 / V18 | 已完成 | V16 overflow source 的确定性 32-unit 拆批、独立 V9 consignment、全量到达后的单一 V15 原子交付与 per-consignment receipt | 部分收货、货损/拒收、车队、独立在途库存或多企业生产 |
+| E：F10.3.0 / V22 | 已完成 | V17/V18 post-baseline custody 的多次按行 receipt、accepted/lost/rejected、即时库存/退款、carrier claim、V15/V17/V18 settled bridge，以及零 receipt 的 V15 failed→V22 voided 闭环、SQL/replay/recovery/API | carrier 实体、保险、运费、SLA、在途库存、所有权/风险转移或生产配方 |
+| E：F10.3.1a / V23 | 已完成 | 承运 actor 与无所有者的经济准备金 firm 分离、政府人工拨备、全额一对一 carrier claim 追偿、V22 `open → resolved` 受控投影、SQL/replay/recovery/API | 保险、运费、SLA、部分追偿、在途库存、所有权/风险转移或生产配方 |
+| E：F10.3.1b / V24 | 已完成 | 对 baseline 后 V22 settled case 封存唯一服务合同，并在后续 automatic tick 以现金 journal 结清固定单位运费；接入版本向量、快照、回放、恢复、SQL guard 与 seller-scoped API | 动态报价、SLA、保险、在途库存、所有权/风险转移、生产配方或账期 |
+| E：F10.3.1c+ / V25+ | 后续阶段 | 报价输入扩展、服务等级/SLA 事实、保险责任链、独立在途库存、生产配方、行业投入产出、破产和完整市场结算 | 自动可信的股票基本面 |
+| F：社会运行与 Agent 运行时 | E 并完成所需空间/经济接口后 | NPC、组织、物品、职业、任务、法律产品层，以及受限的模拟系统/角色 Agent 运行时 | 把 Rule/Role 固化成某一种玩法，或让模型成为状态权威 |
 | G：产品与奖励 | 城市本体稳定后 | 成就、赛季、贡献、受控奖励和运营 | 游戏货币兑换或股票奖励 |
 | E1/E2 | 独立可选 | 银行/信贷；证券/股票 | 城市本体的前置条件 |
 
-新引擎版本只能在阶段注册表中声明前置版本、状态归属、升级路径和验收后发布。阶段编号不是开发顺序的缩写；它是状态协议的兼容边界。
+新引擎版本只能在阶段注册表中声明前置版本、状态归属、升级路径和验收后发布。阶段编号不是开发顺序的缩写；它是状态协议的兼容边界。新世界绝不再默认进入旧 F7/F8 分支；这些版本仅保留读取、回放和显式兼容升级语义。
 
 ## 1. 产品目标与边界
 
@@ -48,6 +60,7 @@
 系统必须始终满足：
 
 - 同一 world、版本向量、种子和命令序列得到相同 canonical state；
+- 同一 `world_id` 是一个多人共享、在线推进的 canonical 世界：时间线、地图、经济、Rule/Case、NPC、事实、状态 hash 与事件 cursor 只有一份；成员视图可脱敏，但绝不因此复制或分叉世界；
 - 资金、资源、土地、住房、容量、流量、持仓和控制权都有明确来源、去向和不变量；
 - 客户端只提交意图，不能指定结算结果、余额、坐标、奖励金额或处罚结果；
 - 聚合城市模型可逐步细化为空间、家庭、企业和 Actor 模型，而不保留双权威状态；
@@ -90,7 +103,9 @@ flowchart TB
 | control grant | 用户对某 Actor 的可撤销 capability | 允许指定的 Actor 命令 | 赋予 owner 或管理员权限 |
 | 组织/岗位 | 世界内关系与职责 | 表达雇佣、社团、政府、设施岗位 | 直接改平台成员关系 |
 
-默认一个用户可以拥有一个私人 world，同时 world 可有协作成员和多个 Actor。玩家可以是城市的治理者、某个角色的控制者，或两者兼有；这两种权力必须分别授予和审计。
+默认产品模型是“管理员创建并运营一个共享在线 `world`，多个被授权成员进入同一座城市”。管理员可配置成员准入策略、邀请和组策略自动加入，但普通用户不能创建 world。成员加入只会创建/更新 membership、治理 role 和可撤销的 control grant；绝不为成员自动创建、分配或复制私人 world。普通用户的主要入口是加入已有 world、创建/绑定自己的角色和观察同一座城市，而不是领取一份个人城市副本。
+
+玩家可以是城市的治理者、某个角色的控制者，或两者兼有；这两种权力必须分别授予和审计。world owner 是治理角色，不表示该 owner 独占世界或其他成员进入后会落入 owner 的私有分片。若未来保留个人 sandbox，它必须由管理员显式创建为不同的 `world_id`，并在时间线、经济、奖励、人口和在线事件上与共享城市完全隔离；不得把 sandbox 当作同一城市的“每人一份实例”。
 
 ### 2.2 World、城市和空间层级
 
@@ -107,6 +122,8 @@ World
 ```
 
 `District` 是治理和统计的空间分区，不等于地形格子；`Jurisdiction` 是规则适用范围，不等于成员权限；`Building` 是空间资产，不自动拥有企业、家庭或 Actor。
+
+同一个 `world_id` 只能有一条 canonical 时间线和一组权威状态：同一时间锚点、版本向量、世界种子、空间 Chunk、人口/NPC、资源与市场账本、Rule/Case、Fact/Effect、snapshot、state hash、due event 队列和 timeline cursor。成员身份、用户角色、私有记忆、可见范围与 UI projection 属于访问/展示层；它们可以令两名用户获得不同字段或不同可见对象，但不得因此产生不同的世界事实、不同的 reducer 结果或不同的世界副本。
 
 ## 3. 权威状态、事实与跨尺度桥接
 
@@ -186,26 +203,31 @@ rule_bundle(id, version, hash)
 
 ### 4.3 时间、调度与命令
 
-- 一个基础 tick 固定推进一个游戏小时；real time 只决定何时调度，不进入 reducer；
-- `speed_multiplier` 只改变真实调度间隔，不能改变游戏时间单位或公式；
+- V24 及兼容引擎保持“一个基础 tick 固定推进一个游戏小时；real time 只决定何时调度，不进入 reducer”的既有语义；新的 realtime engine 使用独立的 world elapsed time、Temporal Frame、时钟段和 due event，详见[《城市模拟实时世界时钟与像素世界改动设计》](CITY_SIMULATION_REALTIME_PIXEL_WORLD_DESIGN_CN.md)，不得混用两种时间单位；
+- V24 的 `speed_multiplier` 只改变真实调度间隔，不能改变游戏时间单位或公式；realtime production world 固定真实时间，不支持加速；
 - 每个 world 任意时刻只有一个写入者，lease/advisory lock 用于协调，不改变命令顺序；
-- 命令以 `(world_id, user_id, client_request_id)` 幂等，使用 `expected_world_tick` 处理并发编辑；
-- 暂停 world 不自然推进；有允许执行的 pending command 时可运行一个显式命令 tick，但不能跳过时间；
-- 追赶只重复完整 tick，受每轮预算和故障退避限制；绝不合并、跳过或伪造 tick；
-- 客户端时间、浏览器刷新、SSE 重连不能决定 `execute_at_tick` 或结果。
+- V24 命令以 `(world_id, user_id, client_request_id)` 幂等并使用 `expected_world_tick` 处理并发编辑；realtime 命令以 timeline cursor、相关实体版本和服务端 precondition hash 处理，两个 API 不混用；
+- V24 暂停 world 不自然推进；realtime pause 会冻结世界 elapsed time 并在 resume 创建新的时钟段，二者都不能通过命令跳过时间；
+- V24 追赶只重复完整 tick，受每轮预算和故障退避限制；realtime 追赶按封存 due event 与连续区间结算，绝不合并、跳过或伪造离散事件；
+- 客户端时间、浏览器刷新、SSE 重连不能决定 `execute_at_tick`、realtime due time 或任何结果。
 
-### 4.4 Tick phase contract
+### 4.4 V24 Tick 与 realtime Frame phase contract
 
-当前及后续引擎必须把跨域因果固定为阶段协议。默认顺序如下；如果某版本调整顺序，必须发布新 `engine_version` 并完成回放测试。
+V24 的 tick phase contract 与 realtime 的 Temporal Frame phase contract 均必须把跨域因果固定为阶段协议；两者的具体时钟/调度规则分别以各自 engine version 为准。如果某版本调整顺序，必须发布新 `engine_version` 并完成回放测试。V6 已冻结版本向量，V7–V12 以新的开放世界引擎版本追加服务、effect、mobility、到达桥接、OD 与住宅—就业内容目录，不能回写 V6 或借用旧 F8 的空间表。
+
+以下编号顺序是 V24 及其兼容引擎的 tick phase 基线；realtime engine 使用[《城市模拟实时世界时钟与像素世界改动设计》](CITY_SIMULATION_REALTIME_PIXEL_WORLD_DESIGN_CN.md)中定义的 Temporal Frame phase、due event 和连续区间结算，但同样不得让同一 frame/tick 输出形成无审计反馈环。
 
 1. 锁定 world、读取前一 canonical state、校验前 hash、选择到期命令；
 2. 校验权限、参数和 `expected_world_tick`，确定命令 applied/rejected；
 3. 执行到期的 `PRE_*` 生命周期、已排程 effect 和状态到期；
 4. 执行 Actor movement intent、空间 mutation、Portal/访问状态与交通输入准备；
 5. 执行 F8 生命周期、物理网络和公共服务结算；
-6. 执行劳动力、生产、库存、物流、住房、商品和财政市场结算；
-7. 生成规则 Case、跨域 effect、指标、奖励资格和用户可见事件；
-8. 执行 `POST_*` 磨损/故障/下期排程，写事实、投影、snapshot、hash 和 Outbox 后一次提交。
+6. V11 自动 OD source 先检查真实、已验证的 Actor 当前位置和当前冲突状态；它只写当前 tick 的 `mobility.requested` 事实与 V9 demand，绝不在同 tick 调度或移动 Actor；
+7. 在普通命令前处理到期 mobility route、过期 demand，并且只调度此前 tick 已接受的 demand；同 tick 新请求绝不提前占用容量；
+8. V10 只消费早于当前 tick 的 V9 完成事实；它先记录 pending，再校验 Actor 仍在请求时捕获的位置、没有活动 V5 navigation intent、目标 Sector 已按绑定 worldgen 物化且存在可通行/未占用 surface Cell，才写 landing fact 与位置 effect；
+9. 执行劳动力、生产、库存、物流、住房、商品和财政市场结算；
+10. 生成规则 Case、跨域 effect、闭合周期指标、奖励资格和用户可见事件；
+11. 执行 `POST_*` 磨损/故障/下期排程，写事实、投影、snapshot、hash 和 Outbox 后一次提交。
 
 同 tick 输出不能形成反馈环。服务短缺、可达性、犯罪/处罚、污染和政策效果默认在下一 tick 被其他域消费；若需要同 tick 效果，必须在设计中给出无环依赖图和测试。
 
@@ -219,7 +241,7 @@ rule_bundle(id, version, hash)
 
 ### 5.1 新世界的空间原则
 
-新世界使用按需物化的开放世界：宏观地理决定区域和城市位置，Sector 决定道路层级/地形连续性，Chunk 决定可交互 Cell、建筑和家具。ASCII、像素 tile 和未来 3D 都只是同一空间语义的 renderer，不能成为状态来源。
+新世界使用按需物化的开放世界：宏观地理决定区域和城市位置，Sector 决定道路层级/地形连续性，Chunk 决定可交互 Cell、建筑和家具。新 realtime world 的玩家地图以版本化像素 tile 呈现；ASCII 只保留给旧 world、测试或诊断兼容路径。所有视觉 renderer 都只是同一空间语义的投影，不能成为状态来源。
 
 ```text
 Macro geography → Settlement layout → Sector plan → Chunk baseline →
@@ -251,9 +273,9 @@ Parcel / Building / Facility / Portal → 后续玩家与系统事实
 
 ### 5.4 空间与交通的共用边界
 
-F7 导航、F8 物理网络、F9 道路/公交/货运会复用空间锚点，但各自保留结算事实：
+V5 开放世界本地导航、F8 物理网络、F9 道路/公交/货运会复用空间锚点，但各自保留结算事实：
 
-- F7 负责可通行、位置、Portal、占用和 Actor 移动；
+- V5 负责可通行、位置、Portal、占用、navigation intent 和 Actor 本地移动；
 - F8 负责电、水、污水、垃圾等容量、路径、损耗和服务交付；
 - F9 负责道路容量、旅行时间、通勤和货运；
 - 三者不能共用一个“万能边流量表”，也不能各自重新定义坐标、建筑入口或可达性。
@@ -293,14 +315,33 @@ E2（证券）至少需要：F10 多企业、可验证损益/资产负债/现金
 
 ## 7. 公共服务、交通与城市反馈
 
-F8.0–F8.2 已提供服务目录、设施生命周期、人员/预算/资源约束、物理网络、路径、损耗和确定性分配。它们现在是城市基础设施事实，而非仅用于面板展示。
+F8.0–F8.2 已提供服务目录、设施生命周期、人员/预算/资源约束、物理网络、路径、损耗和确定性分配。V7 又将开放世界设施锚点接入服务目录、可达性、有限队列和响应；V8 将服务响应封存为下一 tick 才可应用的跨域 effect。它们现在都是城市基础设施事实，而非仅用于面板展示。
 
-下一阶段必须完成：
+V9.0 已完成的最小交通底座是：设施/区域/中央换乘枢纽组成的世界专属有向图、步行/公共交通/货运模式、固定容量、确定性最短路径、拥堵延迟、请求—排程—完成/过期事实、回放恢复，以及 V8→V9 升级基线。路线完成本身只记录聚合到达事实，不会改写 Actor 的局部坐标。
 
-1. F8.3：教育、医疗、消防、治安等社会服务的空间可达性、排队和响应；
-2. F8.4：将服务质量/短缺作为版本化、滞后一 tick 的 effect 输入给人口、企业、建筑、Actor 和环境；
-3. F9：在新 worldgen 的道路/站点锚点上实现通勤、公交、货运和拥堵；
-4. F10：将物流与真实企业供应链接入资源和市场结算。
+V10 已完成 F9.1 的最小跨尺度桥接：仅 V10 新接受的 demand 捕获完整 V5 原始位置；V9 completed fact 只能在后续 tick 注册 `mobility.arrival.pending`，随后按 V2/V3 绑定生成器物化目标 Sector，并由 V5 的可通行/占用规则选择确定性 surface 落点。成功、受阻重试和失败分别写 `mobility.arrival.landed`、`mobility.arrival.blocked`、`mobility.arrival.failed` 事实；成功落点通过位置 effect 更新 Actor。V9→V10 升级的基线排除所有旧 demand，不会为历史路线补造坐标或到达记录。
+
+V11 已完成 F9.2 的第一个可扩展 source adapter：在 genesis 或 V10→V11 暂停升级时，从非 dormant 的 V5 NPC `work_facility` 封存 `npc.assigned_facility_visit` source。它不伪造家庭、住宅或企业订单；source 到期时只把 Actor 当时真实的已验证局部位置作为 origin，把已封存的工作 Facility hub 作为 destination。生成、抑制和每 24 tick 关闭一次的网络周期指标均有独立 runtime fact，V9 继续负责下一 tick 的路径/容量，V10 继续负责更晚的局部落点。周期指标按事件发生窗口记录自动 source 的生成/抑制及全网络请求、排程、完成、过期、到达、旅行时间、拥堵和峰值占用，不追溯改写已经关闭的周期。V10→V11 基线不重分类任何历史 demand、route 或 arrival。数据模型、时序、指标 scope 和后续 source 准入门槛见[《F9.2 版本化 OD Source 与交通周期指标设计》](CITY_SIMULATION_F9_2_OD_DESIGN_CN.md)。
+
+V12 已完成 F9.2.B.0 的输入底座：在 genesis 或暂停的 V11→V12 升级时，仅为基线时合格的 employment NPC 封存 `npc.residence_employment` binding。它优先采用已验证的 V5 residence；缺失时才在真实 residence Facility 容量中作稳定哈希分配，容量不足明确计入 `unbound_candidate_count`。binding 记录 home/work Facility 与 hub、employment role、24 tick 双向相位和版本化 policy，但**不生成**第二条交通需求，也不把实时位置、household 或企业订单臆造为输入。绑定进入 canonical snapshot、版本向量、replay、recovery 与只读 API；未来 source 必须重新验证 Actor 当时所在建筑和冲突状态。详细契约见[《F9.2.B 住宅—就业绑定底座设计》](CITY_SIMULATION_F9_2B_COMMUTE_BINDINGS_DESIGN_CN.md)。
+
+V13 已完成 F9.2.B.1 的双向通勤 adapter：每个 active V12 binding 封存 `npc.residence_to_work` 与 `npc.work_to_residence` 两条 source。source 到期时必须先通过 Facility Presence Domain：Actor 要么位于对应 Facility 的精确 interior，要么位于该 Facility 固定入口 24-cell 内的有效 surface egress 域；错误地点、失活 role/Facility、导航或 mobility 冲突都会记录 suppression fact 并推进 cadence，绝不传送或替换起点。成功 source 只创建带完整 `commute_source_code`、binding、direction 与 captured-origin metadata 的 V9 demand；V9/V10 仍保持后续 tick 的调度/落点因果边界。V11 历史 source 不会被改写，但对拥有完整 V13 pair 的 Actor 会以 `superseded_by_commute_source` 抑制 generic demand。V13 还封存按方向的 closed-cycle 指标、version vector、replay/recovery 与只读 API；详细契约见[《F9.2.B.1 / V13 双向通勤 Source 设计》](CITY_SIMULATION_F9_2C_COMMUTE_SOURCES_DESIGN_CN.md)。
+
+V14 已完成 F9.2.B.2 的 lifecycle successor 层：每个 V12 binding 的有效关系以 append-only assignment epoch 表示，V13 source 仅保留为封存审计。管理员 rebind 原子地 supersede 旧 epoch、创建 successor epoch/source pair；自动规则只会根据 actor、role、设施与 profile 证据追加 suspend/resume/terminate transition，不能从实时位置或当前配置猜测迁居。epoch/source/transition/metric 由 runtime fact、SQL deferred assertion、canonical snapshot、replay、recovery、V13→V14 paused upgrade 和只读 API 共同行使约束；新 source 最早下一 tick 才进入 V9 调度。详细契约见[《F9.2.B.2 / V14 通勤生命周期与 Assignment Epoch 设计》](CITY_SIMULATION_F9_2D_COMMUTE_LIFECYCLE_DESIGN_CN.md)。
+
+下一阶段必须按以下顺序完成：
+
+1. F9.2.C / V16 已完成：仅消费 V15 F10.0 的 `dispatched` fact 建立企业 freight source，并与通勤指标严格隔离；
+2. F10.1 / V17 已完成：V9/V16 route completion 只进入 custody 的 `awaiting_receipt`，必须经显式 receipt adapter 才能产生 V15 `delivered`；
+3. F10.2 / V18 已完成：仅接管 V16 `suppressed` overflow source，按 frozen line 稳定拆成不超过 32-unit 的 V9 consignment；所有 consignment 到达 `awaiting_receipt` 后才允许一笔 V15 原子交付，多个 V18 receipt 共同绑定这笔交付而不创建第二份库存或现金；
+4. F9.3.0 / V19 已完成：每个 V9 hub/edge 均拥有不可变的 spatial node/corridor identity；默认、日本都市、中国都市的交通类别来自封存 style catalog，而非 reducer 的国家条件分支；V18→V19 暂停升级只映射既有拓扑，不补造 demand、route、库存、账本或交付事实；
+5. F9.3.1 / V20 已完成：在不改变 V19 node/corridor identity 的前提下封存通用 asset definition，并通过 append-only state/transition fact 表达 restricted、maintenance、construction、closed 和 operational；V9 调度保持不变；
+6. F9.3.2 / V21 已完成：V21 只在 V9 schedule fact 之后消费 V20 transition 的状态，V20 命令在 T 提交、最早于 T+1 的 V9 自动调度中可见；历史 allocation/reservation 不回写，容量封闭时才在相同 V9 排序规则内选择仍可达的替代路径。V20→V21 升级以 upgrade tick 为 baseline，不为历史 route 回填 admission；完整边界、审计、回放与恢复契约见[《F9.3.2 有效基础设施容量设计》](CITY_SIMULATION_F9_3_2_EFFECTIVE_CAPACITY_DESIGN_CN.md)；
+7. F9.3.3+：在 V21 的单 segment 走廊容量边界之上，再评估多 segment、站点/终端、施工成本/工期、跨网络依赖与已接受 allocation 的显式重规划协议；
+8. F10.3.0 / V22 已完成：只接管 V22 baseline 后的 V17 shipment 或 V18 consignment，按冻结 line 多次记录 accepted/lost/rejected；每次 receipt 立即更新库存/退款，carrier liability 只创建 claim，所有 case 结清才写 V15/V17/V18 settled successor。第一条 receipt 前可保留 V15 failed/reversal，并以 V22 voided order/case 封存，不伪造 V17/V18 settled；第一条 receipt 后旧 fail 必须拒绝。升级前 custody 不回填。
+9. F10.3.1a / V23 已完成：在 V22 已封存的 carrier claim 上追加无所有者承运准备金、政府人工拨备与全额一对一卖方追偿；追偿只改变 `open → resolved` 受控投影，绝不重写 V22 receipt、资源操作、退款或 claim 金额。
+10. F10.3.1b / V24 已完成：为 baseline 后的 V22 case 封存服务量、卖方、系统 carrier、准备金 firm、固定单位费率和 quote；仅当 case 已 `settled` 且跨越 automatic tick 后，以真实现金 journal 结清。现金不足时不透支、不伪造债务，保留同一 quote 供后续 tick 重试；升级前 case 不补费。
+11. F10.3.1c+ / V25+：在 V24 已封存 quote 的边界上追加报价输入、服务等级/SLA、保险、独立在途库存、所有权/风险转移和多企业生产；不得用新费率或保险规则追溯改写 V22/V23/V24 历史。
 
 公共服务、交通和经济反馈不能直接互改投影。例：医疗短缺在 T 结算为 service fact，在 T+1 才影响健康/劳动供给；通勤时间在 T 生成，在下一劳动结算周期影响岗位匹配。这样可避免离散模型内部循环和不可回放的即时补丁。
 
@@ -332,6 +373,8 @@ Actor 是底层开放世界实体，可代表玩家角色、NPC、组织代理�
 
 层级切换必须是版本化的聚合/展开 bridge，保留总量、控制权和事实来源。NPC 的目标、行动预算和失败原因必须可查询；不允许后台随机“传送”改变玩家可见结果。
 
+后续引入 Agent 时，NPC Manager 作为模拟系统 Agent 负责 NPC 的分层和生命周期，NPC Character Agent 只为一个 NPC Actor 提交受限意图；用户角色 Agent 与该树分离。模型调用、人格演化、父子委派、异步决策、回放和隐私边界以[《城市模拟 Agent 化架构改动设计》](CITY_SIMULATION_AGENT_ARCHITECTURE_DESIGN_CN.md)为准，不能由本节的 NPC LOD 描述推导出直接模型写状态的权限。
+
 ### 8.3 Rule、法律与处罚
 
 Rule 是通用条件树和 Effect 模板。法律、组织纪律、任务条件、危险区域、设施准入都是 Rule 目录实例，而不是不同的底层系统。
@@ -344,7 +387,11 @@ Case 的最小生命周期为：`detected → filed → adjudicating → resolve
 
 ### 9.1 成员与世界生命周期
 
-`owner`、`planner`、`treasurer`、`trader`、`viewer` 是治理权限集合，不是职业或 Actor 权限。成员离开、被封禁、所有权转让和 world 归档时，系统必须处理 active control grant、待处理命令、未结算订单、恢复任务和奖励 Outbox。
+`owner`、`planner`、`treasurer`、`trader`、`viewer` 是治理权限集合，不是职业、Actor 权限或“个人 world 归属”。同一 `world_id` 的全部成员无论是否在线都指向同一时间线；在线成员从该时间线读取同一 cursor 序列的授权投影。成员加入、邀请、审核、组策略分配或角色绑定只改变该成员的访问范围、治理能力、Actor control grant 和私有资料范围，不创建第二份地图、经济、NPC 或事件流。
+
+在线并不以浏览器连接作为世界状态权威：连接/断线只影响当前 SSE 会话和可选的受限 presence 投影，不能暂停 world、冻结角色、改变奖励资格或为离线用户复制状态。某成员对公开/可见对象的已接受命令在唯一世界序列中提交；其他有可见权限的成员必须通过同一 cursor 的 patch 收敛到该结果。私有室内、私人物品、人格/Agent memory、未公开证据和管理员信息只在投影层过滤，不能借“隐私”产生并行世界。
+
+成员离开、被封禁、所有权转让和 world 归档时，系统必须处理 active control grant、待处理命令、未结算订单、恢复任务和奖励 Outbox。成员移除不会删除世界公共历史，也不会重写其他成员的状态；若需要删除受法律/隐私约束的用户资料，应通过独立的最小化/脱敏流程处理，而非重放或拆分 world。
 
 管理员只能通过审计命令暂停、恢复、重放、升级或补偿；禁止直接编辑 canonical/projection 表。紧急修复必须先冻结 world，再生成补偿/修复事实和新的恢复证据。
 
@@ -382,7 +429,7 @@ idempotency key, expiry, reversal policy
 
 SSE 只推送 tick、命令终态、增量指标、可见事件和奖励状态；断线以事件 cursor 补拉。页面收到新状态时局部更新，不卸载整页、不用全页刷新伪装同步。
 
-地图按视口/Chunk 分页加载，渲染层消费稳定的 terrain/feature/actor 语义；ASCII、像素图和未来等距/3D 视图共享同一 projection。前端只显示后端给出的可执行操作和拒绝原因，不能在客户端预测并写入世界结果。
+地图按视口/Chunk 分页加载，渲染层消费稳定的 terrain/feature/actor 语义；新 realtime world 使用像素图集和场景渲染，ASCII 仅为旧兼容/诊断工具。未来等距/3D 视图必须共享同一语义 projection。前端只显示后端给出的可执行操作和拒绝原因，不能在客户端预测并写入世界结果。
 
 ### 10.3 玩家信息架构
 
@@ -425,9 +472,9 @@ SSE 只推送 tick、命令终态、增量指标、可见事件和奖励状态�
 
 以本文件为基线，补齐版本注册、版本向量、跨尺度桥接、世界生命周期、phase contract、快照保留策略和旧 F7 世界处置策略。该阶段不新增产品玩法。
 
-### B：F8.3/F8.4
+### B：F8.3/F8.4（已完成于 V7/V8）
 
-先建立社会服务可达性、排队、响应和跨域滞后 effect；验证公共服务可真实影响城市，而不会形成同 tick 循环。未完成前不进入 F9。
+已建立开放世界服务可达性、有限队列、响应以及下一 tick 跨域 effect；V9 只消费这一既有契约，不复用旧 F8 的空间投影。
 
 ### C：worldgen-v2
 
@@ -435,11 +482,11 @@ SSE 只推送 tick、命令终态、增量指标、可见事件和奖励状态�
 
 ### D：F9 与 E：F10
 
-F9 先提供可解释的交通、通勤和货运能力；F10 再建设多企业、供应链、破产和产业循环。没有这两步，不进入银行和证券。
+V9–V18 已提供可解释的宏观出行、容量、到达事实、受验证的本地落点、自动 OD source、闭合网络指标、容量受限住宅—就业绑定、双向通勤 lifecycle 与企业 freight source evidence；V15 已建立最小企业订单/库存/结算闭环，V17 已将 route completion 收紧为 custody 的 `awaiting_receipt` 并以显式 receipt adapter 连接 V15 `delivered`，V18 已把超过 32 cargo units 的 V16 overflow 订单稳定拆为全量收货批次。V19 已将冻结 V9 拓扑转换为可被后续系统引用的 static node/corridor identity；V20 已在其上封存可变资产的 capacity/state 生命周期；V21 已将其接入未来 V9 调度，以 append-only admission 证明每条 allocation 所消费的容量、状态 transition 和替代路径决定，并保持 T→T+1 的因果边界。V22/V23 已闭合部分 receipt、货损/拒收、承运责任 claim 与准备金追偿；V24 又为已 settled case 建立不可变服务合同与延后一 tick 的现金运费结算。下一步只能为新版本增加报价输入、SLA、保险、在途库存与多企业生产；在这些完成前不进入银行和证券。
 
-### F：社会运行层与 G：产品奖励
+### F：社会运行层、Agent 运行时与 G：产品奖励
 
-在已有 Actor/Rule/Case 协议上加入 NPC、组织、物品、职业、任务和法律产品内容；城市本体长期稳定后才开放赛季、成就、受控奖励和可选消费。
+在已有 Actor/Rule/Case 协议上先加入受服务端约束的模拟系统/角色 Agent 运行时、NPC Manager、人格/记忆、异步决策和完整回放边界，再扩展 NPC、组织、物品、职业、任务和法律产品内容；若 Agent 运行在 realtime world，必须先满足实时世界时钟与像素世界文档中的 R1 时间内核门禁。城市本体与奖励 outbox 稳定后才开放赛季、成就、受控奖励和可选消费。详细依赖和停止条件以[《城市模拟 Agent 化架构改动设计》](CITY_SIMULATION_AGENT_ARCHITECTURE_DESIGN_CN.md)和[《城市模拟实时世界时钟与像素世界改动设计》](CITY_SIMULATION_REALTIME_PIXEL_WORLD_DESIGN_CN.md)为准。
 
 ### E1/E2：独立复审
 

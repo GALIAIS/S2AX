@@ -156,6 +156,7 @@ type CityStepResult struct {
 	OpenWorldRuntimeFacts   []CityOpenWorldRuntimeFact       `json:"open_world_runtime_facts"`
 	OpenWorldRuntimeEffects []CityOpenWorldRuntimeEffect     `json:"open_world_runtime_effects"`
 	OpenWorldRuleCases      []CityOpenWorldRuleCase          `json:"open_world_rule_cases"`
+	SupplyChainFacts        []CityOpenWorldSupplyChainFact   `json:"supply_chain_facts"`
 	WorldEffectOperations   []WorldEffectOperation           `json:"world_effect_operations"`
 	WorldRuleCases          []WorldRuleCase                  `json:"world_rule_cases"`
 	ServiceFacts            []CityServiceFact                `json:"service_facts"`
@@ -249,6 +250,9 @@ func (s *CityEconomyService) SubmitCommand(ctx context.Context, input CityComman
 	world, err := lockCityWorld(ctx, tx, input.UserID, input.WorldID)
 	if err != nil {
 		return nil, err
+	}
+	if cityEngineIsRealtime(world.simulationVersion) {
+		return nil, ErrCityRealtimeLegacyAPI
 	}
 	existing, err := getCityCommandByRequest(ctx, tx, input.WorldID, input.UserID, requestID)
 	if err == nil {
@@ -381,6 +385,9 @@ func (s *CityEconomyService) stepWorld(ctx context.Context, input CityStepInput)
 	if err != nil {
 		return nil, err
 	}
+	if cityEngineIsRealtime(world.simulationVersion) {
+		return nil, ErrCityRealtimeLegacyAPI
+	}
 
 	existingTick, err := getCityTickByRequest(ctx, tx, input.WorldID, requestID)
 	if err == nil {
@@ -443,6 +450,7 @@ func (s *CityEconomyService) stepWorld(ctx context.Context, input CityStepInput)
 	openWorldRuntimeFactSequence := int64(1)
 	openWorldRuntimeEffectSequence := int64(1)
 	openWorldRuntimeRuleCaseSequence := int64(1)
+	supplyChainFactSequence := int64(1)
 	cityServiceFactSequence := int64(1)
 	cityFacilityLifecycleFactSequence := int64(1)
 	cityPhysicalNetworkFactSequence := int64(1)
@@ -464,6 +472,15 @@ func (s *CityEconomyService) stepWorld(ctx context.Context, input CityStepInput)
 		if isCityResourceCommand(command.CommandType) {
 			hasResourceCommand = true
 		}
+		if isCityOpenWorldSupplyChainCommand(command.CommandType) || isCityOpenWorldFreightSettlementCommand(command.CommandType) {
+			hasLedgerCommand = true
+			needsLedgerBootstrap = true
+			hasResourceCommand = true
+		}
+		if isCityOpenWorldCarrierRecoveryCommand(command.CommandType) {
+			hasLedgerCommand = true
+			needsLedgerBootstrap = true
+		}
 		if command.CommandType == CityCommandTypeDevelopmentStart {
 			hasResourceCommand = true
 		}
@@ -482,7 +499,7 @@ func (s *CityEconomyService) stepWorld(ctx context.Context, input CityStepInput)
 			return nil, err
 		}
 	}
-	if hasLedgerCommand || marketCycleDue {
+	if hasLedgerCommand || marketCycleDue || cityEngineSupportsOpenWorldSupplyChain(engine.version) {
 		ledgerUnit, err = loadCityLedgerBaseUnit(ctx, tx, input.WorldID)
 		if err != nil {
 			return nil, err
@@ -518,6 +535,8 @@ func (s *CityEconomyService) stepWorld(ctx context.Context, input CityStepInput)
 	openWorldRuntimeFactCount := 0
 	openWorldRuntimeEffectCount := 0
 	openWorldRuntimeRuleCaseCount := 0
+	openWorldImpactScheduleCount := 0
+	openWorldImpactApplicationCount := 0
 	cityServiceFactCount := 0
 	cityServiceAllocationCount := 0
 	cityServiceSettlementCount := 0
@@ -552,6 +571,205 @@ func (s *CityEconomyService) stepWorld(ctx context.Context, input CityStepInput)
 		openWorldRuntimeFactSequence = automaticRuntime.nextFactSeq
 		openWorldRuntimeEffectSequence = automaticRuntime.nextEffectSeq
 		worldRuntimeAutomaticEvents = append(worldRuntimeAutomaticEvents, automaticRuntime.events...)
+	}
+	if cityEngineSupportsOpenWorldImpactBridge(engine.version) {
+		// Reconcile responses from older ticks before applying due effects. A
+		// response created later in this tick is deliberately scheduled only in
+		// the post-service pass below, after this application window has closed.
+		impactScheduleEvents, impactScheduleErr := scheduleCityOpenWorldV8ServiceImpacts(
+			ctx, tx, input.WorldID, targetTick, false,
+		)
+		if impactScheduleErr != nil {
+			return nil, impactScheduleErr
+		}
+		openWorldImpactScheduleCount += len(impactScheduleEvents)
+		worldRuntimeAutomaticEvents = append(worldRuntimeAutomaticEvents, impactScheduleEvents...)
+		automaticImpacts, impactErr := advanceCityOpenWorldV8ImpactEffects(
+			ctx, tx, input.WorldID, targetTick,
+			openWorldRuntimeFactSequence, openWorldRuntimeEffectSequence,
+		)
+		if impactErr != nil {
+			return nil, impactErr
+		}
+		openWorldRuntimeFactCount += len(automaticImpacts.facts)
+		openWorldRuntimeEffectCount += len(automaticImpacts.effects)
+		openWorldImpactApplicationCount += len(automaticImpacts.facts)
+		openWorldRuntimeFactSequence = automaticImpacts.nextFactSeq
+		openWorldRuntimeEffectSequence = automaticImpacts.nextEffectSeq
+		worldRuntimeAutomaticEvents = append(worldRuntimeAutomaticEvents, automaticImpacts.events...)
+	}
+	if cityEngineSupportsOpenWorldServiceCoordination(engine.version) {
+		automaticServices, serviceErr := advanceCityOpenWorldV7ServiceRequests(
+			ctx, tx, input.WorldID, targetTick, openWorldRuntimeFactSequence,
+		)
+		if serviceErr != nil {
+			return nil, serviceErr
+		}
+		openWorldRuntimeFactCount += len(automaticServices.facts)
+		openWorldRuntimeFactSequence = automaticServices.nextFactSeq
+		worldRuntimeAutomaticEvents = append(worldRuntimeAutomaticEvents, automaticServices.events...)
+	}
+	if cityEngineSupportsOpenWorldImpactBridge(engine.version) {
+		// This runs after V7 service transitions. The schedule has an effective
+		// tick of response_tick+1, while application already ran above, making
+		// same-tick cross-domain mutation impossible by construction.
+		impactScheduleEvents, impactScheduleErr := scheduleCityOpenWorldV8ServiceImpacts(
+			ctx, tx, input.WorldID, targetTick, true,
+		)
+		if impactScheduleErr != nil {
+			return nil, impactScheduleErr
+		}
+		openWorldImpactScheduleCount += len(impactScheduleEvents)
+		worldRuntimeAutomaticEvents = append(worldRuntimeAutomaticEvents, impactScheduleEvents...)
+	}
+	if cityEngineSupportsOpenWorldMobilityOD(engine.version) {
+		// V11 source adapters create their fact-backed V9 demand before the
+		// scheduler runs, but V9 still only schedules demands from older ticks.
+		// This is the fixed causal boundary for automatic and player trips alike.
+		automaticOD, odErr := advanceCityOpenWorldV11MobilityOD(
+			ctx, tx, input.WorldID, targetTick, openWorldRuntimeFactSequence,
+		)
+		if odErr != nil {
+			return nil, odErr
+		}
+		openWorldRuntimeFactCount += len(automaticOD.facts)
+		openWorldRuntimeFactSequence = automaticOD.nextFactSeq
+		worldRuntimeAutomaticEvents = append(worldRuntimeAutomaticEvents, automaticOD.events...)
+	}
+	if cityEngineRunsOpenWorldV13CommuteSources(engine.version) {
+		// V13 consumes the verified V12 residence/work binding after V11 has
+		// suppressed any superseded generic source. It still emits a V9 demand
+		// that cannot be scheduled until a later tick.
+		automaticCommutes, commuteErr := advanceCityOpenWorldV13CommuteSources(
+			ctx, tx, input.WorldID, targetTick, openWorldRuntimeFactSequence,
+		)
+		if commuteErr != nil {
+			return nil, commuteErr
+		}
+		openWorldRuntimeFactCount += len(automaticCommutes.facts)
+		openWorldRuntimeFactSequence = automaticCommutes.nextFactSeq
+		worldRuntimeAutomaticEvents = append(worldRuntimeAutomaticEvents, automaticCommutes.events...)
+	}
+	if cityEngineSupportsOpenWorldCommuteLifecycle(engine.version) {
+		// V14 retains V13 rows for audit but drives future commute demand only
+		// from the effective assignment epoch lifecycle.
+		automaticLifecycle, lifecycleErr := advanceCityOpenWorldV14CommuteLifecycle(
+			ctx, tx, input.WorldID, targetTick, openWorldRuntimeFactSequence,
+		)
+		if lifecycleErr != nil {
+			return nil, lifecycleErr
+		}
+		openWorldRuntimeFactCount += len(automaticLifecycle.facts)
+		openWorldRuntimeFactSequence = automaticLifecycle.nextFactSeq
+		worldRuntimeAutomaticEvents = append(worldRuntimeAutomaticEvents, automaticLifecycle.events...)
+	}
+	if cityEngineSupportsOpenWorldSupplyChain(engine.version) {
+		// Supply orders carry their own evidence sequence and can expire before
+		// this tick's command batch. This prevents a late same-tick action from
+		// reviving a contractual deadline that has already elapsed.
+		automaticSupplyChain, supplyChainErr := s.advanceCityOpenWorldV15SupplyChain(
+			ctx, tx, input.WorldID, targetTick, supplyChainFactSequence,
+			journalSequence, resourceOperationSequence, ledgerUnit,
+		)
+		if supplyChainErr != nil {
+			return nil, supplyChainErr
+		}
+		supplyChainFactSequence = automaticSupplyChain.nextFactSequence
+		journalSequence = automaticSupplyChain.nextJournalSequence
+		resourceOperationSequence = automaticSupplyChain.nextResourceOpSequence
+		worldRuntimeAutomaticEvents = append(worldRuntimeAutomaticEvents, automaticSupplyChain.events...)
+	}
+	if cityEngineSupportsOpenWorldEnterpriseFreight(engine.version) {
+		// V16 observes V15 dispatches only after a tick boundary, then emits
+		// V9-compatible freight demand. It runs before V9 so a source cannot
+		// schedule transport in the same tick that created its evidence.
+		automaticFreight, freightErr := advanceCityOpenWorldV16EnterpriseFreight(
+			ctx, tx, input.WorldID, targetTick, openWorldRuntimeFactSequence,
+		)
+		if freightErr != nil {
+			return nil, freightErr
+		}
+		openWorldRuntimeFactCount += len(automaticFreight.facts)
+		openWorldRuntimeFactSequence = automaticFreight.nextFactSeq
+		worldRuntimeAutomaticEvents = append(worldRuntimeAutomaticEvents, automaticFreight.events...)
+	}
+	if cityEngineSupportsOpenWorldEnterpriseFreightReceipts(engine.version) {
+		// V17 consumes only posted V16 evidence. It must run after the freight
+		// adapter and before V9 so a new shipment has no same-tick scheduling or
+		// receipt side effect.
+		if receiptErr := advanceCityOpenWorldV17EnterpriseFreightReceipts(
+			ctx, tx, input.WorldID, targetTick,
+		); receiptErr != nil {
+			return nil, receiptErr
+		}
+	}
+	if cityEngineSupportsOpenWorldFreightBatches(engine.version) {
+		// V18 inspects only V16 overflow evidence. New capacity-bounded demands
+		// become eligible after this boundary, never in their creation tick.
+		automaticBatches, batchErr := advanceCityOpenWorldV18FreightBatches(
+			ctx, tx, input.WorldID, targetTick, openWorldRuntimeFactSequence,
+		)
+		if batchErr != nil {
+			return nil, batchErr
+		}
+		openWorldRuntimeFactCount += len(automaticBatches.facts)
+		openWorldRuntimeFactSequence = automaticBatches.nextFactSeq
+		worldRuntimeAutomaticEvents = append(worldRuntimeAutomaticEvents, automaticBatches.events...)
+	}
+	if cityEngineSupportsOpenWorldFreightSettlements(engine.version) {
+		// V22 observes only custody evidence that was already posted by V17/V18
+		// in this tick. It creates no financial or inventory side effect; those
+		// remain explicit receipt commands below the causal boundary.
+		if settlementErr := advanceCityOpenWorldV22FreightSettlements(
+			ctx, tx, input.WorldID, targetTick,
+		); settlementErr != nil {
+			return nil, settlementErr
+		}
+	}
+	if cityEngineSupportsOpenWorldCarrierCommerce(engine.version) {
+		// V24 only observes durable V22 cases that predate this automatic pass.
+		// A receipt submitted below cannot be charged until a later tick, which
+		// preserves a visible causal boundary between settlement and payment.
+		automaticCarrierCommerce, commerceErr := s.advanceCityOpenWorldV24CarrierCommerce(
+			ctx, tx, input.WorldID, targetTick, journalSequence, ledgerUnit,
+		)
+		if commerceErr != nil {
+			return nil, commerceErr
+		}
+		journalSequence = automaticCarrierCommerce.nextJournalSequence
+		worldRuntimeAutomaticEvents = append(worldRuntimeAutomaticEvents, automaticCarrierCommerce.events...)
+	}
+	if cityEngineSupportsOpenWorldMobility(engine.version) {
+		// V9 only schedules demands accepted in an earlier tick. Running this
+		// pass before command application makes a command submitted for the
+		// current tick eligible no earlier than the next tick, independent of
+		// command ordering within a batch.
+		automaticMobility, mobilityErr := advanceCityOpenWorldV9Mobility(
+			ctx, tx, input.WorldID, targetTick, openWorldRuntimeFactSequence, engine.version,
+		)
+		if mobilityErr != nil {
+			return nil, mobilityErr
+		}
+		openWorldRuntimeFactCount += len(automaticMobility.facts)
+		openWorldRuntimeFactSequence = automaticMobility.nextFactSeq
+		worldRuntimeAutomaticEvents = append(worldRuntimeAutomaticEvents, automaticMobility.events...)
+	}
+	if cityEngineSupportsOpenWorldArrivalBridge(engine.version) {
+		// V10 intentionally runs after V9 mobility but only consumes completion
+		// facts from a prior tick. This preserves a real tick boundary between
+		// aggregate transport and the validated local-world landing reducer.
+		automaticArrivals, arrivalErr := advanceCityOpenWorldV10MobilityArrivals(
+			ctx, tx, input.WorldID, targetTick,
+			openWorldRuntimeFactSequence, openWorldRuntimeEffectSequence,
+		)
+		if arrivalErr != nil {
+			return nil, arrivalErr
+		}
+		openWorldRuntimeFactCount += len(automaticArrivals.facts)
+		openWorldRuntimeEffectCount += len(automaticArrivals.effects)
+		openWorldRuntimeFactSequence = automaticArrivals.nextFactSeq
+		openWorldRuntimeEffectSequence = automaticArrivals.nextEffectSeq
+		worldRuntimeAutomaticEvents = append(worldRuntimeAutomaticEvents, automaticArrivals.events...)
 	}
 	for _, command := range commands {
 		var pending cityPendingEvent
@@ -603,6 +821,42 @@ func (s *CityEconomyService) stepWorld(ctx context.Context, input CityStepInput)
 				householdMovementSequence++
 				householdMovementCount++
 			}
+		} else if isCityOpenWorldCarrierRecoveryCommand(command.CommandType) {
+			var execution cityOpenWorldCarrierRecoveryExecution
+			execution, err = s.applyCityOpenWorldCarrierRecoveryCommand(
+				ctx, tx, input.WorldID, targetTick, journalSequence, ledgerUnit, command,
+			)
+			if err != nil {
+				return nil, err
+			}
+			pending = execution.pending
+			journalSequence = execution.nextJournalSequence
+		} else if isCityOpenWorldFreightSettlementCommand(command.CommandType) {
+			var execution cityOpenWorldFreightSettlementExecution
+			execution, err = s.applyCityOpenWorldFreightSettlementCommand(
+				ctx, tx, input.WorldID, targetTick, supplyChainFactSequence,
+				journalSequence, resourceOperationSequence, ledgerUnit, command,
+			)
+			if err != nil {
+				return nil, err
+			}
+			pending = execution.pending
+			supplyChainFactSequence = execution.nextFactSequence
+			journalSequence = execution.nextJournalSequence
+			resourceOperationSequence = execution.nextResourceOpSequence
+		} else if isCityOpenWorldSupplyChainCommand(command.CommandType) {
+			var execution cityOpenWorldSupplyChainExecution
+			execution, err = s.applyCityOpenWorldSupplyChainCommand(
+				ctx, tx, input.WorldID, targetTick, supplyChainFactSequence,
+				journalSequence, resourceOperationSequence, ledgerUnit, command,
+			)
+			if err != nil {
+				return nil, err
+			}
+			pending = execution.pending
+			supplyChainFactSequence = execution.nextFactSequence
+			journalSequence = execution.nextJournalSequence
+			resourceOperationSequence = execution.nextResourceOpSequence
 		} else if isCityOpenWorldRuntimeCommand(command.CommandType) {
 			var execution cityOpenWorldRuntimeExecution
 			execution, err = s.applyCityOpenWorldRuntimeCommand(
@@ -1050,37 +1304,39 @@ WHERE id = $1 AND status = 'pending'`, pending.command.ID, pending.status, targe
 		eventSequence++
 	}
 	completionPayload := map[string]any{
-		"tick":                            targetTick,
-		"simulated_at":                    simulatedTo.UTC().Format(time.RFC3339Nano),
-		"state_hash":                      stateHash,
-		"prng_proof":                      prngProof,
-		"command_count":                   len(commands),
-		"applied_command_count":           appliedCount,
-		"rejected_command_count":          rejectedCount,
-		"journal_count":                   journalCount,
-		"resource_operation_count":        resourceOperationCount,
-		"market_settlement_count":         marketSettlementCount,
-		"population_movement_count":       demographyExecution.movementCount,
-		"population_migration_count":      populationMigrationCount,
-		"household_movement_count":        householdMovementCount,
-		"spatial_mutation_count":          spatialMutationCount,
-		"development_fact_count":          developmentFactCount,
-		"building_adjustment_count":       buildingAdjustmentCount,
-		"enterprise_location_fact_count":  enterpriseLocationFactCount,
-		"world_runtime_fact_count":        worldRuntimeFactCount,
-		"world_effect_operation_count":    worldEffectOperationCount,
-		"world_rule_case_count":           worldRuleCaseCount,
-		"open_world_runtime_fact_count":   openWorldRuntimeFactCount,
-		"open_world_runtime_effect_count": openWorldRuntimeEffectCount,
-		"open_world_rule_case_count":      openWorldRuntimeRuleCaseCount,
-		"service_fact_count":              cityServiceFactCount,
-		"service_allocation_count":        cityServiceAllocationCount,
-		"service_settlement_count":        cityServiceSettlementCount,
-		"facility_lifecycle_fact_count":   cityFacilityLifecycleFactCount,
-		"physical_network_fact_count":     cityPhysicalNetworkFactCount,
-		"physical_network_batch_count":    cityPhysicalNetworkBatchCount,
-		"physical_network_path_count":     cityPhysicalNetworkPathCount,
-		"physical_network_segment_count":  cityPhysicalNetworkSegmentCount,
+		"tick":                                targetTick,
+		"simulated_at":                        simulatedTo.UTC().Format(time.RFC3339Nano),
+		"state_hash":                          stateHash,
+		"prng_proof":                          prngProof,
+		"command_count":                       len(commands),
+		"applied_command_count":               appliedCount,
+		"rejected_command_count":              rejectedCount,
+		"journal_count":                       journalCount,
+		"resource_operation_count":            resourceOperationCount,
+		"market_settlement_count":             marketSettlementCount,
+		"population_movement_count":           demographyExecution.movementCount,
+		"population_migration_count":          populationMigrationCount,
+		"household_movement_count":            householdMovementCount,
+		"spatial_mutation_count":              spatialMutationCount,
+		"development_fact_count":              developmentFactCount,
+		"building_adjustment_count":           buildingAdjustmentCount,
+		"enterprise_location_fact_count":      enterpriseLocationFactCount,
+		"world_runtime_fact_count":            worldRuntimeFactCount,
+		"world_effect_operation_count":        worldEffectOperationCount,
+		"world_rule_case_count":               worldRuleCaseCount,
+		"open_world_runtime_fact_count":       openWorldRuntimeFactCount,
+		"open_world_runtime_effect_count":     openWorldRuntimeEffectCount,
+		"open_world_rule_case_count":          openWorldRuntimeRuleCaseCount,
+		"open_world_impact_schedule_count":    openWorldImpactScheduleCount,
+		"open_world_impact_application_count": openWorldImpactApplicationCount,
+		"service_fact_count":                  cityServiceFactCount,
+		"service_allocation_count":            cityServiceAllocationCount,
+		"service_settlement_count":            cityServiceSettlementCount,
+		"facility_lifecycle_fact_count":       cityFacilityLifecycleFactCount,
+		"physical_network_fact_count":         cityPhysicalNetworkFactCount,
+		"physical_network_batch_count":        cityPhysicalNetworkBatchCount,
+		"physical_network_path_count":         cityPhysicalNetworkPathCount,
+		"physical_network_segment_count":      cityPhysicalNetworkSegmentCount,
 	}
 	if _, err = insertCityEvent(ctx, tx, input.WorldID, targetTick, eventSequence,
 		nil, "city.tick.completed", completionPayload); err != nil {
@@ -1245,6 +1501,15 @@ func normalizeCityCommand(commandType string, rawPayload json.RawMessage, expect
 		}
 		payload = value
 	case CityCommandTypeOpenWorldSectorMaterialize,
+		CityCommandTypeOpenWorldFreightSettlementReceipt,
+		CityCommandTypeOpenWorldCarrierReserveFund,
+		CityCommandTypeOpenWorldFreightClaimResolve,
+		CityCommandTypeOpenWorldSupplyOrderCreate,
+		CityCommandTypeOpenWorldSupplyOrderAccept,
+		CityCommandTypeOpenWorldSupplyOrderDispatch,
+		CityCommandTypeOpenWorldSupplyOrderDeliver,
+		CityCommandTypeOpenWorldSupplyOrderCancel,
+		CityCommandTypeOpenWorldSupplyOrderFail,
 		CityCommandTypeOpenWorldActorCreate,
 		CityCommandTypeOpenWorldActorActivityPerform,
 		CityCommandTypeOpenWorldActorRoleTransition,
@@ -1255,7 +1520,12 @@ func normalizeCityCommand(commandType string, rawPayload json.RawMessage, expect
 		CityCommandTypeOpenWorldPortalStateSet,
 		CityCommandTypeOpenWorldPortalAccessSet,
 		CityCommandTypeOpenWorldActorNavigationSet,
-		CityCommandTypeOpenWorldActorNavigationCancel:
+		CityCommandTypeOpenWorldActorNavigationCancel,
+		CityCommandTypeOpenWorldActorServiceRequest,
+		CityCommandTypeOpenWorldActorMobilityRequest,
+		CityCommandTypeOpenWorldCommuteAssignmentRebind,
+		CityCommandTypeOpenWorldCommuteAssignmentSetState,
+		CityCommandTypeOpenWorldInfrastructureAssetTransition:
 		openWorldPayload, _, openWorldErr := normalizeCityOpenWorldCommand(commandType, rawPayload)
 		if openWorldErr != nil {
 			return nil, openWorldErr
@@ -1512,6 +1782,35 @@ func authorizeCityCommandSubmission(
 	if IsCitySystemAdministrator(ctx) {
 		return nil
 	}
+	if isCityOpenWorldSupplyChainCommand(commandType) {
+		return authorizeCityOpenWorldSupplyChainCommandSubmission(
+			ctx, queryer, world, userID, worldID, commandType, payload,
+		)
+	}
+	if isCityOpenWorldFreightSettlementCommand(commandType) {
+		return authorizeCityOpenWorldFreightSettlementCommandSubmission(
+			ctx, queryer, world, userID, worldID, commandType, payload,
+		)
+	}
+	if isCityOpenWorldCarrierRecoveryCommand(commandType) {
+		return authorizeCityOpenWorldCarrierRecoveryCommandSubmission(
+			ctx, queryer, world, userID, worldID, commandType, payload,
+		)
+	}
+	// V14 assignment lifecycle is an administrative world-management surface.
+	// Members may inspect only the actor-scoped projection; they must never
+	// enqueue a reassignment, suspension, or resumption for another actor.
+	if isCityOpenWorldCommuteLifecycleCommand(commandType) {
+		return ErrCityPermissionDenied
+	}
+	// V20 infrastructure changes are a world-owner management surface. The
+	// reducer repeats the active-owner check when executing the command.
+	if isCityOpenWorldInfrastructureCommand(commandType) {
+		if world.memberRole == CityMemberRoleOwner {
+			return nil
+		}
+		return ErrCityPermissionDenied
+	}
 	if isCityOpenWorldRuntimeCommand(commandType) {
 		return authorizeCityOpenWorldRuntimeCommandSubmission(ctx, queryer, userID, worldID, commandType, payload)
 	}
@@ -1585,6 +1884,98 @@ SELECT EXISTS (
 	return nil
 }
 
+// authorizeCityOpenWorldSupplyChainCommandSubmission keeps F10.0's economic
+// commands scoped to a participant firm.  A normal member may never operate
+// the municipal counterparty merely because its node code is discoverable;
+// world owners retain the existing management authority, and system admins
+// were already admitted by the outer authorization fast path.
+func authorizeCityOpenWorldSupplyChainCommandSubmission(
+	ctx context.Context,
+	queryer citySQLQueryer,
+	world *lockedCityWorld,
+	userID, worldID int64,
+	commandType string,
+	payload json.RawMessage,
+) error {
+	if world == nil || userID <= 0 || worldID <= 0 {
+		return ErrCityPermissionDenied
+	}
+	if world.memberRole == CityMemberRoleOwner {
+		return nil
+	}
+	ownedNode := func(nodeCode string) (bool, error) {
+		var allowed bool
+		err := queryer.QueryRowContext(ctx, `
+SELECT EXISTS (
+    SELECT 1
+    FROM city_open_world_supply_chain_nodes node
+    JOIN city_economic_entities firm
+      ON firm.id = node.firm_entity_id AND firm.world_id = node.world_id
+    WHERE node.world_id = $1 AND node.code = $2 AND node.state = 'active'
+      AND firm.entity_type = 'firm' AND firm.status = 'active'
+      AND firm.owner_user_id = $3
+)`, worldID, nodeCode, userID).Scan(&allowed)
+		if err != nil {
+			return false, fmt.Errorf("authorize V15 supply-chain node ownership: %w", err)
+		}
+		return allowed, nil
+	}
+	switch commandType {
+	case CityCommandTypeOpenWorldSupplyOrderCreate:
+		var value cityOpenWorldSupplyChainOrderCreatePayload
+		if err := json.Unmarshal(payload, &value); err != nil {
+			return ErrCityInvalidInput.WithCause(err)
+		}
+		allowed, err := ownedNode(value.BuyerNodeCode)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return ErrCityPermissionDenied
+		}
+		return nil
+	case CityCommandTypeOpenWorldSupplyOrderAccept,
+		CityCommandTypeOpenWorldSupplyOrderDispatch,
+		CityCommandTypeOpenWorldSupplyOrderDeliver,
+		CityCommandTypeOpenWorldSupplyOrderCancel,
+		CityCommandTypeOpenWorldSupplyOrderFail:
+		var value cityOpenWorldSupplyChainOrderActionPayload
+		if err := json.Unmarshal(payload, &value); err != nil {
+			return ErrCityInvalidInput.WithCause(err)
+		}
+		var buyerNodeCode, sellerNodeCode string
+		err := queryer.QueryRowContext(ctx, `
+SELECT buyer_node_code, seller_node_code
+FROM city_open_world_supply_chain_orders
+WHERE world_id = $1 AND code = $2`, worldID, value.OrderCode).Scan(&buyerNodeCode, &sellerNodeCode)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrCityPermissionDenied
+		}
+		if err != nil {
+			return fmt.Errorf("authorize V15 supply-chain order ownership: %w", err)
+		}
+		buyerOwned, err := ownedNode(buyerNodeCode)
+		if err != nil {
+			return err
+		}
+		sellerOwned, err := ownedNode(sellerNodeCode)
+		if err != nil {
+			return err
+		}
+		allowed := buyerOwned || sellerOwned
+		if commandType == CityCommandTypeOpenWorldSupplyOrderAccept ||
+			commandType == CityCommandTypeOpenWorldSupplyOrderDispatch {
+			allowed = sellerOwned
+		}
+		if !allowed {
+			return ErrCityPermissionDenied
+		}
+		return nil
+	default:
+		return ErrCityPermissionDenied
+	}
+}
+
 // authorizeCityOpenWorldRuntimeCommandSubmission mirrors the reducer's
 // ownership/grant check at enqueue time. The older F7 actor tables cannot be
 // reused here: V4/V5 actors, control grants, and locations deliberately live
@@ -1646,6 +2037,18 @@ SELECT EXISTS (
 		actorCode = value.ActorCode
 	case CityCommandTypeOpenWorldActorNavigationCancel:
 		var value cityOpenWorldActorNavigationCancelPayload
+		if err := json.Unmarshal(payload, &value); err != nil {
+			return ErrCityInvalidInput.WithCause(err)
+		}
+		actorCode = value.ActorCode
+	case CityCommandTypeOpenWorldActorServiceRequest:
+		var value cityOpenWorldActorServiceRequestPayload
+		if err := json.Unmarshal(payload, &value); err != nil {
+			return ErrCityInvalidInput.WithCause(err)
+		}
+		actorCode = value.ActorCode
+	case CityCommandTypeOpenWorldActorMobilityRequest:
+		var value cityOpenWorldActorMobilityRequestPayload
 		if err := json.Unmarshal(payload, &value); err != nil {
 			return ErrCityInvalidInput.WithCause(err)
 		}
@@ -1940,6 +2343,10 @@ ORDER BY c.sequence ASC`, tick.WorldID, tick.Tick)
 	if err != nil {
 		return nil, err
 	}
+	supplyChainFacts, err := loadCityOpenWorldSupplyChainFactsForTick(ctx, queryer, tick.WorldID, tick.Tick)
+	if err != nil {
+		return nil, err
+	}
 	serviceFacts, serviceAllocations, serviceSettlements, err := loadCityServiceResultsForTick(
 		ctx, queryer, tick.WorldID, tick.Tick,
 	)
@@ -1998,6 +2405,7 @@ ORDER BY e.sequence ASC`, tick.WorldID, tick.Tick)
 		OpenWorldRuntimeFacts:   openWorldRuntimeFacts,
 		OpenWorldRuntimeEffects: openWorldRuntimeEffects,
 		OpenWorldRuleCases:      openWorldRuleCases,
+		SupplyChainFacts:        supplyChainFacts,
 		WorldEffectOperations:   worldEffectOperations,
 		WorldRuleCases:          worldRuleCases,
 		ServiceFacts:            serviceFacts,
@@ -2116,32 +2524,38 @@ func writeCityHashInt64(writer cityHashWriter, value int64) {
 }
 
 type cityHashState struct {
-	Name               string                           `json:"name"`
-	Status             string                           `json:"status"`
-	SimulationVersion  string                           `json:"simulation_version"`
-	Seed               int64                            `json:"seed"`
-	CurrentTick        int64                            `json:"current_tick"`
-	SimulatedAt        string                           `json:"simulated_at"`
-	SpeedMilli         int64                            `json:"speed_milli"`
-	Timezone           string                           `json:"timezone"`
-	Settings           json.RawMessage                  `json:"settings"`
-	MonetaryUnits      []cityHashMonetaryUnit           `json:"monetary_units"`
-	AccountTemplates   []cityHashAccountTemplate        `json:"account_templates"`
-	Entities           []cityHashEntity                 `json:"entities"`
-	Accounts           []cityHashAccount                `json:"accounts"`
-	Physical           cityPhysicalHashState            `json:"physical"`
-	Markets            cityMarketHashState              `json:"markets"`
-	Demography         cityDemographyHashState          `json:"demography"`
-	OpenWorld          *cityOpenWorldHashState          `json:"open_world,omitempty"`
-	Spatial            *citySpatialHashState            `json:"spatial,omitempty"`
-	Land               *cityLandHashState               `json:"land,omitempty"`
-	Development        *cityDevelopmentHashState        `json:"development,omitempty"`
-	EnterpriseLocation *cityEnterpriseLocationHashState `json:"enterprise_location,omitempty"`
-	WorldRuntime       *worldRuntimeHashState           `json:"world_runtime,omitempty"`
-	OpenWorldRuntime   *cityOpenWorldRuntimeHashState   `json:"open_world_runtime,omitempty"`
-	PublicServices     *cityPublicServiceHashState      `json:"public_services,omitempty"`
-	FacilityLifecycle  *cityFacilityLifecycleHashState  `json:"facility_lifecycle,omitempty"`
-	PhysicalNetworks   *cityPhysicalNetworkHashState    `json:"physical_networks,omitempty"`
+	Name                  string                              `json:"name"`
+	Status                string                              `json:"status"`
+	SimulationVersion     string                              `json:"simulation_version"`
+	Seed                  int64                               `json:"seed"`
+	CurrentTick           int64                               `json:"current_tick"`
+	SimulatedAt           string                              `json:"simulated_at"`
+	SpeedMilli            int64                               `json:"speed_milli"`
+	Timezone              string                              `json:"timezone"`
+	Settings              json.RawMessage                     `json:"settings"`
+	MonetaryUnits         []cityHashMonetaryUnit              `json:"monetary_units"`
+	AccountTemplates      []cityHashAccountTemplate           `json:"account_templates"`
+	Entities              []cityHashEntity                    `json:"entities"`
+	Accounts              []cityHashAccount                   `json:"accounts"`
+	Physical              cityPhysicalHashState               `json:"physical"`
+	Markets               cityMarketHashState                 `json:"markets"`
+	Demography            cityDemographyHashState             `json:"demography"`
+	OpenWorld             *cityOpenWorldHashState             `json:"open_world,omitempty"`
+	Spatial               *citySpatialHashState               `json:"spatial,omitempty"`
+	Land                  *cityLandHashState                  `json:"land,omitempty"`
+	Development           *cityDevelopmentHashState           `json:"development,omitempty"`
+	EnterpriseLocation    *cityEnterpriseLocationHashState    `json:"enterprise_location,omitempty"`
+	WorldRuntime          *worldRuntimeHashState              `json:"world_runtime,omitempty"`
+	OpenWorldRuntime      *cityOpenWorldRuntimeHashState      `json:"open_world_runtime,omitempty"`
+	Realtime              *cityRealtimeHashState              `json:"realtime,omitempty"`
+	RealtimeSpatial       *cityRealtimeSpatialHashState       `json:"realtime_spatial,omitempty"`
+	RealtimeActors        *cityRealtimeActorHashState         `json:"realtime_actors,omitempty"`
+	RealtimeAgents        *cityRealtimeAgentHashState         `json:"realtime_agents,omitempty"`
+	RealtimeCharacterLife *cityRealtimeCharacterLifeHashState `json:"realtime_character_life,omitempty"`
+	VersionVector         *CityWorldVersionVector             `json:"version_vector,omitempty"`
+	PublicServices        *cityPublicServiceHashState         `json:"public_services,omitempty"`
+	FacilityLifecycle     *cityFacilityLifecycleHashState     `json:"facility_lifecycle,omitempty"`
+	PhysicalNetworks      *cityPhysicalNetworkHashState       `json:"physical_networks,omitempty"`
 }
 
 type cityHashMonetaryUnit struct {
@@ -2310,6 +2724,30 @@ ORDER BY e.entity_type ASC, e.code ASC, u.code ASC, t.code ASC`, worldID)
 	if err != nil {
 		return state, err
 	}
+	if cityEngineIsRealtime(state.SimulationVersion) {
+		state.Realtime, err = loadCityRealtimeHashState(ctx, queryer, worldID)
+		if err != nil {
+			return state, err
+		}
+	}
+	if cityEngineSupportsRealtimeStaticWorldgen(state.SimulationVersion) {
+		state.RealtimeSpatial, err = loadCityRealtimeSpatialHashState(ctx, queryer, worldID)
+		if err != nil {
+			return state, err
+		}
+		state.RealtimeActors, err = loadCityRealtimeActorHashState(ctx, queryer, worldID)
+		if err != nil {
+			return state, err
+		}
+		state.RealtimeAgents, err = loadCityRealtimeAgentHashState(ctx, queryer, worldID)
+		if err != nil {
+			return state, err
+		}
+		state.RealtimeCharacterLife, err = loadCityRealtimeCharacterLifeHashState(ctx, queryer, worldID)
+		if err != nil {
+			return state, err
+		}
+	}
 	if cityEngineSupportsOpenWorld(state.SimulationVersion) {
 		state.OpenWorld, err = loadCityOpenWorldHashState(ctx, queryer, worldID)
 		if err != nil {
@@ -2318,6 +2756,12 @@ ORDER BY e.entity_type ASC, e.code ASC, u.code ASC, t.code ASC`, worldID)
 	}
 	if cityEngineSupportsOpenWorldRuntime(state.SimulationVersion) {
 		state.OpenWorldRuntime, err = loadCityOpenWorldRuntimeHashState(ctx, queryer, worldID)
+		if err != nil {
+			return state, err
+		}
+	}
+	if cityEngineSupportsWorldVersionVector(state.SimulationVersion) {
+		state.VersionVector, err = loadCityWorldVersionVector(ctx, queryer, worldID)
 		if err != nil {
 			return state, err
 		}

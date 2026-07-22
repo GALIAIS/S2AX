@@ -3,8 +3,6 @@ import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import type { ClassicOvermapScene } from '../projection'
 
-vi.mock('pixi.js/unsafe-eval', () => ({}))
-
 vi.mock('pixi.js', () => {
   class MockDisplayObject {
     destroy = vi.fn()
@@ -29,7 +27,7 @@ vi.mock('pixi.js', () => {
     stroke(): this { return this }
   }
 
-  class BitmapText extends MockDisplayObject {
+  class Text extends MockDisplayObject {
     anchor = { set: vi.fn() }
     position = { set: vi.fn() }
   }
@@ -45,10 +43,9 @@ vi.mock('pixi.js', () => {
 
   return {
     Application,
-    BitmapFont: { install: vi.fn(), uninstall: vi.fn() },
-    BitmapText,
     Container,
-    Graphics
+    Graphics,
+    Text
   }
 })
 

@@ -760,6 +760,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring },
     { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true },
     { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, hideInSimpleMode: true },
+    { path: '/admin/city/visual-packs', label: t('nav.cityVisualPacks'), icon: BatchImageIcon, hideInSimpleMode: true, featureFlag: flagCitySimulation },
     { path: '/admin/currencies', label: t('nav.virtualCurrencies'), icon: CreditCardIcon, hideInSimpleMode: true },
     { path: '/admin/currency-integrations', label: t('nav.virtualCurrencyIntegrations'), icon: KeyIcon, hideInSimpleMode: true },
     {

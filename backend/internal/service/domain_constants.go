@@ -143,6 +143,9 @@ const (
 	SettingKeyAffiliateAdminRechargeEnabled    = "affiliate_admin_recharge_enabled"    // 管理员充值是否产生返利
 	SettingKeyRiskControlEnabled               = "risk_control_enabled"                // 是否启用风控中心入口与审计链路
 	SettingKeyCitySimulationEnabled            = "city_simulation_enabled"             // 是否开放城市模拟入口与 API
+	SettingKeyCityPixelRendererEnabled         = "city_pixel_renderer_enabled"         // 是否开放共享实时像素世界渲染 API
+	SettingKeyCityVisualPackPublishEnabled     = "city_visual_pack_publish_enabled"    // 是否允许管理员发布新的城市视觉包
+	SettingKeyCityRealtimeSchedulerEnabled     = "city_realtime_scheduler_enabled"     // 是否允许 realtime scheduler 领取生产 world 的 Frame 租约
 	SettingKeyContentModerationConfig          = "content_moderation_config"           // 内容审计配置（JSON）
 	SettingKeyCyberSessionBlockEnabled         = "cyber_session_block_enabled"         // cyber 命中后会话级自动屏蔽总开关(默认关)
 	SettingKeyCyberSessionBlockTTLSeconds      = "cyber_session_block_ttl_seconds"     // 会话屏蔽 TTL 秒数(默认 3600)

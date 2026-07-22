@@ -71,6 +71,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		idempotencyCleanupSvc,
 		nil, // virtualCurrencyHoldCleanup
 		nil, // cityTickScheduler
+		nil, // cityRealtimeScheduler
 		&service.BatchImageCleanupService{},
 		nil, // batchImageWorker
 		pricingSvc,

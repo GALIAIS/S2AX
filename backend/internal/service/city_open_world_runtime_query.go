@@ -285,6 +285,137 @@ FROM city_open_world_runtime_profiles WHERE world_id = $1`, worldID).Scan(
 		}
 		state.Social = social
 	}
+	var simulationVersion string
+	if err := queryer.QueryRowContext(ctx, `
+SELECT simulation_version FROM city_worlds WHERE id = $1`, worldID).Scan(&simulationVersion); err != nil {
+		return nil, fmt.Errorf("load open-world runtime simulation version: %w", err)
+	}
+	if cityEngineSupportsOpenWorldServiceCoordination(simulationVersion) {
+		services, serviceErr := loadCityOpenWorldServiceState(ctx, queryer, worldID)
+		if serviceErr != nil {
+			return nil, serviceErr
+		}
+		state.Services = services
+	}
+	if cityEngineSupportsOpenWorldImpactBridge(simulationVersion) {
+		impacts, impactErr := loadCityOpenWorldImpactState(ctx, queryer, worldID)
+		if impactErr != nil {
+			return nil, impactErr
+		}
+		state.Impacts = impacts
+	}
+	if cityEngineSupportsOpenWorldMobility(simulationVersion) {
+		mobility, mobilityErr := loadCityOpenWorldMobilityState(ctx, queryer, worldID)
+		if mobilityErr != nil {
+			return nil, mobilityErr
+		}
+		state.Mobility = mobility
+	}
+	if cityEngineSupportsOpenWorldArrivalBridge(simulationVersion) {
+		arrivals, arrivalErr := loadCityOpenWorldMobilityArrivalState(ctx, queryer, worldID)
+		if arrivalErr != nil {
+			return nil, arrivalErr
+		}
+		state.Arrivals = arrivals
+	}
+	if cityEngineSupportsOpenWorldMobilityOD(simulationVersion) {
+		od, odErr := loadCityOpenWorldMobilityODState(ctx, queryer, worldID)
+		if odErr != nil {
+			return nil, odErr
+		}
+		state.OD = od
+	}
+	if cityEngineSupportsOpenWorldCommuteBindings(simulationVersion) {
+		commutes, commuteErr := loadCityOpenWorldCommuteState(ctx, queryer, worldID)
+		if commuteErr != nil {
+			return nil, commuteErr
+		}
+		state.Commutes = commutes
+	}
+	if cityEngineSupportsOpenWorldCommuteSources(simulationVersion) {
+		commuteSources, sourceErr := loadCityOpenWorldCommuteSourceState(ctx, queryer, worldID)
+		if sourceErr != nil {
+			return nil, sourceErr
+		}
+		state.CommuteSources = commuteSources
+	}
+	if cityEngineSupportsOpenWorldCommuteLifecycle(simulationVersion) {
+		lifecycle, lifecycleErr := loadCityOpenWorldCommuteLifecycleState(ctx, queryer, worldID)
+		if lifecycleErr != nil {
+			return nil, lifecycleErr
+		}
+		state.CommuteLifecycle = lifecycle
+	}
+	if cityEngineSupportsOpenWorldSupplyChain(simulationVersion) {
+		supplyChain, supplyChainErr := loadCityOpenWorldSupplyChainState(ctx, queryer, worldID)
+		if supplyChainErr != nil {
+			return nil, supplyChainErr
+		}
+		state.SupplyChain = supplyChain
+	}
+	if cityEngineSupportsOpenWorldEnterpriseFreight(simulationVersion) {
+		freight, freightErr := loadCityOpenWorldEnterpriseFreightState(ctx, queryer, worldID)
+		if freightErr != nil {
+			return nil, freightErr
+		}
+		state.EnterpriseFreight = freight
+	}
+	if cityEngineSupportsOpenWorldEnterpriseFreightReceipts(simulationVersion) {
+		receipts, receiptErr := loadCityOpenWorldEnterpriseFreightReceiptState(ctx, queryer, worldID)
+		if receiptErr != nil {
+			return nil, receiptErr
+		}
+		state.EnterpriseFreightReceipts = receipts
+	}
+	if cityEngineSupportsOpenWorldFreightBatches(simulationVersion) {
+		batches, batchErr := loadCityOpenWorldFreightBatchState(ctx, queryer, worldID)
+		if batchErr != nil {
+			return nil, batchErr
+		}
+		state.EnterpriseFreightBatches = batches
+	}
+	if cityEngineSupportsOpenWorldSpatialNetwork(simulationVersion) {
+		network, networkErr := loadCityOpenWorldSpatialNetworkState(ctx, queryer, worldID)
+		if networkErr != nil {
+			return nil, networkErr
+		}
+		state.SpatialNetwork = network
+	}
+	if cityEngineSupportsOpenWorldInfrastructure(simulationVersion) {
+		infrastructure, infrastructureErr := loadCityOpenWorldInfrastructureState(ctx, queryer, worldID)
+		if infrastructureErr != nil {
+			return nil, infrastructureErr
+		}
+		state.Infrastructure = infrastructure
+	}
+	if cityEngineSupportsOpenWorldEffectiveCapacity(simulationVersion) {
+		effectiveCapacity, effectiveCapacityErr := loadCityOpenWorldEffectiveCapacityState(ctx, queryer, worldID)
+		if effectiveCapacityErr != nil {
+			return nil, effectiveCapacityErr
+		}
+		state.EffectiveCapacity = effectiveCapacity
+	}
+	if cityEngineSupportsOpenWorldFreightSettlements(simulationVersion) {
+		freightSettlements, settlementErr := loadCityOpenWorldFreightSettlementState(ctx, queryer, worldID)
+		if settlementErr != nil {
+			return nil, settlementErr
+		}
+		state.FreightSettlements = freightSettlements
+	}
+	if cityEngineSupportsOpenWorldCarrierRecovery(simulationVersion) {
+		carrierRecovery, recoveryErr := loadCityOpenWorldCarrierRecoveryState(ctx, queryer, worldID)
+		if recoveryErr != nil {
+			return nil, recoveryErr
+		}
+		state.CarrierRecovery = carrierRecovery
+	}
+	if cityEngineSupportsOpenWorldCarrierCommerce(simulationVersion) {
+		carrierCommerce, commerceErr := loadCityOpenWorldCarrierCommerceState(ctx, queryer, worldID)
+		if commerceErr != nil {
+			return nil, commerceErr
+		}
+		state.CarrierCommerce = carrierCommerce
+	}
 	return state, nil
 }
 

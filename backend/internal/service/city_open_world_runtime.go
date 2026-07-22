@@ -31,26 +31,43 @@ const (
 	CityCommandTypeOpenWorldPortalAccessSet       = "open_world.portal.access.set"
 	CityCommandTypeOpenWorldActorNavigationSet    = "open_world.actor.navigation.set"
 	CityCommandTypeOpenWorldActorNavigationCancel = "open_world.actor.navigation.cancel"
+	CityCommandTypeOpenWorldActorMobilityRequest  = "open_world.actor.mobility.request"
+	// V14 lifecycle commands are administrator-only. They alter the current
+	// effective assignment through fact-backed successor epochs/transitions;
+	// V12 bindings and V13 sources are never mutated.
+	CityCommandTypeOpenWorldCommuteAssignmentRebind   = "open_world.commute.assignment.rebind"
+	CityCommandTypeOpenWorldCommuteAssignmentSetState = "open_world.commute.assignment.state.set"
+	// V20 mutates only the generic infrastructure asset lifecycle. Its
+	// capacity state is intentionally not consumed by V9 routing yet.
+	CityCommandTypeOpenWorldInfrastructureAssetTransition = "open_world.infrastructure.asset.transition"
 
-	CityOpenWorldRuntimeFactActorCreated         = "actor.created"
-	CityOpenWorldRuntimeFactActivityPerformed    = "actor.activity.performed"
-	CityOpenWorldRuntimeFactRoleTransitioned     = "actor.role.transitioned"
-	CityOpenWorldRuntimeFactLocationMoved        = "actor.location.moved"
-	CityOpenWorldRuntimeFactPortalTraversed      = "actor.portal.traversed"
-	CityOpenWorldRuntimeFactControlGranted       = "actor.control.granted"
-	CityOpenWorldRuntimeFactControlRevoked       = "actor.control.revoked"
-	CityOpenWorldRuntimeFactPortalStateChanged   = "portal.state.changed"
-	CityOpenWorldRuntimeFactPortalAccessChanged  = "portal.access.changed"
-	CityOpenWorldRuntimeFactRuleCaseOpened       = "rule.case.opened"
-	CityOpenWorldRuntimeFactRuleConsequence      = "rule.consequence.applied"
-	CityOpenWorldRuntimeFactStatusExpired        = "actor.status.expired"
-	CityOpenWorldRuntimeFactNavigationCreated    = "actor.navigation.intent.created"
-	CityOpenWorldRuntimeFactNavigationReplaced   = "actor.navigation.intent.replaced"
-	CityOpenWorldRuntimeFactNavigationCancelled  = "actor.navigation.intent.cancelled"
-	CityOpenWorldRuntimeFactNavigationProgressed = "actor.navigation.intent.progressed"
-	CityOpenWorldRuntimeFactNavigationArrived    = "actor.navigation.intent.arrived"
-	CityOpenWorldRuntimeFactNavigationBlocked    = "actor.navigation.intent.blocked"
-	CityOpenWorldRuntimeFactNavigationFailed     = "actor.navigation.intent.failed"
+	CityOpenWorldRuntimeFactActorCreated           = "actor.created"
+	CityOpenWorldRuntimeFactActivityPerformed      = "actor.activity.performed"
+	CityOpenWorldRuntimeFactRoleTransitioned       = "actor.role.transitioned"
+	CityOpenWorldRuntimeFactLocationMoved          = "actor.location.moved"
+	CityOpenWorldRuntimeFactPortalTraversed        = "actor.portal.traversed"
+	CityOpenWorldRuntimeFactControlGranted         = "actor.control.granted"
+	CityOpenWorldRuntimeFactControlRevoked         = "actor.control.revoked"
+	CityOpenWorldRuntimeFactPortalStateChanged     = "portal.state.changed"
+	CityOpenWorldRuntimeFactPortalAccessChanged    = "portal.access.changed"
+	CityOpenWorldRuntimeFactRuleCaseOpened         = "rule.case.opened"
+	CityOpenWorldRuntimeFactRuleConsequence        = "rule.consequence.applied"
+	CityOpenWorldRuntimeFactStatusExpired          = "actor.status.expired"
+	CityOpenWorldRuntimeFactNavigationCreated      = "actor.navigation.intent.created"
+	CityOpenWorldRuntimeFactNavigationReplaced     = "actor.navigation.intent.replaced"
+	CityOpenWorldRuntimeFactNavigationCancelled    = "actor.navigation.intent.cancelled"
+	CityOpenWorldRuntimeFactNavigationProgressed   = "actor.navigation.intent.progressed"
+	CityOpenWorldRuntimeFactNavigationArrived      = "actor.navigation.intent.arrived"
+	CityOpenWorldRuntimeFactNavigationBlocked      = "actor.navigation.intent.blocked"
+	CityOpenWorldRuntimeFactNavigationFailed       = "actor.navigation.intent.failed"
+	CityOpenWorldRuntimeFactMobilityRequested      = "mobility.requested"
+	CityOpenWorldRuntimeFactMobilityScheduled      = "mobility.scheduled"
+	CityOpenWorldRuntimeFactMobilityCompleted      = "mobility.completed"
+	CityOpenWorldRuntimeFactMobilityExpired        = "mobility.expired"
+	CityOpenWorldRuntimeFactMobilityArrivalPending = "mobility.arrival.pending"
+	CityOpenWorldRuntimeFactMobilityArrivalBlocked = "mobility.arrival.blocked"
+	CityOpenWorldRuntimeFactMobilityArrivalLanded  = "mobility.arrival.landed"
+	CityOpenWorldRuntimeFactMobilityArrivalFailed  = "mobility.arrival.failed"
 
 	cityOpenWorldRuntimeID                     = "sub2api-city-open-world-runtime"
 	cityOpenWorldRuntimeVersion                = "1.0.0"
@@ -270,6 +287,72 @@ type CityOpenWorldRuntimeState struct {
 	// independent open-world runtime state makes the scenario/facility/NPC
 	// baseline part of the same canonical snapshot without leaking into F7.
 	Social *CityOpenWorldSocialRuntimeState `json:"social,omitempty"`
+	// Services is present only for the V7 contract. It is deliberately a
+	// sibling of Social: service dispatch consumes the V5 facility projection,
+	// but owns a separate, fact-backed access and queue state machine.
+	Services *CityOpenWorldServiceState `json:"services,omitempty"`
+	// Impacts is present only for the V8 contract. It bridges immutable service
+	// responses into delayed, explicit domain-metric applications without
+	// letting the service reducer mutate another domain in the response tick.
+	Impacts *CityOpenWorldImpactState `json:"impacts,omitempty"`
+	// Mobility is present only for V9. It carries the aggregate hub graph,
+	// route demand, capacity allocation, and route history, but never owns the
+	// V5 cell-level actor location projection.
+	Mobility *CityOpenWorldMobilityState `json:"mobility,omitempty"`
+	// Arrivals is V10's explicit boundary between a completed V9 aggregate
+	// route and a validated V5 local surface landing. It never rewrites the
+	// V9 route itself and retains its own fact chain for audit/recovery.
+	Arrivals *CityOpenWorldMobilityArrivalState `json:"arrivals,omitempty"`
+	// OD is V11's versioned source adapter and closed-cycle metric ledger. It
+	// creates V9-compatible demands but never owns routes, allocations, or V10
+	// local arrival transitions.
+	OD *CityOpenWorldMobilityODState `json:"od,omitempty"`
+	// Commutes is V12's immutable residence/employment binding baseline. It
+	// holds no live travel state; future adapters must still go through V9/V10.
+	Commutes *CityOpenWorldCommuteState `json:"commutes,omitempty"`
+	// CommuteSources is V13's fact-backed dual-direction source lifecycle.
+	// It consumes V12 bindings without owning V9 routes or V10 arrivals.
+	CommuteSources *CityOpenWorldCommuteSourceState `json:"commute_sources,omitempty"`
+	// CommuteLifecycle is V14's successor-epoch projection. It retains V12
+	// bindings and V13 source history as immutable inputs while allowing
+	// administrator-authorized rebinds and pauses through append-only facts.
+	CommuteLifecycle *CityOpenWorldCommuteLifecycleState `json:"commute_lifecycle,omitempty"`
+	// SupplyChain is F10.0's firm/facility/district order lifecycle. It owns
+	// reservations, settlement, and delivery evidence without modifying sealed
+	// V5–V14 social or commute projections.
+	SupplyChain *CityOpenWorldSupplyChainState `json:"supply_chain,omitempty"`
+	// EnterpriseFreight is V16's narrow dispatch-to-network adapter. It proves
+	// the V15 dispatch-to-V9 demand relationship without granting route
+	// completion any inventory or settlement semantics.
+	EnterpriseFreight *CityOpenWorldEnterpriseFreightState `json:"enterprise_freight,omitempty"`
+	// EnterpriseFreightReceipts is V17's fact-backed custody and receipt gate.
+	// It observes V16 transport evidence and V15 delivery evidence but never
+	// becomes a second mutable inventory ledger.
+	EnterpriseFreightReceipts *CityOpenWorldEnterpriseFreightReceiptState `json:"enterprise_freight_receipts,omitempty"`
+	// EnterpriseFreightBatches is V18's overflow-only consignment planner. It
+	// proves all capacity-bounded arrivals before V15's one atomic delivery.
+	EnterpriseFreightBatches *CityOpenWorldFreightBatchState `json:"enterprise_freight_batches,omitempty"`
+	// SpatialNetwork is V19's frozen public identity layer over V9 hubs and
+	// edges. It intentionally contains no live routing or mutable capacity.
+	SpatialNetwork *CityOpenWorldSpatialNetworkState `json:"spatial_network,omitempty"`
+	// Infrastructure is V20's generic asset lifecycle over V19 identities.
+	// It records capacity/state facts only; a later engine version owns any
+	// scheduler consumption of those values.
+	Infrastructure *CityOpenWorldInfrastructureState `json:"infrastructure,omitempty"`
+	// EffectiveCapacity is V21's fact-backed proof that new V9 reservations
+	// consumed the matching V20 corridor-segment capacity. It stores admission
+	// evidence only; current capacity remains derived from V9/V19/V20 state.
+	EffectiveCapacity *CityOpenWorldEffectiveCapacityState `json:"effective_capacity,omitempty"`
+	// FreightSettlements is V22's partial freight outcome layer. It never
+	// rewrites prior V15 atomic deliveries; only post-baseline V17/V18 sources
+	// may reach the V15 settled successor through this projection.
+	FreightSettlements *CityOpenWorldFreightSettlementState `json:"freight_settlements,omitempty"`
+	// CarrierRecovery is V23's separate manual reserve and carrier-claim
+	// closure ledger. It consumes V22 claims but never rewrites V22 receipts.
+	CarrierRecovery *CityOpenWorldCarrierRecoveryState `json:"carrier_recovery,omitempty"`
+	// CarrierCommerce is V24's append-only contract and cash-fee projection.
+	// It is deliberately separate from V22 custody and V23 recovery evidence.
+	CarrierCommerce *CityOpenWorldCarrierCommerceState `json:"carrier_commerce,omitempty"`
 }
 
 type cityOpenWorldRuntimeHashState = CityOpenWorldRuntimeState
@@ -353,6 +436,24 @@ type cityOpenWorldActorNavigationCancelPayload struct {
 	ActorCode string `json:"actor_code"`
 }
 
+// cityOpenWorldCommuteAssignmentRebindPayload selects the successor epoch's
+// effective facilities. Hubs are resolved from the sealed V9 facility hub
+// topology so callers cannot manufacture arbitrary route endpoints.
+type cityOpenWorldCommuteAssignmentRebindPayload struct {
+	ActorCode          string `json:"actor_code"`
+	EmploymentRoleCode string `json:"employment_role_code"`
+	HomeFacilityCode   string `json:"home_facility_code"`
+	WorkFacilityCode   string `json:"work_facility_code"`
+	OutboundPhase      *int64 `json:"outbound_phase,omitempty"`
+	ReasonCode         string `json:"reason_code,omitempty"`
+}
+
+type cityOpenWorldCommuteAssignmentSetStatePayload struct {
+	ActorCode  string `json:"actor_code"`
+	State      string `json:"state"`
+	ReasonCode string `json:"reason_code,omitempty"`
+}
+
 func isCityOpenWorldRuntimeCommand(commandType string) bool {
 	switch commandType {
 	case CityCommandTypeOpenWorldActorCreate,
@@ -365,7 +466,12 @@ func isCityOpenWorldRuntimeCommand(commandType string) bool {
 		CityCommandTypeOpenWorldPortalStateSet,
 		CityCommandTypeOpenWorldPortalAccessSet,
 		CityCommandTypeOpenWorldActorNavigationSet,
-		CityCommandTypeOpenWorldActorNavigationCancel:
+		CityCommandTypeOpenWorldActorNavigationCancel,
+		CityCommandTypeOpenWorldActorServiceRequest,
+		CityCommandTypeOpenWorldActorMobilityRequest,
+		CityCommandTypeOpenWorldCommuteAssignmentRebind,
+		CityCommandTypeOpenWorldCommuteAssignmentSetState,
+		CityCommandTypeOpenWorldInfrastructureAssetTransition:
 		return true
 	default:
 		return false
@@ -375,6 +481,11 @@ func isCityOpenWorldRuntimeCommand(commandType string) bool {
 func isCityOpenWorldSocialRuntimeCommand(commandType string) bool {
 	return commandType == CityCommandTypeOpenWorldActorNavigationSet ||
 		commandType == CityCommandTypeOpenWorldActorNavigationCancel
+}
+
+func isCityOpenWorldCommuteLifecycleCommand(commandType string) bool {
+	return commandType == CityCommandTypeOpenWorldCommuteAssignmentRebind ||
+		commandType == CityCommandTypeOpenWorldCommuteAssignmentSetState
 }
 
 func normalizeCityOpenWorldRuntimeCommand(commandType string, rawPayload json.RawMessage) (any, bool, error) {
@@ -547,6 +658,75 @@ func normalizeCityOpenWorldRuntimeCommand(commandType string, rawPayload json.Ra
 			return nil, true, err
 		}
 		return value, true, nil
+	case CityCommandTypeOpenWorldActorServiceRequest:
+		value, err := normalizeCityOpenWorldActorServiceRequest(rawPayload)
+		if err != nil {
+			return nil, true, err
+		}
+		return value, true, nil
+	case CityCommandTypeOpenWorldActorMobilityRequest:
+		value, err := normalizeCityOpenWorldActorMobilityRequest(rawPayload)
+		if err != nil {
+			return nil, true, err
+		}
+		return value, true, nil
+	case CityCommandTypeOpenWorldCommuteAssignmentRebind:
+		var value cityOpenWorldCommuteAssignmentRebindPayload
+		if err := decodeStrictCityObject(rawPayload, &value); err != nil {
+			return nil, true, ErrCityInvalidInput.WithCause(err)
+		}
+		if err := normalizeCode(&value.ActorCode, "actor_code"); err != nil {
+			return nil, true, err
+		}
+		if err := normalizeCode(&value.EmploymentRoleCode, "employment_role_code"); err != nil {
+			return nil, true, err
+		}
+		if err := normalizeCode(&value.HomeFacilityCode, "home_facility_code"); err != nil {
+			return nil, true, err
+		}
+		if err := normalizeCode(&value.WorkFacilityCode, "work_facility_code"); err != nil {
+			return nil, true, err
+		}
+		if value.HomeFacilityCode == value.WorkFacilityCode {
+			return nil, true, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "facility_assignment"})
+		}
+		if value.OutboundPhase != nil && (*value.OutboundPhase < 0 || *value.OutboundPhase >= cityOpenWorldCommutePeriodTicks) {
+			return nil, true, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "outbound_phase"})
+		}
+		value.ReasonCode = strings.ToLower(strings.TrimSpace(value.ReasonCode))
+		if value.ReasonCode == "" {
+			value.ReasonCode = cityOpenWorldCommuteLifecycleReasonAdminRebind
+		}
+		if !worldRuntimeCodeValid(value.ReasonCode, 96) {
+			return nil, true, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "reason_code"})
+		}
+		return value, true, nil
+	case CityCommandTypeOpenWorldCommuteAssignmentSetState:
+		var value cityOpenWorldCommuteAssignmentSetStatePayload
+		if err := decodeStrictCityObject(rawPayload, &value); err != nil {
+			return nil, true, ErrCityInvalidInput.WithCause(err)
+		}
+		if err := normalizeCode(&value.ActorCode, "actor_code"); err != nil {
+			return nil, true, err
+		}
+		value.State = strings.ToLower(strings.TrimSpace(value.State))
+		if value.State != cityOpenWorldCommuteLifecycleStateActive && value.State != cityOpenWorldCommuteLifecycleStateSuspended {
+			return nil, true, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "state"})
+		}
+		value.ReasonCode = strings.ToLower(strings.TrimSpace(value.ReasonCode))
+		if value.ReasonCode == "" {
+			if value.State == cityOpenWorldCommuteLifecycleStateActive {
+				value.ReasonCode = cityOpenWorldCommuteLifecycleReasonAdminResumed
+			} else {
+				value.ReasonCode = cityOpenWorldCommuteLifecycleReasonAdminSuspended
+			}
+		}
+		if !worldRuntimeCodeValid(value.ReasonCode, 96) {
+			return nil, true, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "reason_code"})
+		}
+		return value, true, nil
+	case CityCommandTypeOpenWorldInfrastructureAssetTransition:
+		return normalizeCityOpenWorldInfrastructureCommand(rawPayload)
 	default:
 		return nil, false, nil
 	}
@@ -575,7 +755,7 @@ func builtInCityOpenWorldRuntimeDefinitionsForVersion(simulationVersion string) 
 		Kind: WorldRuntimeDefinitionActorType, Code: "npc", Version: cityOpenWorldRuntimeCatalogVersion,
 		Hash: hex.EncodeToString(sum[:]), Visibility: "public", Payload: npcPayload,
 	})
-	if simulationVersion == CitySimulationVersionOpenWorldV5 {
+	if cityEngineSupportsOpenWorldSocialRuntime(simulationVersion) {
 		socialDefinitions, socialErr := builtInCityOpenWorldSocialRuntimeDefinitions()
 		if socialErr != nil {
 			return nil, "", socialErr
@@ -617,7 +797,8 @@ func cityOpenWorldRuntimeProfileIdentity(simulationVersion string) (runtimeID, r
 	switch simulationVersion {
 	case CitySimulationVersionOpenWorldV4:
 		return cityOpenWorldRuntimeID, cityOpenWorldRuntimeVersion, cityOpenWorldRuntimeCatalogVersion, nil
-	case CitySimulationVersionOpenWorldV5:
+	case CitySimulationVersionOpenWorldV5, CitySimulationVersionOpenWorldV6,
+		CitySimulationVersionOpenWorldV7, CitySimulationVersionOpenWorldV8, CitySimulationVersionOpenWorldV9, CitySimulationVersionOpenWorldV10, CitySimulationVersionOpenWorldV11, CitySimulationVersionOpenWorldV12, CitySimulationVersionOpenWorldV13, CitySimulationVersionOpenWorldV14, CitySimulationVersionOpenWorldV15, CitySimulationVersionOpenWorldV16, CitySimulationVersionOpenWorldV17, CitySimulationVersionOpenWorldV18, CitySimulationVersionOpenWorldV19, CitySimulationVersionOpenWorldV20, CitySimulationVersionOpenWorldV21, CitySimulationVersionOpenWorldV22, CitySimulationVersionOpenWorldV23, CitySimulationVersionOpenWorldV24:
 		return cityOpenWorldSocialRuntimeID, cityOpenWorldSocialRuntimeVersion, cityOpenWorldSocialRuntimeCatalogVersion, nil
 	default:
 		return "", "", "", ErrCitySimulationVersion.WithMetadata(map[string]string{"version": simulationVersion})

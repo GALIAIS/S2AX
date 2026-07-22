@@ -31,6 +31,8 @@ Thumbs.db
 dist/
 build/
 frontend-next/
+.next/
+frontend-next/.next/
 
 # Node modules (will be installed in container)
 frontend/node_modules/

@@ -489,6 +489,19 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/city/visual-packs',
+    name: 'AdminCityVisualPacks',
+    component: () => import('@/views/admin/CityVisualPacksView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      requiresCitySimulation: true,
+      title: 'City Visual Packs',
+      titleKey: 'admin.cityVisualPacks.title',
+      descriptionKey: 'admin.cityVisualPacks.description'
+    }
+  },
+  {
     path: '/admin/currencies',
     name: 'AdminCurrencies',
     component: () => import('@/views/admin/CurrenciesView.vue'),

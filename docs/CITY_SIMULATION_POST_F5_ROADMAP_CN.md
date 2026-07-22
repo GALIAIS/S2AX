@@ -1,10 +1,10 @@
 # 城市模拟 F5 后续基础层路线与详细设计
 
-版本：v2.4（2026-07-19）
-当前版本：`city-f8-v3`（F8.0 服务结算、F8.1 设施生命周期、F8.2 物理网络、回放恢复与操作工作台已完成）
-主线：先建设真实城市本体，再评审利率、银行信贷和股票等可选经济分支
+版本：v3.4（2026-07-21）
+当前新世界版本：`city-openworld-v24`（V3 开放世界生成、V4 Actor runtime、V5 社会运行时、V6 不可变版本向量、V7 服务协同、V8 跨域 effect、V9 聚合 mobility、V10 跨尺度到达桥接、V11 版本化自动 OD source/周期指标、V12 容量受限住宅—就业绑定、V13 双向 commute source、V14 append-only assignment lifecycle、V15 F10.0 企业订单/库存保留/交付/结算、V16 F9.2.C 企业货运 source→V9 适配、V17 custody/receipt gate、V18 overflow batch freight、V19 静态 spatial node/corridor、V20 通用可变基础设施 asset lifecycle、V21 effective-capacity admission/动态替代路径、V22 F10.3 partial freight settlement / no-receipt failure closure、V23 F10.3.1a manual carrier reserve / one-to-one claim recovery，以及 V24 F10.3.1b versioned carrier service contract / cash freight fee settlement 均已完成；`city-f8-v3` 仅为历史兼容链）
+主线：先建设真实城市本体；下一切片仅能在 V24 固定 quote 与现金支付边界之上评审报价输入、SLA、保险、在途库存与多企业生产，利率、银行信贷和股票仍是独立可选经济分支
 
-> 本文保留 F5 后实施切片的详细历史。总体架构、worldgen-v2、F8.3/F8.4 与后续顺序以《城市模拟游戏总体设计》v1.0 为准。
+> 本文保留 F5 后实施切片的详细历史。总体架构、worldgen-v2、V7–V24 与后续顺序以《城市模拟游戏总体设计》v2.4 为准。新功能必须落入 `city-openworld-v24+` 链，不能把旧 F7 固定地图重新作为默认空间底座。
 
 ## 1. 总体决策
 
@@ -270,20 +270,80 @@ F6.3 已完成以下底层闭环：
 
 ## 6. F9：交通、通勤与物流
 
-### 6.1 首版聚合网络
+### 6.1 V9.0 已完成：封存的聚合 mobility 图
 
-- 区域节点、道路/公交边和分时容量。
-- 家庭居住区到就业区的 OD 需求。
-- 企业原料和商品的区域物流需求。
-- 确定性最短广义成本和容量分配。
+- 每个 V9 world 在 genesis 或 V8→V9 暂停升级时，封存设施 hub、区域 hub 与中央 interchange；其模式、边、容量、版本和 content hash 进入 canonical state。
+- 内置 `walk`、`transit`、`freight` 三个模式；边以设施—区域 local 与区域—中心 trunk 表达，不声称是车道级网络。
+- Actor 通过 `open_world.actor.mobility.request` 提交需求；请求记录来源 hub、目的 hub、模式、目的、单位、最早出发 tick 与截止 tick，客户端不能提交路线或结算结果。
+- 调度只处理此前 tick 已接受的需求，按稳定顺序做最短路径和每边容量预约；拥堵延迟由已预约占用率以整数 milli 计算。
+- route 在到达 tick 生成完成 fact；它不会修改 Actor 坐标。需求、route、allocation 和 actor metric 都可从快照恢复并参与回放验证。
+- V9 配置、拓扑和动态投影由数据库触发器保护；路线/需求循环外键在恢复事务中延迟到 commit 校验，不放松引用完整性。
 
-### 6.2 关键输出
+### 6.2 V10 / F9.1 已完成：受验证的跨尺度到达
+
+- 仅 V10 新 demand 会在接受时封存 V5 origin；V9 completed fact 在后续 tick 变成 `mobility.arrival.pending`，不会同 tick 改写坐标或复写 V9 route。
+- 目标 Sector 由已绑定的 V2/V3 worldgen 物化，V5 surface passability 与 occupancy 选出确定性落点；缺少落点会产生有限次数的 blocked 事实，之后明确 failed。
+- V9→V10 的 arrival baseline 排除旧 demand，升级不会为旧 route 或历史世界伪造局部位置。
+
+### 6.3 V11 / F9.2.A 已完成：版本化自动 OD source 与闭合指标
+
+- genesis 或 V10→V11 暂停升级时，从 V5 的非 dormant NPC `work_facility` 封存 `npc.assigned_facility_visit` source；source code、Actor、Facility hub、模式、目的、周期、相位、版本和 metadata 全部进入 canonical state。
+- source 不伪造 home、household、企业订单或任意“常住地”。到期时读取 Actor 当时已验证的 V5 局部位置作为 origin；有 active navigation intent、尚未结束的 mobility demand、位置无效、目的 hub/模式不可用时写 `system.mobility.od.suppressed`，不偷偷改写位置或补造需求。
+- 成功时先写 `system.mobility.od.generated`，再写子事实 `mobility.requested` 并创建带 `od_source_code`/captured-origin metadata 的 V9 demand。V9 仍只在后续 tick 调度；V10 仍只在 route completed 的更后续 tick 落地。
+- 每个 24 tick 窗口在下一 tick 关闭一次，封存 automatic source 的 generated/suppressed 数和全网络 request/schedule/complete/expire、arrival、travel/congestion、peak occupancy 指标。关闭后不回写历史窗口；长期 route 的完成会出现在它实际发生的窗口。
+- profile、source、metric、fact 关系由数据库触发器和 deferred FK 保护；state 已进入 snapshot、replay、recovery、版本向量及只读 `open-world/mobility/od` API。V10→V11 只建立未来 source baseline，不重分类历史 V9/V10 行程。
+
+### 6.4 V12 / F9.2.B.0 已完成：住宅—就业绑定底座
+
+- genesis 或 V11→V12 暂停升级时，只为基线时 active、非 dormant、具有 active employment role 和有效 work Facility/hub 的 NPC 封存 `npc.residence_employment` binding。
+- valid V5 home 优先；否则在真实 active residence Facility 的容量中按 Actor/Facility 的稳定 hash 分配。无法分配时只增加 `unbound_candidate_count`，不以当前位置、工作地、household cohort 或 UI 字段伪造住宅。
+- binding 固化 home/work Facility+hubs、employment role、24 tick outbound/return phase、算法 contract 与 metadata；它不产生 mobility demand，不改写 V11 source、V9 route 或 V10 arrival。
+- profile/binding 由不可变写闸门、capacity/foundation assertion、canonical snapshot、replay、recovery、V12 version-vector catalog 和只读 `open-world/commutes` API 保护。V13 必须重新验证活跃状态、当前位置和预期 building origin，不能把 V12 historical binding 当成即时移动许可。
+
+### 6.5 V13/V14 已完成：从绑定到可演进通勤
+
+- V13 已完成家—工作/工作—家 source：它只消费 V12 binding，必须用当前已验证的 Facility Presence Domain 作为起点门槛；Actor 不在预期起点或发生冲突时写明确 suppression fact 而非传送。V11 generic source 对拥有完整 V13 pair 的 Actor 以 `superseded_by_commute_source` 保留审计而不产生重复需求。
+- V14 source lifecycle 已通过新的 assignment epoch、transition 与 source pair 处理离职、迁居、设施关闭、临时停工和管理员 rebind；它不 UPDATE 或删除 V12/V13 历史证据，且以 deferred assertion、canonical/replay/recovery 和 V13→V14 paused upgrade 保护完整性。
+- 企业订单、库存 ownership、交付与 journal 事实完整前不得引入 enterprise freight source；不能把 V5 work facility 或 V12 binding 误当企业物流订单。
+- 逐 source 输出未满足出行、旅行时间和拥堵输入；按下一周期规则供人口、企业和市场消费，不能让指标同 tick 反向改写路由。
+- 由 style profile/worldgen 内容包提供道路等级、站点、换乘与货运设施；不同城市原型不能由 reducer 内的国家分支实现。
+
+### 6.6 V16 / F9.2.C 已完成：企业货运 source→V9 适配
+
+- 只消费 V15 已 `dispatched` 的订单、冻结行快照、企业节点和 facility hub，下一 tick
+  建立一个 `system.freight.carrier` 驱动的 V9 `freight` demand；不写库存、journal、
+  V15 `delivered` 或任何钱包变化。
+- V16 原子映射的最大总量固定为 V9 冻结 freight 图最窄 local edge 的 32 cargo
+  units/tick；超过上限必须落为可审计 `suppressed` source，而不是制造永远无法
+  排程的 demand。拆单、车队与在途库存仍属于后续独立版本。
+- V9 schedule/complete/expire 只被观察为 V16 source 事实。V15 在 pending 阶段
+  终态时只使 V9 demand expire；已 scheduled/completed 的运输保留 allocation 并标记
+  `transport_orphaned`。每 tick 先投影 V9 结果，再处理 V15 terminal，避免竞态
+  误判。
+- demand metadata 显式 `arrival_bridge=excluded`，所以 V10 不会为 carrier 创建
+  局部位置；路线完成仍不是收货。新世界、V15→V16 paused upgrade、canonical/replay/
+  recovery、成员范围读取和 PostgreSQL 集成测试均已覆盖。
+
+### 6.7 V17 / F10.1 已完成：货物 custody、到达观察与 receipt gate
+
+- V17 为 baseline 后的每个可运输 V16 source 冻结一张 shipment 和 line snapshot；V16
+  `demand_pending`、`route_scheduled`、`route_completed`、`demand_expired`、`voided`、
+  `transport_orphaned` 只通过 append-only evidence 映射为 custody transition。
+- `route_completed` 只会进入 `awaiting_receipt`。既有 V15 `order.deliver` 只有在该状态
+  才可执行，并在同一事务将 V15 inventory/resource operation 与 V17 receipt 绑定；不会
+  创建第二份库存余额，也不会自动收货。
+- V16→V17 paused upgrade 以 baseline 保护前序 source：旧 source 保持 legacy delivery，
+  不回填伪造 shipment 或 receipt。canonical snapshot、replay、verified recovery、迁移
+  guards、成员范围查询与 PostgreSQL integration 已覆盖。
+- V18 已追加 baseline 后 V16 overflow source 的确定性拆单、独立 V9 consignment 与全量 receipt gate；部分 receipt、拒收/货损和承运责任仍必须由后续版本追加，且不得改写 V17/V18 已封存的事实含义。
+
+### 6.8 目标指标（尚未全部接入）
 
 - 平均/分位通勤时间、未满足出行、拥堵指数。
 - 区域可达岗位、可达住房和物流成本。
 - 交通能源消耗、排放和财政维护成本。
 
-### 6.3 边界
+### 6.9 边界
 
 首版不在在线 tick 中嵌入 SUMO/MATSim。高精度交通可作为离线场景适配器，输出必须固化为版本化输入包，不能在同一 seed 下随外部服务结果漂移。
 
@@ -312,6 +372,15 @@ F6.3 已完成以下底层闭环：
 - 未交付订单不能提前成为可用库存。
 - 投入产出表和配方版本决定技术，企业不能生产未授权商品。
 - 供应中断通过积压、价格和产能利用率逐周期传播。
+
+### 7.4 V17 已完成：receipt 与在途 custody
+
+V17 已将 V16 route evidence 固化为 shipment custody，而非把它当作 receipt。只有
+`awaiting_receipt` shipment 才能调用 V15 delivery；该原子命令在库存 transfer 后写入
+V17 receipt fact 与 receipt projection。V17 仍不建立独立可扣减的在途库存余额，因而
+不会重复记账。
+
+V18 已定义并实现订单拆分、批次 consignment 与“全部到达后一次原子收货”：它不实现部分收货、拒收、损耗、运费、保险或承运责任。后续版本必须为这些新含义追加事实和 profile，不能复用或重写 V17/V18 已有字段。
 
 ## 8. F11：家庭福利、需求与城市吸引力
 
@@ -430,7 +499,9 @@ F11 完成后，F6.2 的迁移评分从简化参数切换到真实城市反馈�
 
 ### 第三批：F7–F9（进行中）
 
-F7.0 坐标与规则集至 F7.11 movement intent/行动预算/拥堵预留，以及 F8.0 通用公共服务、F8.1 设施生命周期和 F8.2 通用物理网络均已完成。当前停止；后续恢复时依次实施 F8.3 社会服务可达性、F8.4 跨域效果，再进入 F9 交通，不能绕开现有空间身份、生命周期、服务与网络事实建立旁路汇总。
+F7.0 坐标与规则集至 F7.11 movement intent/行动预算/拥堵预留、V7 服务可达性与队列、V8 下一 tick 跨域 effect、V9 设施—区域—换乘的容量路线底座、V10 对 V5 局部空间的受验证到达桥接、V11 NPC work-facility 自动 OD source/闭合周期指标、V12 容量受限住宅—就业绑定、V13 双向设施在场域 commute source、V14 assignment epoch lifecycle、V15 F10.0 企业订单/库存 ownership/保留/交付/reversal、V16 enterprise freight source、V17 custody/receipt gate、V18 overflow batch freight/full-receipt gate、V19 F9.3.0 的静态 spatial node/corridor 身份层、V20 F9.3.1 的通用 asset state/capacity lifecycle、V21 F9.3.2 的 future-allocation effective-capacity admission、V22 F10.3.0 的按行 partial receipt、货损/拒收、即时退款和承运责任 claim、V23 F10.3.1a 的准备金拨备/全额 carrier claim 追偿，以及 V24 F10.3.1b 的唯一服务合同与延后一 tick 的现金运费结算均已完成。V21 不追溯重写历史 route/reservation，V22 不回填 upgrade tick 前的 custody，V20 命令在 T 提交后仅从 T+1 自动调度可见，V24 不向升级前 case 补费且不以余额不足伪造债务；容量封闭时才会在确定性排序内选择替代路径。下一步仅能增加报价输入、服务等级/SLA、保险、独立在途库存与多企业生产；不能绕开现有空间身份、生命周期、服务、effect、mobility、OD fact、V12–V24 evidence 建立旁路汇总。
+
+截至 V24，以上段落中的 F10.3.1a/1b 已完成：系统承运 actor 与 `system_freight_reserve` 经济 firm 分离，政府只能经审计 funding 注入准备金，V22 的 `carrier` claim 仅能在资金充足时全额、一对一追偿并受控推进至 `resolved`；V24 再为 baseline 后的 V22 settled case 封存唯一 service contract，并在后续 automatic tick 以固定单位费率写入真实 seller-to-carrier cash journal。历史 V22 receipt/refund/claim、V23 recovery、历史 route 和升级前 case 均不被重写或补费。SLA、保险和在途库存仍须作为后继版本。
 
 ### 第四批：F10–F13
 

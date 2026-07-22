@@ -48,6 +48,22 @@ func TestNormalizeCityCommandCanonicalizesIntent(t *testing.T) {
 	require.ErrorIs(t, err, ErrCityInvalidInput)
 }
 
+func TestNormalizeCityCommandIncludesLaterOpenWorldCommands(t *testing.T) {
+	expectedTick := int64(7)
+	for _, testCase := range []struct {
+		commandType string
+		payload     string
+	}{
+		{CityCommandTypeOpenWorldFreightSettlementReceipt, `{"case_code":"case.test","liability_party":"seller","lines":[{"source_line_no":1,"accepted_units":1,"lost_units":0,"rejected_units":0}]}`},
+		{CityCommandTypeOpenWorldCarrierReserveFund, `{"amount_units":1}`},
+		{CityCommandTypeOpenWorldFreightClaimResolve, `{"claim_code":"claim.test"}`},
+	} {
+		normalized, err := normalizeCityCommand(testCase.commandType, json.RawMessage(testCase.payload), &expectedTick)
+		require.NoError(t, err, testCase.commandType)
+		require.Equal(t, testCase.commandType, normalized.commandType)
+	}
+}
+
 func TestCityTickFailureAuditOnlyTracksEngineFailures(t *testing.T) {
 	require.False(t, shouldRecordCityTickFailure(nil))
 	require.False(t, shouldRecordCityTickFailure(ErrCityExpectedTickConflict))

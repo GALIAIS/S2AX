@@ -43,8 +43,9 @@
           <div class="runtime-member-identity">
             <span>{{ memberInitial(member) }}</span>
             <div>
-              <strong>{{ member.username || member.email }}</strong>
-              <small>{{ member.username ? member.email : `#${member.user_id}` }}</small>
+              <strong>{{ memberRosterDisplayName(member) }}</strong>
+              <small v-if="member.email">{{ member.username ? member.email : `#${member.user_id}` }}</small>
+              <small v-else-if="member.username">#{{ member.user_id }}</small>
             </div>
           </div>
           <template v-if="systemAdmin && member.role !== 'owner'">
@@ -213,6 +214,23 @@
                     ? t('citySpatial.runtime.processing')
                     : portalActionLabel(action) }}
                 </button>
+                <button
+                  v-if="canTraversePortal(portal)"
+                  type="button"
+                  class="btn btn-primary btn-sm runtime-portal-traverse"
+                  :disabled="Boolean(busyCommandCode)"
+                  @click="traversePortal(portal)"
+                >
+                  {{ busyCommandCode === portalTraversalCommandCode(portal)
+                    ? t('citySpatial.runtime.processing')
+                    : t('citySpatial.runtime.portals.traverse') }}
+                </button>
+                <span
+                  v-else-if="supportsDirectPortalTraversal && portal.state.state_code === 'open' && portal.access_evaluation?.satisfied === true && !portalActorAtEndpoint(portal)"
+                  class="runtime-portal-traverse-hint"
+                >
+                  {{ t('citySpatial.runtime.portals.endpointRequired') }}
+                </span>
                 <span v-if="portal.state.portal_type !== 'entrance'">{{ t('citySpatial.runtime.portals.fixedOpen') }}</span>
                 <span v-else-if="!portalActorInRange(portal)">{{ t('citySpatial.runtime.portals.outOfRange') }}</span>
               </div>
@@ -476,21 +494,21 @@
 
                   <form class="runtime-navigation-intent-form" @submit.prevent="setNavigationIntent">
                     <div class="runtime-navigation-coordinate-fields">
-                      <label><span>X</span><input v-model.number="navigationIntentForm.x" class="input font-mono" type="number" step="1"></label>
-                      <label><span>Y</span><input v-model.number="navigationIntentForm.y" class="input font-mono" type="number" step="1"></label>
-                      <label><span>Z</span><input v-model.number="navigationIntentForm.z" class="input font-mono" type="number" step="1"></label>
+                      <label><span>X</span><input v-model.number="navigationIntentForm.x" class="input font-mono" type="number" step="1" @input="markNavigationIntentFormDirty"></label>
+                      <label><span>Y</span><input v-model.number="navigationIntentForm.y" class="input font-mono" type="number" step="1" @input="markNavigationIntentFormDirty"></label>
+                      <label><span>Z</span><input v-model.number="navigationIntentForm.z" class="input font-mono" type="number" step="1" @input="markNavigationIntentFormDirty"></label>
                     </div>
                     <label>
                       <span>{{ t('citySpatial.runtime.navigationIntent.priority') }}</span>
-                      <input v-model.number="navigationIntentForm.priority" class="input font-mono" type="number" min="-10" max="10" step="1">
+                      <input v-model.number="navigationIntentForm.priority" class="input font-mono" type="number" min="-10" max="10" step="1" @input="markNavigationIntentFormDirty">
                     </label>
                     <label>
                       <span>{{ t('citySpatial.runtime.navigationIntent.maxSteps') }}</span>
-                      <input v-model.number="navigationIntentForm.maxSteps" class="input font-mono" type="number" min="1" max="1024" step="1">
+                      <input v-model.number="navigationIntentForm.maxSteps" class="input font-mono" type="number" min="1" max="1024" step="1" @input="markNavigationIntentFormDirty">
                     </label>
                     <label>
                       <span>{{ t('citySpatial.runtime.navigationIntent.onBlocked') }}</span>
-                      <Select v-model="navigationIntentForm.onBlocked" :options="navigationOnBlockedOptions" :searchable="false" />
+                      <Select v-model="navigationIntentForm.onBlocked" :options="navigationOnBlockedOptions" :searchable="false" @update:model-value="markNavigationIntentFormDirty" />
                     </label>
                     <button
                       type="button"
@@ -743,7 +761,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type {
   AddCityWorldMemberRequest,
@@ -752,6 +770,7 @@ import type {
   CityMemberRole,
   CityNavigationCoordinate,
   CityNavigationPath,
+  CityRuntimeCommandType,
   UpdateCityWorldMemberRequest,
   WorldActor,
   WorldActorAttribute,
@@ -767,7 +786,6 @@ import type {
   WorldRequirementNode,
   WorldRuleCase,
   WorldRuntimeCatalog,
-  WorldRuntimeCommandType,
   WorldRuntimeDefinition
 } from '@/api/citySpatial'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
@@ -820,7 +838,7 @@ const emit = defineEmits<{
   focusActor: [actorCode: string]
   previewPath: []
   clearPath: []
-  command: [commandType: WorldRuntimeCommandType, payload: Record<string, unknown>, commandCode: string]
+  command: [commandType: CityRuntimeCommandType, payload: Record<string, unknown>, commandCode: string]
   memberAdd: [request: AddCityWorldMemberRequest]
   memberUpdate: [userID: number, request: UpdateCityWorldMemberRequest]
 }>()
@@ -851,6 +869,8 @@ const navigationIntentForm = reactive<{
   maxSteps: 256,
   onBlocked: 'retry'
 })
+const navigationIntentFormDirty = ref(false)
+const navigationIntentFormActorCode = ref<string | null>(null)
 type PortalPolicyMode =
   | 'unchanged'
   | 'public'
@@ -913,6 +933,9 @@ const actorLocation = computed(() => props.actorState?.location ?? props.actorSt
 const actorCapabilities = computed(() => props.actorState?.capabilities ?? [])
 const canCommand = computed(() => props.systemAdmin || actorCapabilities.value.includes('actor.command'))
 const canManageControl = computed(() => props.systemAdmin)
+const supportsDirectPortalTraversal = computed(() => (
+  props.catalog?.profile.runtime_id.startsWith('sub2api-city-open-world') ?? false
+))
 const actorAnchor = computed(() => {
   const location = actorLocation.value
   if (!location?.anchor_kind || !location.anchor_code) return t('citySpatial.runtime.location.noAnchor')
@@ -1082,7 +1105,8 @@ watch(archetypes, items => {
 
 watch(() => {
   const intent = selectedNavigationIntent.value
-  return `${props.selectedActorCode ?? ''}:${intent?.intent_code ?? ''}:${intent?.version ?? 0}`
+  const location = actorLocation.value
+  return `${props.selectedActorCode ?? ''}:${intent?.intent_code ?? ''}:${intent?.version ?? 0}:${location?.version ?? 0}:${location?.x ?? 0}:${location?.y ?? 0}:${location?.z ?? 0}`
 }, () => hydrateNavigationIntentForm(), { immediate: true })
 
 watch(() => {
@@ -1112,6 +1136,8 @@ watch(portalPolicyDefinitionOptions, options => {
 
 function hydrateNavigationIntentForm(): void {
   const intent = selectedNavigationIntent.value
+  const actorChanged = navigationIntentFormActorCode.value !== props.selectedActorCode
+  if (!intent && navigationIntentFormDirty.value && !actorChanged) return
   const destination = intent?.destination ?? props.navigationDestination ?? actorLocation.value
   if (destination) {
     navigationIntentForm.x = destination.x
@@ -1121,6 +1147,8 @@ function hydrateNavigationIntentForm(): void {
   navigationIntentForm.priority = intent?.priority ?? 0
   navigationIntentForm.maxSteps = intent?.max_steps ?? 256
   navigationIntentForm.onBlocked = intent?.on_blocked ?? 'retry'
+  navigationIntentFormActorCode.value = props.selectedActorCode
+  navigationIntentFormDirty.value = false
 }
 
 function useSelectedNavigationDestination(): void {
@@ -1129,6 +1157,11 @@ function useSelectedNavigationDestination(): void {
   navigationIntentForm.x = destination.x
   navigationIntentForm.y = destination.y
   navigationIntentForm.z = destination.z
+  navigationIntentFormDirty.value = true
+}
+
+function markNavigationIntentFormDirty(): void {
+  navigationIntentFormDirty.value = true
 }
 
 function formatNavigationCoordinate(coordinate: CityNavigationCoordinate): string {
@@ -1215,6 +1248,22 @@ function portalActorInRange(portal: WorldPortalAccessView): boolean {
   ))
 }
 
+function portalActorAtEndpoint(portal: WorldPortalAccessView): boolean {
+  const location = actorLocation.value
+  if (!location) return false
+  return [portal.from, portal.to].some(endpoint => (
+    location.x === endpoint.x && location.y === endpoint.y && location.z === endpoint.z
+  ))
+}
+
+function canTraversePortal(portal: WorldPortalAccessView): boolean {
+  return Boolean(
+    supportsDirectPortalTraversal.value && props.selectedActorCode && canCommand.value &&
+    portalActorAtEndpoint(portal) && portal.state.state_code === 'open' &&
+    portal.access_evaluation?.satisfied === true
+  )
+}
+
 function canTransitionPortal(portal: WorldPortalAccessView): boolean {
   return Boolean(
     props.selectedActorCode && canCommand.value && portal.state.portal_type === 'entrance' &&
@@ -1224,6 +1273,18 @@ function canTransitionPortal(portal: WorldPortalAccessView): boolean {
 
 function portalCommandCode(portal: WorldPortalAccessView, action: WorldPortalAction): string {
   return `portal:state:${portalKey(portal)}:${action}`
+}
+
+function portalTraversalCommandCode(portal: WorldPortalAccessView): string {
+  return `portal:use:${portalKey(portal)}`
+}
+
+function traversePortal(portal: WorldPortalAccessView): void {
+  if (!props.selectedActorCode || !canTraversePortal(portal)) return
+  emit('command', 'open_world.actor.portal.use', {
+    actor_code: props.selectedActorCode,
+    portal_code: portal.state.portal_code
+  }, portalTraversalCommandCode(portal))
 }
 
 function transitionPortal(portal: WorldPortalAccessView, action: WorldPortalAction): void {
@@ -1407,6 +1468,10 @@ function configurePortalPolicy(): void {
 
 function memberInitial(member: CityMember): string {
   return (member.username || member.email || String(member.user_id)).trim().slice(0, 1).toUpperCase()
+}
+
+function memberRosterDisplayName(member: CityMember): string {
+  return member.username || member.email || `#${member.user_id}`
 }
 
 function memberDisplayName(userID: number): string {
@@ -1850,14 +1915,20 @@ function capabilityLabel(capability: WorldActorCapability): string {
 .runtime-fact-stream article small { color: var(--ui-label-secondary); font: 0.55rem ui-monospace, monospace; }
 .runtime-loading-line { position: absolute; top: 0; left: 0; width: 35%; height: 2px; background: var(--ui-accent); animation: runtime-loading 1s steps(8, end) infinite; }
 @keyframes runtime-loading { from { transform: translateX(-100%); } to { transform: translateX(385%); } }
+@media (max-width: 1280px) {
+  /* The application sidebar can leave this panel much narrower than the
+     viewport. Keep the movement-intent form in its own row before its grid
+     columns spill underneath the control card and intercept player clicks. */
+  .runtime-spatial-control { grid-template-columns: 1fr; }
+  .runtime-spatial-control > article:first-child { border-right: 0; border-bottom: 1px solid var(--ui-separator); }
+}
 @media (max-width: 1000px) {
-  .runtime-spatial-control, .runtime-actions-grid, .runtime-governance-grid { grid-template-columns: 1fr; }
+  .runtime-actions-grid, .runtime-governance-grid { grid-template-columns: 1fr; }
   .runtime-portal-list { grid-template-columns: 1fr; }
   .runtime-portal-policy-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .runtime-portal-policy-heading { grid-column: 1 / -1; }
   .runtime-navigation-intent-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .runtime-navigation-coordinate-fields { grid-column: 1 / -1; }
-  .runtime-spatial-control > article:first-child { border-right: 0; border-bottom: 1px solid var(--ui-separator); }
   .runtime-actions-grid > section:first-child, .runtime-governance-grid > section { border-right: 0; border-bottom: 1px solid var(--ui-separator); }
 }
 @media (max-width: 640px) {

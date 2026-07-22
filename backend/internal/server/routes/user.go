@@ -132,6 +132,8 @@ func RegisterUserRoutes(
 			cityWorlds.GET("", h.CityEconomy.ListWorlds)
 			cityWorlds.POST("", middleware.AdminOnly(), h.CityEconomy.CreateWorld)
 			cityWorlds.GET("/:world_id", h.CityEconomy.GetWorld)
+			cityWorlds.GET("/:world_id/clock", h.CityEconomy.GetRealtimeClock)
+			cityWorlds.GET("/:world_id/timeline", h.CityEconomy.ListTemporalFrames)
 			cityWorlds.GET("/:world_id/members", h.CityEconomy.ListWorldMembers)
 			cityWorlds.POST("/:world_id/members", middleware.AdminOnly(), h.CityEconomy.AddWorldMember)
 			cityWorlds.PATCH("/:world_id/members/:user_id", middleware.AdminOnly(), h.CityEconomy.UpdateWorldMember)
@@ -165,6 +167,27 @@ func RegisterUserRoutes(
 			cityWorlds.GET("/:world_id/open-world/map", h.CityEconomy.GetOpenWorldMap)
 			cityWorlds.GET("/:world_id/open-world/buildings/:building_code/portals", h.CityEconomy.ListOpenWorldBuildingPortals)
 			cityWorlds.GET("/:world_id/open-world/buildings/:building_code/interiors/:floor_index", h.CityEconomy.GetOpenWorldBuildingInterior)
+			cityWorlds.GET("/:world_id/open-world/services", h.CityEconomy.GetOpenWorldServiceState)
+			cityWorlds.GET("/:world_id/open-world/impacts", h.CityEconomy.GetOpenWorldImpactState)
+			cityWorlds.GET("/:world_id/open-world/mobility", h.CityEconomy.GetOpenWorldMobilityState)
+			cityWorlds.GET("/:world_id/open-world/mobility/arrivals", h.CityEconomy.GetOpenWorldMobilityArrivalState)
+			cityWorlds.GET("/:world_id/open-world/mobility/od", h.CityEconomy.GetOpenWorldMobilityODState)
+			cityWorlds.GET("/:world_id/open-world/commutes", h.CityEconomy.GetOpenWorldCommuteState)
+			cityWorlds.GET("/:world_id/open-world/commute-sources", h.CityEconomy.GetOpenWorldCommuteSourceState)
+			cityWorlds.GET("/:world_id/open-world/commute-lifecycle", h.CityEconomy.GetOpenWorldCommuteLifecycleState)
+			cityWorlds.GET("/:world_id/open-world/supply-chain", h.CityEconomy.GetOpenWorldSupplyChainState)
+			cityWorlds.GET("/:world_id/open-world/enterprise-freight", h.CityEconomy.GetOpenWorldEnterpriseFreightState)
+			cityWorlds.GET("/:world_id/open-world/enterprise-freight/receipts", h.CityEconomy.GetOpenWorldEnterpriseFreightReceiptState)
+			cityWorlds.GET("/:world_id/open-world/freight-batches", h.CityEconomy.GetOpenWorldFreightBatchState)
+			cityWorlds.GET("/:world_id/open-world/spatial-network", h.CityEconomy.GetOpenWorldSpatialNetworkState)
+			cityWorlds.GET("/:world_id/open-world/infrastructure", h.CityEconomy.GetOpenWorldInfrastructureState)
+			cityWorlds.GET("/:world_id/open-world/effective-capacity", h.CityEconomy.GetOpenWorldEffectiveCapacityState)
+			cityWorlds.GET("/:world_id/open-world/freight-settlements", h.CityEconomy.GetOpenWorldFreightSettlementState)
+			cityWorlds.GET("/:world_id/open-world/carrier-recovery", h.CityEconomy.GetOpenWorldCarrierRecoveryState)
+			cityWorlds.GET("/:world_id/open-world/carrier-commerce", h.CityEconomy.GetOpenWorldCarrierCommerceState)
+			cityWorlds.GET("/:world_id/open-world/services/providers", h.CityEconomy.ListOpenWorldServiceProviders)
+			cityWorlds.GET("/:world_id/open-world/services/requests", h.CityEconomy.ListOpenWorldServiceRequests)
+			cityWorlds.GET("/:world_id/open-world/services/responses", h.CityEconomy.ListOpenWorldServiceResponses)
 			cityWorlds.GET("/:world_id/land", h.CityEconomy.GetLandState)
 			cityWorlds.GET("/:world_id/development", h.CityEconomy.GetDevelopmentState)
 			cityWorlds.GET("/:world_id/enterprise-locations", h.CityEconomy.GetEnterpriseLocationState)
@@ -212,6 +235,79 @@ func RegisterUserRoutes(
 			cityWorlds.GET("/:world_id/recovery-runs", h.CityEconomy.ListRecoveries)
 			cityWorlds.POST("/:world_id/recovery-runs", middleware.AdminOnly(), h.CityEconomy.StartRecovery)
 			cityWorlds.GET("/:world_id/recovery-runs/:run_id", h.CityEconomy.GetRecovery)
+		}
+
+		// The shared realtime pixel renderer is a separately deployable content
+		// plane. Its routes stay fail-closed until the administrator enables the
+		// dedicated setting; clock/timeline introspection remains available for
+		// operational recovery without exposing visual chunks or manifests.
+		cityRealtimePixel := cityWorlds.Group("/:world_id/realtime")
+		cityRealtimePixel.Use(middleware.CityRealtimePixelRendererGuard(settingService))
+		{
+			cityRealtimePixel.GET("/projection", h.CityEconomy.GetRealtimeWorldProjection)
+			cityRealtimePixel.GET("/visual-manifest", h.CityEconomy.GetRealtimeVisualManifest)
+			cityRealtimePixel.GET("/patches", h.CityEconomy.ListRealtimePatches)
+			cityRealtimePixel.GET("/actors", h.CityEconomy.GetRealtimeActors)
+			cityRealtimePixel.GET("/pixel-chunks/:chunk_x/:chunk_y/:z", h.CityEconomy.GetRealtimePixelChunk)
+		}
+
+		// Shared activity facts remain part of the simulation plane. They are
+		// member-safe and must stay available even while the optional visual
+		// renderer content plane is disabled for maintenance.
+		cityRealtimeShared := cityWorlds.Group("/:world_id/realtime")
+		cityRealtimeShared.GET("/events", h.CityEconomy.ListRealtimePublicCharacterEvents)
+
+		// Character commands are part of the simulation plane rather than the
+		// optional pixel content plane. A temporary renderer outage must never
+		// make an already-authorized shared-world character unmanageable.
+		cityRealtimeCharacter := cityWorlds.Group("/:world_id/realtime/character")
+		cityRealtimeCharacter.Use(middleware.RequestBodyLimit(4096))
+		{
+			cityRealtimeCharacter.GET("", h.CityEconomy.GetRealtimeMyCharacter)
+			cityRealtimeCharacter.GET("/events", h.CityEconomy.ListRealtimeMyCharacterEvents)
+			cityRealtimeCharacter.POST("", h.CityEconomy.CreateRealtimeCharacter)
+			cityRealtimeCharacter.POST("/agent", h.CityEconomy.ConfigureRealtimeCharacterAgent)
+			cityRealtimeCharacter.POST("/move", h.CityEconomy.MoveRealtimeCharacter)
+			cityRealtimeCharacter.POST("/portals", h.CityEconomy.TraverseRealtimeCharacterPortal)
+			cityRealtimeCharacter.POST("/activities", h.CityEconomy.PerformRealtimeCharacterActivity)
+			cityRealtimeCharacter.POST("/roles", h.CityEconomy.ChangeRealtimeCharacterRole)
+		}
+
+		// Realtime operational and visual-content controls are administrator
+		// scoped. Reading audit-safe visual release state remains possible while
+		// publication is disabled, but all mutation routes are independently
+		// fail-closed behind the publication switch.
+		cityAdmin := authenticated.Group("/admin/city")
+		cityAdmin.Use(middleware.CitySimulationGuard(settingService), middleware.AdminOnly())
+		{
+			cityAdminControl := cityAdmin.Group("")
+			cityAdminControl.Use(middleware.RequestBodyLimit(1024))
+			{
+				cityAdminControl.GET("/clock-health", h.CityEconomy.GetRealtimeOperationalHealth)
+				cityAdminControl.POST("/worlds/:world_id/pause", h.CityEconomy.PauseRealtimeWorld)
+				cityAdminControl.POST("/worlds/:world_id/resume", h.CityEconomy.ResumeRealtimeWorld)
+			}
+
+			cityVisualRead := cityAdmin.Group("")
+			{
+				cityVisualRead.GET("/visual-packs", h.CityEconomy.ListRealtimeVisualPacks)
+				cityVisualRead.GET("/visual-release-policies", h.CityEconomy.ListRealtimeVisualReleasePolicies)
+				cityVisualRead.GET("/visual-packs/:pack_id/:pack_version/generation-jobs", h.CityEconomy.ListRealtimeVisualGenerationJobs)
+				cityVisualRead.GET("/visual-packs/:pack_id/:pack_version/review-events", h.CityEconomy.ListRealtimeVisualReviewEvents)
+				cityVisualRead.GET("/visual-packs/:pack_id/:pack_version", h.CityEconomy.GetRealtimeVisualPack)
+			}
+
+			cityVisualWrite := cityAdmin.Group("")
+			cityVisualWrite.Use(middleware.CityVisualPackPublishGuard(settingService), middleware.RequestBodyLimit(64<<10))
+			{
+				cityVisualWrite.POST("/visual-packs", h.CityEconomy.CreateRealtimeVisualPack)
+				cityVisualWrite.PATCH("/visual-packs/:pack_id/:pack_version", h.CityEconomy.UpdateRealtimeVisualPack)
+				cityVisualWrite.POST("/visual-packs/:pack_id/:pack_version/generation-jobs", h.CityEconomy.CreateRealtimeVisualGenerationJob)
+				cityVisualWrite.PATCH("/visual-packs/:pack_id/:pack_version/generation-jobs/:job_id/review", h.CityEconomy.ReviewRealtimeVisualGenerationJob)
+				cityVisualWrite.POST("/visual-packs/:pack_id/:pack_version/publish", h.CityEconomy.PublishRealtimeVisualPack)
+				cityVisualWrite.POST("/visual-packs/:pack_id/:pack_version/retire", h.CityEconomy.RetireRealtimeVisualPack)
+				cityVisualWrite.PUT("/visual-release-policies/:spatial_profile_id", h.CityEconomy.SetRealtimeVisualReleasePolicy)
+			}
 		}
 
 		// 用户可用渠道（非管理员接口）

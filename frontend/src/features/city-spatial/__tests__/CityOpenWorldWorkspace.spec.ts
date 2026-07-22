@@ -209,4 +209,26 @@ describe('CityOpenWorldWorkspace', () => {
 		expect(getOpenWorldGeneration).toHaveBeenCalledTimes(1)
 		expect(wrapper.text()).toContain('当前 Region 的地图事实已验证')
 	})
+
+  it('lets an administrator resume a paused open world from the play surface', async () => {
+    const pausedWorld: CityWorld = {
+      ...world,
+      status: 'paused',
+      simulation_version: 'city-openworld-v24',
+      speed_multiplier: 1000
+    }
+    const wrapper = mount(CityOpenWorldWorkspace, {
+      props: { world: pausedWorld, worlds: [pausedWorld], systemAdmin: true },
+      global: {
+        plugins: [i18n],
+        stubs: { CityClassicViewport: ViewportStub, BaseDialog: DialogStub, Select: true, Icon: true }
+      }
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-test="open-world-lifecycle-toggle"]').trigger('click')
+
+    expect(wrapper.emitted('world-control')?.[0]).toEqual(['world.resume', {}, 'world.resume'])
+    expect(wrapper.text()).toContain('世界已暂停')
+  })
 })

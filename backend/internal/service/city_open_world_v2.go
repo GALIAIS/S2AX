@@ -19,6 +19,9 @@ type cityOpenWorldSectorMaterializePayload struct {
 
 func isCityOpenWorldCommand(commandType string) bool {
 	return commandType == CityCommandTypeOpenWorldSectorMaterialize ||
+		isCityOpenWorldCarrierRecoveryCommand(commandType) ||
+		isCityOpenWorldFreightSettlementCommand(commandType) ||
+		isCityOpenWorldSupplyChainCommand(commandType) ||
 		isCityOpenWorldRuntimeCommand(commandType)
 }
 
@@ -26,6 +29,15 @@ func normalizeCityOpenWorldCommand(
 	commandType string,
 	rawPayload json.RawMessage,
 ) (any, bool, error) {
+	if payload, handled, err := normalizeCityOpenWorldCarrierRecoveryCommand(commandType, rawPayload); handled || err != nil {
+		return payload, handled, err
+	}
+	if payload, handled, err := normalizeCityOpenWorldFreightSettlementCommand(commandType, rawPayload); handled || err != nil {
+		return payload, handled, err
+	}
+	if payload, handled, err := normalizeCityOpenWorldSupplyChainCommand(commandType, rawPayload); handled || err != nil {
+		return payload, handled, err
+	}
 	if payload, handled, err := normalizeCityOpenWorldRuntimeCommand(commandType, rawPayload); handled || err != nil {
 		return payload, handled, err
 	}
@@ -86,6 +98,283 @@ func initializeCityOpenWorldV5Foundation(
 		return err
 	}
 	return initializeCityOpenWorldV5SocialFoundation(ctx, tx, worldID)
+}
+
+func initializeCityOpenWorldV7Foundation(
+	ctx context.Context,
+	tx *sql.Tx,
+	worldID, seed int64,
+	simulationVersion, profileID, spawnPolicy string,
+) error {
+	if err := initializeCityOpenWorldV6Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy); err != nil {
+		return err
+	}
+	return initializeCityOpenWorldV7ServiceFoundation(ctx, tx, worldID)
+}
+
+// V8 retains the sealed V7 service baseline, then binds the delayed impact
+// bridge. The bridge has its own profile/catalog so later adapter work can be
+// added without changing service response semantics retroactively.
+func initializeCityOpenWorldV8Foundation(
+	ctx context.Context,
+	tx *sql.Tx,
+	worldID, seed int64,
+	simulationVersion, profileID, spawnPolicy string,
+) error {
+	if err := initializeCityOpenWorldV6Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy); err != nil {
+		return err
+	}
+	if err := initializeCityOpenWorldV7ServiceFoundation(ctx, tx, worldID); err != nil {
+		return err
+	}
+	return initializeCityOpenWorldV8ImpactFoundation(ctx, tx, worldID)
+}
+
+// V9 retains V8's sealed service/impact chronology and appends an immutable
+// aggregate-mobility baseline. Dynamic trip demand is added only after this
+// topology exists and is recorded by runtime facts.
+func initializeCityOpenWorldV9Foundation(
+	ctx context.Context,
+	tx *sql.Tx,
+	worldID, seed int64,
+	simulationVersion, profileID, spawnPolicy string,
+) error {
+	if err := initializeCityOpenWorldV8Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy); err != nil {
+		return err
+	}
+	return initializeCityOpenWorldV9MobilityFoundation(ctx, tx, worldID)
+}
+
+// V10 adds only the fact-backed V9-to-local arrival bridge. It deliberately
+// retains every V9 aggregate route and V5 local-navigation contract unchanged.
+func initializeCityOpenWorldV10Foundation(
+	ctx context.Context,
+	tx *sql.Tx,
+	worldID, seed int64,
+	simulationVersion, profileID, spawnPolicy string,
+) error {
+	if err := initializeCityOpenWorldV9Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy); err != nil {
+		return err
+	}
+	return initializeCityOpenWorldV10ArrivalFoundation(ctx, tx, worldID)
+}
+
+// V11 seals automatic OD source adapters and their closed-cycle metric
+// contract. It reuses V10's route and arrival facts unchanged.
+func initializeCityOpenWorldV11Foundation(
+	ctx context.Context,
+	tx *sql.Tx,
+	worldID, seed int64,
+	simulationVersion, profileID, spawnPolicy string,
+) error {
+	if err := initializeCityOpenWorldV10Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy); err != nil {
+		return err
+	}
+	return initializeCityOpenWorldV11MobilityODFoundation(ctx, tx, worldID)
+}
+
+// V12 retains every V11 traffic contract and appends only the immutable,
+// capacity-limited residence/employment binding baseline used by later commute
+// adapters. It does not alter V11 source scheduling.
+func initializeCityOpenWorldV12Foundation(
+	ctx context.Context,
+	tx *sql.Tx,
+	worldID, seed int64,
+	simulationVersion, profileID, spawnPolicy string,
+) error {
+	if err := initializeCityOpenWorldV11Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy); err != nil {
+		return err
+	}
+	return initializeCityOpenWorldV12CommuteFoundation(ctx, tx, worldID)
+}
+
+// V13 preserves the immutable V12 binding baseline and adds a separate,
+// fact-backed dual-direction source adapter. V9 routes and V10 arrivals stay
+// the exclusive owners of macro routing and local landings.
+func initializeCityOpenWorldV13Foundation(
+	ctx context.Context,
+	tx *sql.Tx,
+	worldID, seed int64,
+	simulationVersion, profileID, spawnPolicy string,
+) error {
+	if err := initializeCityOpenWorldV12Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy); err != nil {
+		return err
+	}
+	return initializeCityOpenWorldV13CommuteSourceFoundation(ctx, tx, worldID)
+}
+
+// V14 preserves the sealed V13 source rows as historical evidence, then
+// builds a distinct successor-epoch lifecycle projection. It is deliberately
+// not a mutation layer over V12 bindings or V13 source identities.
+func initializeCityOpenWorldV14Foundation(
+	ctx context.Context,
+	tx *sql.Tx,
+	worldID, seed int64,
+	simulationVersion, profileID, spawnPolicy string,
+) error {
+	if err := initializeCityOpenWorldV13Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy); err != nil {
+		return err
+	}
+	return initializeCityOpenWorldV14CommuteLifecycleFoundation(ctx, tx, worldID)
+}
+
+// V15 retains the sealed V14 commute lifecycle and adds F10.0's independent
+// supply-chain projection over existing firms, facilities, and districts.
+func initializeCityOpenWorldV15Foundation(
+	ctx context.Context,
+	tx *sql.Tx,
+	worldID, seed int64,
+	simulationVersion, profileID, spawnPolicy string,
+) error {
+	if err := initializeCityOpenWorldV14Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy); err != nil {
+		return err
+	}
+	return initializeCityOpenWorldV15SupplyChainFoundation(ctx, tx, worldID)
+}
+
+// V16 inherits the sealed V15 contract and attaches a non-settling freight
+// adapter only after its source domain is fully valid.
+func initializeCityOpenWorldV16Foundation(
+	ctx context.Context,
+	tx *sql.Tx,
+	worldID, seed int64,
+	simulationVersion, profileID, spawnPolicy string,
+) error {
+	if err := initializeCityOpenWorldV15Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy); err != nil {
+		return err
+	}
+	return initializeCityOpenWorldV16EnterpriseFreightFoundation(ctx, tx, worldID)
+}
+
+// V17 keeps the complete V16 genesis chain, then seals a separate custody and
+// receipt profile. The profile does not backfill any predecessor source.
+func initializeCityOpenWorldV17Foundation(
+	ctx context.Context,
+	tx *sql.Tx,
+	worldID, seed int64,
+	simulationVersion, profileID, spawnPolicy string,
+) error {
+	if err := initializeCityOpenWorldV16Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy); err != nil {
+		return err
+	}
+	return initializeCityOpenWorldV17EnterpriseFreightReceiptFoundation(ctx, tx, worldID)
+}
+
+// V18 keeps the entire V17 genesis chain and adds a forward-only overflow
+// batch profile. No batch is created at genesis; the first post-baseline V16
+// suppressed source becomes the immutable root of a deterministic plan.
+func initializeCityOpenWorldV18Foundation(
+	ctx context.Context,
+	tx *sql.Tx,
+	worldID, seed int64,
+	simulationVersion, profileID, spawnPolicy string,
+) error {
+	if err := initializeCityOpenWorldV17Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy); err != nil {
+		return err
+	}
+	return initializeCityOpenWorldV18FreightBatchFoundation(ctx, tx, worldID)
+}
+
+// V19 retains V18's complete freight evidence and freezes a separate static
+// spatial network identity for every existing V9 hub and edge. It adds no
+// dynamic routing, demand, inventory, or settlement state at genesis.
+func initializeCityOpenWorldV19Foundation(
+	ctx context.Context,
+	tx *sql.Tx,
+	worldID, seed int64,
+	simulationVersion, profileID, spawnPolicy string,
+) error {
+	if err := initializeCityOpenWorldV18Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy); err != nil {
+		return err
+	}
+	return initializeCityOpenWorldV19SpatialNetworkFoundation(ctx, tx, worldID)
+}
+
+// V20 retains every V19 static descriptor and seeds a generic mutable
+// infrastructure asset lifecycle over that frozen topology. It does not alter
+// V9 scheduling or create any traffic, inventory, or financial history.
+func initializeCityOpenWorldV20Foundation(
+	ctx context.Context,
+	tx *sql.Tx,
+	worldID, seed int64,
+	simulationVersion, profileID, spawnPolicy string,
+) error {
+	if err := initializeCityOpenWorldV19Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy); err != nil {
+		return err
+	}
+	return initializeCityOpenWorldV20InfrastructureFoundation(ctx, tx, worldID)
+}
+
+// V21 retains V20's generic asset lifecycle and adds only the explicit
+// future-route effective-capacity bridge. It creates neither traffic nor
+// historical admissions at genesis.
+func initializeCityOpenWorldV21Foundation(
+	ctx context.Context,
+	tx *sql.Tx,
+	worldID, seed int64,
+	simulationVersion, profileID, spawnPolicy string,
+) error {
+	if err := initializeCityOpenWorldV20Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy); err != nil {
+		return err
+	}
+	return initializeCityOpenWorldV21EffectiveCapacityFoundation(ctx, tx, worldID)
+}
+
+// V22 retains the sealed V21 mobility-capacity protocol and adds a separate
+// future-only freight settlement profile. It creates no shipment, consignment,
+// inventory movement, refund, or claim at genesis.
+func initializeCityOpenWorldV22Foundation(
+	ctx context.Context,
+	tx *sql.Tx,
+	worldID, seed int64,
+	simulationVersion, profileID, spawnPolicy string,
+) error {
+	if err := initializeCityOpenWorldV21Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy); err != nil {
+		return err
+	}
+	return initializeCityOpenWorldV22FreightSettlementFoundation(ctx, tx, worldID)
+}
+
+// V23 keeps V22's future-only settlement baseline and appends a distinct,
+// manual-only carrier reserve. It does not backfill an old claim or mutate
+// historical receipt/custody evidence during genesis or upgrade.
+func initializeCityOpenWorldV23Foundation(
+	ctx context.Context,
+	tx *sql.Tx,
+	worldID, seed int64,
+	simulationVersion, profileID, spawnPolicy string,
+) error {
+	if err := initializeCityOpenWorldV22Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy); err != nil {
+		return err
+	}
+	return initializeCityOpenWorldV23CarrierRecoveryFoundation(ctx, tx, worldID)
+}
+
+// V24 preserves all predecessor projections and adds a new future-only
+// carrier service fee contract. It never backfills a V22 case created before
+// this world's V24 baseline tick.
+func initializeCityOpenWorldV24Foundation(
+	ctx context.Context,
+	tx *sql.Tx,
+	worldID, seed int64,
+	simulationVersion, profileID, spawnPolicy string,
+) error {
+	if err := initializeCityOpenWorldV23Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy); err != nil {
+		return err
+	}
+	return initializeCityOpenWorldV24CarrierCommerceFoundation(ctx, tx, worldID)
+}
+
+// V6 deliberately reuses the V5 spatial/runtime genesis pipeline. Its only
+// new canonical state is the immutable version vector, initialized by the
+// economy service after every V5-owned projection exists.
+func initializeCityOpenWorldV6Foundation(
+	ctx context.Context,
+	tx *sql.Tx,
+	worldID, seed int64,
+	simulationVersion, profileID, spawnPolicy string,
+) error {
+	return initializeCityOpenWorldV5Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy)
 }
 
 func initializeCityOpenWorldRegionFoundation(
@@ -164,26 +453,45 @@ func (s *CityEconomyService) applyCityOpenWorldCommand(
 	if err != nil {
 		return cityPendingEvent{}, err
 	}
+	regionX, regionY := cityOpenWorldRegionForSector(payload.SectorX, payload.SectorY)
+	planHash, alreadyMaterialized, err := ensureCityOpenWorldSectorMaterialized(
+		ctx, tx, worldID, targetTick, payload.SectorX, payload.SectorY,
+	)
+	if err != nil {
+		return cityPendingEvent{}, err
+	}
+	return cityOpenWorldSectorPendingEvent(command, payload, regionX, regionY, planHash, alreadyMaterialized), nil
+}
+
+// ensureCityOpenWorldSectorMaterialized is the shared, deterministic V2+
+// worldgen boundary. Commands and automated systems both use it so an
+// arrival bridge cannot secretly maintain a second map generator or write a
+// landing coordinate against an unavailable sector.
+func ensureCityOpenWorldSectorMaterialized(
+	ctx context.Context,
+	tx *sql.Tx,
+	worldID, targetTick, sectorX, sectorY int64,
+) (planHash string, alreadyMaterialized bool, err error) {
 	var existing bool
 	if err = tx.QueryRowContext(ctx, `
 SELECT EXISTS (
     SELECT 1 FROM city_open_world_sectors
     WHERE world_id = $1 AND sector_x = $2 AND sector_y = $3 AND epoch = 1
-)`, worldID, payload.SectorX, payload.SectorY).Scan(&existing); err != nil {
-		return cityPendingEvent{}, fmt.Errorf("check open-world materialization: %w", err)
+)`, worldID, sectorX, sectorY).Scan(&existing); err != nil {
+		return "", false, fmt.Errorf("check open-world materialization: %w", err)
 	}
-	regionX, regionY := cityOpenWorldRegionForSector(payload.SectorX, payload.SectorY)
+	regionX, regionY := cityOpenWorldRegionForSector(sectorX, sectorY)
 	if existing {
-		return cityOpenWorldSectorPendingEvent(command, payload, regionX, regionY, "", true), nil
+		return "", true, nil
 	}
 	simulationVersion, binding, profile, ruleSet, err := loadCityOpenWorldRegionGenerator(ctx, tx, worldID)
 	if err != nil {
-		return cityPendingEvent{}, err
+		return "", false, err
 	}
 	regionBounds := cityOpenWorldRegionBounds(regionX, regionY)
 	plan, err := cityspatial.GenerateWorldgenPlan(binding, profile, regionBounds)
 	if err != nil {
-		return cityPendingEvent{}, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "open_world_region_plan"}).WithCause(err)
+		return "", false, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "open_world_region_plan"}).WithCause(err)
 	}
 	var storedPlanHash string
 	err = tx.QueryRowContext(ctx, `
@@ -192,30 +500,30 @@ WHERE world_id = $1 AND region_x = $2 AND region_y = $3 AND epoch = 1`,
 		worldID, regionX, regionY,
 	).Scan(&storedPlanHash)
 	if err != nil && err != sql.ErrNoRows {
-		return cityPendingEvent{}, fmt.Errorf("load open-world region: %w", err)
+		return "", false, fmt.Errorf("load open-world region: %w", err)
 	}
 	if err == nil && storedPlanHash != plan.BaselineHash {
-		return cityPendingEvent{}, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "open_world_region_hash"})
+		return "", false, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "open_world_region_hash"})
 	}
-	surface, err := cityOpenWorldSurfaceForVersion(simulationVersion, plan, cityOpenWorldSectorBounds(payload.SectorX, payload.SectorY))
+	surface, err := cityOpenWorldSurfaceForVersion(simulationVersion, plan, cityOpenWorldSectorBounds(sectorX, sectorY))
 	if err != nil {
-		return cityPendingEvent{}, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "open_world_surface"}).WithCause(err)
+		return "", false, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "open_world_surface"}).WithCause(err)
 	}
 	if err = activateCityOpenWorldMaterializationWrite(ctx, tx, worldID); err != nil {
-		return cityPendingEvent{}, err
+		return "", false, err
 	}
 	if storedPlanHash == "" {
 		if err = insertCityOpenWorldRegion(ctx, tx, worldID, regionX, regionY, targetTick, plan.BaselineHash); err != nil {
-			return cityPendingEvent{}, err
+			return "", false, err
 		}
 	}
 	if err = assertCityOpenWorldV2RuleSet(ruleSet); err != nil {
-		return cityPendingEvent{}, err
+		return "", false, err
 	}
-	if err = persistCityOpenWorldV2Sector(ctx, tx, worldID, payload.SectorX, payload.SectorY, targetTick, surface); err != nil {
-		return cityPendingEvent{}, err
+	if err = persistCityOpenWorldV2Sector(ctx, tx, worldID, sectorX, sectorY, targetTick, surface); err != nil {
+		return "", false, err
 	}
-	return cityOpenWorldSectorPendingEvent(command, payload, regionX, regionY, plan.BaselineHash, false), nil
+	return plan.BaselineHash, false, nil
 }
 
 func cityOpenWorldSectorPendingEvent(
@@ -265,7 +573,8 @@ func cityOpenWorldRegionBinding(
 	switch simulationVersion {
 	case CitySimulationVersionOpenWorldV2:
 		binding, err = cityspatial.DefaultOpenWorldgenBindingV2(simulationVersion, seed, profile)
-	case CitySimulationVersionOpenWorldV3, CitySimulationVersionOpenWorldV4, CitySimulationVersionOpenWorldV5:
+	case CitySimulationVersionOpenWorldV3, CitySimulationVersionOpenWorldV4, CitySimulationVersionOpenWorldV5,
+		CitySimulationVersionOpenWorldV6, CitySimulationVersionOpenWorldV7, CitySimulationVersionOpenWorldV8, CitySimulationVersionOpenWorldV9, CitySimulationVersionOpenWorldV10, CitySimulationVersionOpenWorldV11, CitySimulationVersionOpenWorldV12, CitySimulationVersionOpenWorldV13, CitySimulationVersionOpenWorldV14, CitySimulationVersionOpenWorldV15, CitySimulationVersionOpenWorldV16, CitySimulationVersionOpenWorldV17, CitySimulationVersionOpenWorldV18, CitySimulationVersionOpenWorldV19, CitySimulationVersionOpenWorldV20, CitySimulationVersionOpenWorldV21, CitySimulationVersionOpenWorldV22, CitySimulationVersionOpenWorldV23, CitySimulationVersionOpenWorldV24:
 		binding, err = cityspatial.DefaultOpenWorldgenBindingV3(simulationVersion, seed, profile)
 	default:
 		return cityspatial.WorldgenBinding{}, cityspatial.RuleSet{}, ErrCitySimulationVersion.WithMetadata(map[string]string{"version": simulationVersion})
@@ -324,7 +633,8 @@ func cityOpenWorldSurfaceForVersion(
 	switch simulationVersion {
 	case CitySimulationVersionOpenWorldV2:
 		return cityspatial.GenerateOpenWorldSurfaceSector(plan, bounds)
-	case CitySimulationVersionOpenWorldV3, CitySimulationVersionOpenWorldV4, CitySimulationVersionOpenWorldV5:
+	case CitySimulationVersionOpenWorldV3, CitySimulationVersionOpenWorldV4, CitySimulationVersionOpenWorldV5,
+		CitySimulationVersionOpenWorldV6, CitySimulationVersionOpenWorldV7, CitySimulationVersionOpenWorldV8, CitySimulationVersionOpenWorldV9, CitySimulationVersionOpenWorldV10, CitySimulationVersionOpenWorldV11, CitySimulationVersionOpenWorldV12, CitySimulationVersionOpenWorldV13, CitySimulationVersionOpenWorldV14, CitySimulationVersionOpenWorldV15, CitySimulationVersionOpenWorldV16, CitySimulationVersionOpenWorldV17, CitySimulationVersionOpenWorldV18, CitySimulationVersionOpenWorldV19, CitySimulationVersionOpenWorldV20, CitySimulationVersionOpenWorldV21, CitySimulationVersionOpenWorldV22, CitySimulationVersionOpenWorldV23, CitySimulationVersionOpenWorldV24:
 		return cityspatial.GenerateOpenWorldSurfaceSectorV2(plan, bounds)
 	default:
 		return nil, ErrCitySimulationVersion.WithMetadata(map[string]string{"version": simulationVersion})

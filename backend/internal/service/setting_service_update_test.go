@@ -217,6 +217,105 @@ func TestSettingService_AffiliateAdminRechargeSetting(t *testing.T) {
 	})
 }
 
+func TestSettingService_CityRealtimeSchedulerSetting(t *testing.T) {
+	t.Run("missing value defaults to disabled", func(t *testing.T) {
+		svc := NewSettingService(&settingGetAllRepoStub{values: map[string]string{}}, &config.Config{})
+
+		settings, err := svc.GetAllSettings(context.Background())
+		require.NoError(t, err)
+		require.False(t, settings.CityRealtimeSchedulerEnabled)
+	})
+
+	t.Run("explicit value is parsed", func(t *testing.T) {
+		svc := NewSettingService(&settingGetAllRepoStub{values: map[string]string{
+			SettingKeyCityRealtimeSchedulerEnabled: "true",
+		}}, &config.Config{})
+
+		settings, err := svc.GetAllSettings(context.Background())
+		require.NoError(t, err)
+		require.True(t, settings.CityRealtimeSchedulerEnabled)
+	})
+
+	t.Run("persistence requires the parent city feature", func(t *testing.T) {
+		repo := &settingUpdateRepoStub{}
+		svc := NewSettingService(repo, &config.Config{})
+
+		err := svc.UpdateSettings(context.Background(), &SystemSettings{
+			CitySimulationEnabled:        true,
+			CityRealtimeSchedulerEnabled: true,
+		})
+		require.NoError(t, err)
+		require.Equal(t, "true", repo.updates[SettingKeyCityRealtimeSchedulerEnabled])
+
+		err = svc.UpdateSettings(context.Background(), &SystemSettings{
+			CitySimulationEnabled:        false,
+			CityRealtimeSchedulerEnabled: true,
+		})
+		require.NoError(t, err)
+		require.Equal(t, "false", repo.updates[SettingKeyCityRealtimeSchedulerEnabled])
+	})
+}
+
+func TestSettingService_CityPixelRendererSettings(t *testing.T) {
+	t.Run("missing values default to disabled", func(t *testing.T) {
+		svc := NewSettingService(&settingGetAllRepoStub{values: map[string]string{}}, &config.Config{})
+
+		settings, err := svc.GetAllSettings(context.Background())
+		require.NoError(t, err)
+		require.False(t, settings.CityPixelRendererEnabled)
+		require.False(t, settings.CityVisualPackPublishEnabled)
+	})
+
+	t.Run("child values require their parent features", func(t *testing.T) {
+		svc := NewSettingService(&settingGetAllRepoStub{values: map[string]string{
+			SettingKeyCitySimulationEnabled:        "false",
+			SettingKeyCityPixelRendererEnabled:     "true",
+			SettingKeyCityVisualPackPublishEnabled: "true",
+		}}, &config.Config{})
+
+		settings, err := svc.GetAllSettings(context.Background())
+		require.NoError(t, err)
+		require.False(t, settings.CityPixelRendererEnabled)
+		require.False(t, settings.CityVisualPackPublishEnabled)
+	})
+
+	t.Run("enabled hierarchy is parsed", func(t *testing.T) {
+		svc := NewSettingService(&settingGetAllRepoStub{values: map[string]string{
+			SettingKeyCitySimulationEnabled:        "true",
+			SettingKeyCityPixelRendererEnabled:     "true",
+			SettingKeyCityVisualPackPublishEnabled: "true",
+		}}, &config.Config{})
+
+		settings, err := svc.GetAllSettings(context.Background())
+		require.NoError(t, err)
+		require.True(t, settings.CityPixelRendererEnabled)
+		require.True(t, settings.CityVisualPackPublishEnabled)
+	})
+
+	t.Run("persistence closes children when their parent closes", func(t *testing.T) {
+		repo := &settingUpdateRepoStub{}
+		svc := NewSettingService(repo, &config.Config{})
+
+		err := svc.UpdateSettings(context.Background(), &SystemSettings{
+			CitySimulationEnabled:        true,
+			CityPixelRendererEnabled:     true,
+			CityVisualPackPublishEnabled: true,
+		})
+		require.NoError(t, err)
+		require.Equal(t, "true", repo.updates[SettingKeyCityPixelRendererEnabled])
+		require.Equal(t, "true", repo.updates[SettingKeyCityVisualPackPublishEnabled])
+
+		err = svc.UpdateSettings(context.Background(), &SystemSettings{
+			CitySimulationEnabled:        false,
+			CityPixelRendererEnabled:     true,
+			CityVisualPackPublishEnabled: true,
+		})
+		require.NoError(t, err)
+		require.Equal(t, "false", repo.updates[SettingKeyCityPixelRendererEnabled])
+		require.Equal(t, "false", repo.updates[SettingKeyCityVisualPackPublishEnabled])
+	})
+}
+
 func (s *defaultSubGroupReaderStub) GetByID(ctx context.Context, id int64) (*Group, error) {
 	s.calls = append(s.calls, id)
 	if err, ok := s.errBy[id]; ok {

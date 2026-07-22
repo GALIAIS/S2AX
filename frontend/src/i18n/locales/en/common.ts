@@ -55,7 +55,9 @@ export default {
     disable: 'Disable',
     more: 'More',
     menu: 'Menu',
+    toggleMenu: 'Toggle menu',
     userMenu: 'User menu',
+    pageNotFound: 'Page not found',
     close: 'Close',
     clear: 'Clear',
     enabled: 'Enabled',
@@ -182,6 +184,7 @@ export default {
     virtualCurrency: 'Assets',
     accountAllocations: 'Assigned Accounts',
     citySimulation: 'City Simulation',
+    cityVisualPacks: 'City Visual Packs',
     virtualCurrencies: 'Virtual Currencies',
     virtualCurrencyIntegrations: 'Currency Integrations',
     accounts: 'Accounts',
@@ -505,6 +508,11 @@ export default {
       noCases: 'This character has no rule cases.', commandSuccess: 'The character fact was posted through the city tick.',
       commandQueued: 'The character command is queued for the world scheduler to post in a tick.',
       commandFailed: 'Open-world operation failed',
+      lifecycle: {
+        queued: 'The world-scheduler command is queued.',
+        success: 'World scheduling was updated through a city tick.',
+        failed: 'World scheduling operation failed'
+      },
       counters: { actors: 'Actors', facts: 'Facts', cases: 'Cases' },
       members: {
         title: 'World members and duties', count: '{count} active members', identity: 'Email or username',
@@ -577,7 +585,7 @@ export default {
       portals: {
         title: 'Portal state and access control', loading: 'Loading portal projection…', count: '{count} portals', empty: 'This world has no active portals.',
         direction: 'Direction', version: 'Version', policy: 'Access policy', actorAccess: 'Selected actor', fixedOpen: 'Stairs remain open',
-        outOfRange: 'Move the actor next to this portal', editPolicy: 'Edit policy', policyEditor: 'Portal access policy editor',
+        outOfRange: 'Move the actor next to this portal', endpointRequired: 'Move the actor onto this portal endpoint', traverse: 'Traverse portal', editPolicy: 'Edit policy', policyEditor: 'Portal access policy editor',
         policyHint: 'The server validates and posts each policy as a fact. Saving replaces the portal’s complete access requirement.', portal: 'Target portal',
         policyMode: 'Policy condition', noDefinitions: 'No definitions available', minimumStacks: 'Minimum status stacks', factType: 'Fact type',
         windowTicks: 'Window (ticks)', scaledThreshold: 'Attribute threshold', integerThreshold: 'Integer threshold', savePolicy: 'Save access policy',
@@ -617,15 +625,110 @@ export default {
       action: 'New city', title: 'Create city world', name: 'City name',
       namePlaceholder: 'For example: Harbor Test City', timezone: 'IANA time zone',
       timezoneHint: 'Used for city calendar boundaries, for example Asia/Shanghai.', creating: 'Creating…',
+      mode: 'World mode', standardMode: 'Standard open world', realtimeMode: 'Shared realtime pixel world',
+      standardHint: 'Uses the existing open-world runtime for compatibility testing and established city features.',
+      realtimeHint: 'Requires a server-owned, trusted NTP/NTS clock. The server pins the clock, engine, and content versions.',
       style: 'World-generation style', stylePlaceholder: 'Choose a style',
       styleHint: 'Creation freezes the generator, regional style, and glyph rule set; it does not reuse the legacy fixed F7 map.',
       styleLoadFailed: 'Unable to load the open-world style catalog',
       confirm: 'Create open world', success: 'City world created', failed: 'Failed to create city world'
     },
+    realtime: {
+      world: 'City world', sharedWorld: 'Shared realtime world', worldTime: 'World time',
+      zoomOut: 'Zoom out pixel map', zoomIn: 'Zoom in pixel map', refresh: 'Synchronize world projection', returnToSpawn: 'Return to spawn',
+      mapTitle: 'PIXEL WORLD / Shared local map', mapSubtitle: '{chunks} cached Chunks · {actors} visible actors · {cursor}',
+      viewportAria: 'Shared pixel world map. Drag or use arrow keys to pan, use the wheel to zoom, and select a Cell to inspect world facts.',
+      loading: 'Loading shared pixel world', loadingDescription: 'Verifying server spatial hashes and loading visible Chunks…',
+      loadingChunks: 'Loading nearby Chunks', loadFailed: 'Unable to load shared realtime world',
+      rendererDisabledTitle: 'Shared pixel rendering is disabled',
+      rendererDisabledDescription: 'An administrator has temporarily closed this realtime world’s pixel content plane. World data and its timeline remain intact and become available again after re-enabling it.',
+      dragHint: 'Drag to inspect the same city; viewport caching never resets world state.', panHint: 'Pan', zoomHint: 'Zoom', spawnHint: 'Return to spawn',
+      clock: { live: 'Server live projection', committed: 'Committed timeline' },
+      character: {
+        eyebrow: 'My character', title: 'Shared-world identity', loading: 'Loading your character state…',
+        label: 'Public character name', labelPlaceholder: 'For example: Haru Tanaka', createHint: 'Appears only on the shared map; it never discloses your account, prompt, or Agent configuration.',
+        create: 'Create character', creating: 'Creating character…', createFailed: 'Unable to create character', loadFailed: 'Unable to load your character state',
+        runtimeUnavailable: 'This historic world is not bound to the character runtime. You can keep viewing it, but cannot create a character in it.',
+        selectTarget: 'Select an adjacent visible Cell as the movement target.', selectedTarget: 'Target: {x} / {y} / {z}',
+        move: 'Move to target', moving: 'Submitting movement…', moveFailed: 'Unable to move character', adjacentOnly: 'Movement is limited to one adjacent Cell on the same layer.',
+        portals: {
+          title: 'Portal transition', serverAuthoritative: 'Static route verified by server',
+          completed: '{direction} completed', failed: 'Unable to traverse portal',
+          directions: { enter: 'Enter building', exit: 'Exit building', ascend: 'Go upstairs', descend: 'Go downstairs' }
+        },
+        interior: {
+          title: 'Interior navigation', floor: 'Floor {floor}', cellDescription: '{kind} at {x} / {y} / {z}',
+          kinds: { wall: 'Wall', window: 'Window', floor: 'Floor', door: 'Door', furniture: 'Furnishing' }
+        },
+        life: {
+          title: 'Life state', localOnly: 'Local to this city; not redeemable platform balance',
+          energy: 'Energy', satiety: 'Satiety', morale: 'Morale', standing: 'Civic standing',
+          cityCredit: 'City credit', rations: 'Rations'
+        },
+        progression: {
+          title: 'Character progression', private: 'Only visible to you · sealed by server', archetypeSelect: 'Starting archetype', archetype: 'Archetype',
+          experience: 'Total experience', currentRoles: 'Current roles', available: 'Eligible', active: 'Active role',
+          change: 'Change role', changing: 'Changing role…', changeFailed: 'Unable to change role', none: 'None',
+          changed: 'Role changed from “{from}” to “{to}”',
+          unavailable: {
+            civic_standing: 'Civic standing requirement not met', experience: 'Experience requirement not met',
+            role: 'Required role not held', attribute: 'Attribute requirement not met', requirements: 'Requirements not met'
+          },
+          requirements: {
+            none: 'No additional requirements', standing: 'Civic standing {value}', experience: 'Experience {value}',
+            attribute: '{attribute} {value}', role: 'Requires {role}'
+          },
+          attributes: { communication: 'Communication', coordination: 'Coordination', discipline: 'Discipline', reasoning: 'Reasoning', vitality: 'Vitality' },
+          archetypes: { residentGeneralist: 'City generalist', residentSocial: 'Community resident', residentTechnical: 'Technical resident' },
+          roles: { resident: 'Resident', civicAide: 'Civic aide', maintenanceWorker: 'Maintenance worker', communitySteward: 'Community steward' }
+        },
+        activities: {
+          title: 'Current actions', serverAuthoritative: 'Availability is derived from sealed server state',
+          available: 'Ready', unavailable: 'Unavailable', cooldown: 'Cooldown {seconds}s',
+          locationRequired: 'Requires a road or sidewalk', inventoryRequired: 'A ration is required', needsRequired: 'Energy or satiety is too low; rest or eat first',
+          roleRequired: 'Requires the appropriate role', progressionRequired: 'Character progression is unavailable',
+          completed: 'Completed {activity}', completedWithExperience: 'Completed {activity}: {experience}', penalized: '{activity} caused a penalty: {amount} city credit',
+          failed: 'Unable to perform activity',
+          labels: {
+            restShort: 'Short rest', civicShift: 'Civic shift', consumeRation: 'Consume ration',
+            civicCleanup: 'Civic cleanup', conductDisruption: 'Disrupt public order', publicServiceStudy: 'Public service study',
+            civicService: 'Civic service', maintenanceShift: 'Maintenance shift'
+          }
+        },
+        history: { title: 'My activity history', private: 'Only visible to you', completed: 'Completed', penalized: 'Penalized' },
+        agent: {
+          title: 'Character Agent', description: 'Personality and control mode belong only to this character. Every action is still checked by server-side world rules and settled on a later timeline frame.',
+          mode: 'Control mode', personalityRevision: 'Personality revision', queue: 'Queue state',
+          values: 'Core values', valuesPlaceholder: 'For example: community, curiosity (comma or newline separated)',
+          boundaries: 'Hard boundaries', boundariesPlaceholder: 'For example: avoid harm, respect consent (comma or newline separated)',
+          background: 'Background', backgroundPlaceholder: 'Optional: facts known to the character',
+          notes: 'Additional notes', notesPlaceholder: 'Optional personality data, not executable instructions',
+          ownerPrivate: 'Personality is returned only to the character owner. It never enters the shared map, other members’ projections, or Agent observation payloads.',
+          save: 'Save and apply', saving: 'Sealing configuration…', saved: 'Character Agent switched to “{mode}”.', saveFailed: 'Unable to save Character Agent configuration',
+          personalityRequired: 'At least one core value is required before autonomous mode can be enabled.',
+          personalityInvalid: 'Invalid personality fields: add at least one core value; each list is limited to eight unique entries.',
+          manualControlUnavailable: 'The character is in “{mode}” mode. Movement, portals, activities, and role changes are managed by the Character Agent.',
+          queueIdle: 'Idle', queueDecision: 'Awaiting decision', queueIntent: 'Awaiting execution',
+          modes: { manual: 'Manual', assisted: 'Assisted', autonomous: 'Autonomous', suspended: 'Suspended' }
+        }
+      },
+      inspector: {
+        eyebrow: 'Member-safe spatial facts', title: 'Map inspector', coordinate: 'World coordinate', chunk: 'Chunk', terrain: 'Base terrain',
+        building: 'Building', actor: 'Visible actor', floors: 'floors', layers: 'Content layers', noLayers: 'This Cell has no additional visible content layers.',
+        emptyTitle: 'Select a map position', emptyDescription: 'Select a loaded pixel Cell to inspect the server-provided terrain, structures, and visible semantic layers.',
+        viewerScope: 'Viewer scope', staticHash: 'Static projection hash'
+      }
+    },
     openWorld: {
       world: 'Open world', profile: 'World style', generator: 'Generator {version}',
       refresh: 'Reload server world facts', returnToSpawn: 'Return to spawn', nearestInterior: 'Focus nearest materialized interior',
       materializeSector: 'Generate and seal the sector at the current view', materializeFailed: 'The sector-materialization command was not applied',
+      lifecycle: {
+        title: 'World scheduler', tick: 'T{tick} · {cadence}', speed: 'Play cadence',
+        start: 'Start world', pause: 'Pause world',
+        pausedHint: 'This world is paused. Persistent movement and automatic actions continue after an administrator starts it.',
+        status: { running: 'Running', paused: 'Paused' }
+      },
 	  verifyCurrentRegion: 'Verify sealed map facts for the current Region', regionVerified: 'Current Region map facts verified',
 	  worldVerified: 'Whole-world state and canonical hash verified', verificationSummary: '{sectors} sector(s) · {chunks} Chunk(s)',
 	  verificationFailed: 'Map verification returned a mismatched scope',

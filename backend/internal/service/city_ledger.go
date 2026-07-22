@@ -35,6 +35,10 @@ const (
 	cityLedgerRejectionJournalNotFound   = "CITY_LEDGER_JOURNAL_NOT_FOUND"
 	cityLedgerRejectionReversalForbidden = "CITY_LEDGER_REVERSAL_NOT_ALLOWED"
 	cityLedgerRejectionAlreadyReversed   = "CITY_LEDGER_ALREADY_REVERSED"
+	// The V23 freight reserve is an explicit, audited domain fund. Generic
+	// ledger commands and generic reversals must never become an alternate way
+	// to fund, drain, or undo its carrier-claim evidence.
+	cityLedgerRejectionReservedEntityControlled = "CITY_LEDGER_RESERVED_ENTITY_CONTROLLED"
 )
 
 var ErrCityJournalNotFound = infraerrors.NotFound("CITY_JOURNAL_NOT_FOUND", "city journal not found")
@@ -726,6 +730,10 @@ FROM city_economic_entities
 WHERE world_id = $1
   AND status = 'active'
   AND entity_type IN ('household', 'firm', 'government')
+	-- A versioned domain may introduce an unfunded reserve firm that must gain
+	-- capital only through its own audited command protocol. Never turn that
+	-- explicit reserve into an accidental generic opening balance.
+  AND COALESCE(metadata ->> 'opening_policy', '') <> 'manual_reserve_only'
 ORDER BY entity_type ASC, code ASC`, worldID)
 	if err != nil {
 		return nil, firstJournalSequence, fmt.Errorf("load city opening entities: %w", err)
@@ -755,31 +763,75 @@ ORDER BY entity_type ASC, code ASC`, worldID)
 	if len(entities) == 0 {
 		return nil, firstJournalSequence, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "opening_entities"})
 	}
-	var openingCount, journalCount int
-	if err = tx.QueryRowContext(ctx, `
-SELECT COUNT(*) FILTER (WHERE journal_type = 'opening'), COUNT(*)
-FROM city_journals
-WHERE world_id = $1`, worldID).Scan(&openingCount, &journalCount); err != nil {
-		return nil, firstJournalSequence, fmt.Errorf("inspect city ledger bootstrap: %w", err)
+	// The ledger can gain a new active economic entity through a versioned
+	// foundation upgrade (for example the V15 trade buyer). Opening entries are
+	// therefore idempotent per entity, rather than an all-or-nothing first-tick
+	// operation. Existing opening journals remain immutable and every newly
+	// discovered entity must still start from untouched account projections.
+	entityByKey := make(map[string]openingEntity, len(entities))
+	for _, entity := range entities {
+		entityByKey[entity.entityType+"\x00"+entity.code] = entity
 	}
-	if openingCount == len(entities) {
+	openingRows, queryErr := tx.QueryContext(ctx, `
+SELECT metadata ->> 'entity_type', metadata ->> 'entity_code'
+FROM city_journals
+WHERE world_id = $1 AND journal_type = 'opening'
+ORDER BY id ASC`, worldID)
+	if queryErr != nil {
+		return nil, firstJournalSequence, fmt.Errorf("load city ledger opening journals: %w", queryErr)
+	}
+	opened := make(map[string]struct{}, len(entities))
+	for openingRows.Next() {
+		var entityType, code sql.NullString
+		if queryErr = openingRows.Scan(&entityType, &code); queryErr != nil {
+			_ = openingRows.Close()
+			return nil, firstJournalSequence, fmt.Errorf("scan city ledger opening journal: %w", queryErr)
+		}
+		if !entityType.Valid || !code.Valid {
+			_ = openingRows.Close()
+			return nil, firstJournalSequence, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "opening_journal_metadata"})
+		}
+		key := entityType.String + "\x00" + code.String
+		if _, exists := entityByKey[key]; !exists {
+			_ = openingRows.Close()
+			return nil, firstJournalSequence, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "opening_journal_entity"})
+		}
+		if _, exists := opened[key]; exists {
+			_ = openingRows.Close()
+			return nil, firstJournalSequence, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "opening_journal_duplicate"})
+		}
+		opened[key] = struct{}{}
+	}
+	if queryErr = openingRows.Err(); queryErr != nil {
+		_ = openingRows.Close()
+		return nil, firstJournalSequence, fmt.Errorf("iterate city ledger opening journals: %w", queryErr)
+	}
+	_ = openingRows.Close()
+	missing := make([]openingEntity, 0, len(entities))
+	for _, entity := range entities {
+		if _, exists := opened[entity.entityType+"\x00"+entity.code]; !exists {
+			missing = append(missing, entity)
+		}
+	}
+	if len(missing) == 0 {
 		return []cityLedgerBootstrapEvent{}, firstJournalSequence, nil
 	}
-	if openingCount != 0 || journalCount != 0 {
-		return nil, firstJournalSequence, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "opening_journal_count"})
+	for _, entity := range missing {
+		var dirtyAccounts int
+		if err = tx.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM city_accounts
+WHERE world_id = $1 AND entity_id = $2
+  AND (current_balance_units <> 0 OR version <> 0)`, worldID, entity.id).Scan(&dirtyAccounts); err != nil {
+			return nil, firstJournalSequence, fmt.Errorf("inspect city opening account projection: %w", err)
+		}
+		if dirtyAccounts != 0 {
+			return nil, firstJournalSequence, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "pre_opening_account_projection"})
+		}
 	}
-	var dirtyAccounts int
-	if err = tx.QueryRowContext(ctx, `
-SELECT COUNT(*) FROM city_accounts
-WHERE world_id = $1 AND (current_balance_units <> 0 OR version <> 0)`, worldID).Scan(&dirtyAccounts); err != nil {
-		return nil, firstJournalSequence, fmt.Errorf("inspect city pre-ledger balances: %w", err)
-	}
-	if dirtyAccounts != 0 {
-		return nil, firstJournalSequence, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "pre_ledger_account_projection"})
-	}
-	events := make([]cityLedgerBootstrapEvent, 0, len(entities))
+	events := make([]cityLedgerBootstrapEvent, 0, len(missing))
 	sequence := firstJournalSequence
-	for _, entity := range entities {
+	for _, entity := range missing {
 		amount, amountErr := cityOpeningAmountUnits(entity.majorUnits, unit.scale)
 		if amountErr != nil {
 			return nil, firstJournalSequence, amountErr
@@ -1145,7 +1197,22 @@ SELECT EXISTS (SELECT 1 FROM city_journals WHERE reversal_of_journal_id = $1)`, 
 	default:
 		return nil, ErrCitySimulationInvariant.WithMetadata(map[string]string{"command_type": command.CommandType})
 	}
+	if err := rejectCityLedgerReservedEntityMutation(spec); err != nil {
+		return nil, err
+	}
 	return postCityJournal(ctx, tx, spec)
+}
+
+// rejectCityLedgerReservedEntityMutation is deliberately applied only to the
+// generic ledger command reducer. Domain-owned reducers such as V23 construct
+// their journals directly after validating their own stronger contracts.
+func rejectCityLedgerReservedEntityMutation(spec cityLedgerJournalSpec) error {
+	for _, line := range spec.lines {
+		if line.account != nil && line.account.entityCode == cityOpenWorldCarrierRecoveryFirmCode {
+			return cityLedgerReject(cityLedgerRejectionReservedEntityControlled)
+		}
+	}
+	return nil
 }
 
 func cityTransferEntityTypeAllowed(entityType string) bool {

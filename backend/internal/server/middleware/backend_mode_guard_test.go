@@ -469,3 +469,125 @@ func TestCitySimulationGuard(t *testing.T) {
 		})
 	}
 }
+
+func TestCityRealtimePixelRendererGuard(t *testing.T) {
+	tests := []struct {
+		name       string
+		nilService bool
+		city       string
+		renderer   string
+		wantStatus int
+	}{
+		{
+			name:       "nil_service_fails_closed",
+			nilService: true,
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "parent_city_feature_disabled",
+			city:       "false",
+			renderer:   "true",
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "renderer_disabled",
+			city:       "true",
+			renderer:   "false",
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "renderer_enabled",
+			city:       "true",
+			renderer:   "true",
+			wantStatus: http.StatusNoContent,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			router := gin.New()
+			var settingService *service.SettingService
+			if !tc.nilService {
+				settingService = service.NewSettingService(&bmSettingRepo{values: map[string]string{
+					service.SettingKeyCitySimulationEnabled:    tc.city,
+					service.SettingKeyCityPixelRendererEnabled: tc.renderer,
+				}}, &config.Config{})
+			}
+			router.Use(CityRealtimePixelRendererGuard(settingService))
+			router.GET("/city/realtime", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/city/realtime", nil))
+			require.Equal(t, tc.wantStatus, response.Code)
+		})
+	}
+}
+
+func TestCityVisualPackPublishGuard(t *testing.T) {
+	tests := []struct {
+		name       string
+		nilService bool
+		city       string
+		renderer   string
+		publish    string
+		wantStatus int
+	}{
+		{
+			name:       "nil_service_fails_closed",
+			nilService: true,
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "parent_city_feature_disabled",
+			city:       "false",
+			renderer:   "true",
+			publish:    "true",
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "renderer_disabled",
+			city:       "true",
+			renderer:   "false",
+			publish:    "true",
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "publication_disabled",
+			city:       "true",
+			renderer:   "true",
+			publish:    "false",
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "all_levels_enabled",
+			city:       "true",
+			renderer:   "true",
+			publish:    "true",
+			wantStatus: http.StatusNoContent,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			router := gin.New()
+			var settingService *service.SettingService
+			if !tc.nilService {
+				settingService = service.NewSettingService(&bmSettingRepo{values: map[string]string{
+					service.SettingKeyCitySimulationEnabled:        tc.city,
+					service.SettingKeyCityPixelRendererEnabled:     tc.renderer,
+					service.SettingKeyCityVisualPackPublishEnabled: tc.publish,
+				}}, &config.Config{})
+			}
+			router.Use(CityVisualPackPublishGuard(settingService))
+			router.POST("/admin/city/visual-packs", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/admin/city/visual-packs", nil))
+			require.Equal(t, tc.wantStatus, response.Code)
+		})
+	}
+}

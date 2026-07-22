@@ -268,7 +268,9 @@ func decodeCanonicalCitySnapshot(canonical []byte, simulationVersion string) (ci
 	}
 	switch simulationVersion {
 	case CitySimulationVersionOpenWorld, CitySimulationVersionOpenWorldV2, CitySimulationVersionOpenWorldV3,
-		CitySimulationVersionOpenWorldV4, CitySimulationVersionOpenWorldV5,
+		CitySimulationVersionOpenWorldV4, CitySimulationVersionOpenWorldV5, CitySimulationVersionOpenWorldV6,
+		CitySimulationVersionOpenWorldV7, CitySimulationVersionOpenWorldV8, CitySimulationVersionOpenWorldV9, CitySimulationVersionOpenWorldV10, CitySimulationVersionOpenWorldV11, CitySimulationVersionOpenWorldV12, CitySimulationVersionOpenWorldV13, CitySimulationVersionOpenWorldV14, CitySimulationVersionOpenWorldV15,
+		CitySimulationVersionOpenWorldV16, CitySimulationVersionOpenWorldV17, CitySimulationVersionOpenWorldV18, CitySimulationVersionOpenWorldV19, CitySimulationVersionOpenWorldV20, CitySimulationVersionOpenWorldV21, CitySimulationVersionOpenWorldV22, CitySimulationVersionOpenWorldV23, CitySimulationVersionOpenWorldV24,
 		CitySimulationVersionF6, CitySimulationVersionF6V2, CitySimulationVersionF6V3,
 		CitySimulationVersionF7, CitySimulationVersionF7V2, CitySimulationVersionF7V3,
 		CitySimulationVersionF7V4, CitySimulationVersionF7V5, CitySimulationVersionF7V6,
@@ -300,6 +302,137 @@ func decodeCanonicalCitySnapshot(canonical []byte, simulationVersion string) (ci
 		if !cityEngineSupportsOpenWorldSocialRuntime(simulationVersion) && state.OpenWorldRuntime != nil &&
 			state.OpenWorldRuntime.Social != nil {
 			return cityHashState{}, nil, fmt.Errorf("pre-V5 open-world snapshot cannot contain social state")
+		}
+		if cityEngineSupportsOpenWorldServiceCoordination(simulationVersion) &&
+			(state.OpenWorldRuntime == nil || state.OpenWorldRuntime.Services == nil) {
+			return cityHashState{}, nil, fmt.Errorf("city open-world V7 snapshot requires service state")
+		}
+		if !cityEngineSupportsOpenWorldServiceCoordination(simulationVersion) && state.OpenWorldRuntime != nil &&
+			state.OpenWorldRuntime.Services != nil {
+			return cityHashState{}, nil, fmt.Errorf("pre-V7 open-world snapshot cannot contain service state")
+		}
+		if cityEngineSupportsOpenWorldImpactBridge(simulationVersion) &&
+			(state.OpenWorldRuntime == nil || state.OpenWorldRuntime.Impacts == nil) {
+			return cityHashState{}, nil, fmt.Errorf("city open-world V8 snapshot requires impact state")
+		}
+		if !cityEngineSupportsOpenWorldImpactBridge(simulationVersion) && state.OpenWorldRuntime != nil &&
+			state.OpenWorldRuntime.Impacts != nil {
+			return cityHashState{}, nil, fmt.Errorf("pre-V8 open-world snapshot cannot contain impact state")
+		}
+		if cityEngineSupportsOpenWorldMobility(simulationVersion) &&
+			(state.OpenWorldRuntime == nil || state.OpenWorldRuntime.Mobility == nil) {
+			return cityHashState{}, nil, fmt.Errorf("city open-world V9 snapshot requires mobility state")
+		}
+		if !cityEngineSupportsOpenWorldMobility(simulationVersion) && state.OpenWorldRuntime != nil &&
+			state.OpenWorldRuntime.Mobility != nil {
+			return cityHashState{}, nil, fmt.Errorf("pre-V9 open-world snapshot cannot contain mobility state")
+		}
+		if cityEngineSupportsOpenWorldArrivalBridge(simulationVersion) &&
+			(state.OpenWorldRuntime == nil || state.OpenWorldRuntime.Arrivals == nil) {
+			return cityHashState{}, nil, fmt.Errorf("city open-world V10 snapshot requires arrival state")
+		}
+		if !cityEngineSupportsOpenWorldArrivalBridge(simulationVersion) && state.OpenWorldRuntime != nil &&
+			state.OpenWorldRuntime.Arrivals != nil {
+			return cityHashState{}, nil, fmt.Errorf("pre-V10 open-world snapshot cannot contain arrival state")
+		}
+		if cityEngineSupportsOpenWorldMobilityOD(simulationVersion) &&
+			(state.OpenWorldRuntime == nil || state.OpenWorldRuntime.OD == nil) {
+			return cityHashState{}, nil, fmt.Errorf("city open-world V11 snapshot requires OD state")
+		}
+		if !cityEngineSupportsOpenWorldMobilityOD(simulationVersion) && state.OpenWorldRuntime != nil &&
+			state.OpenWorldRuntime.OD != nil {
+			return cityHashState{}, nil, fmt.Errorf("pre-V11 open-world snapshot cannot contain OD state")
+		}
+		if cityEngineSupportsOpenWorldCommuteBindings(simulationVersion) &&
+			(state.OpenWorldRuntime == nil || state.OpenWorldRuntime.Commutes == nil) {
+			return cityHashState{}, nil, fmt.Errorf("city open-world V12 snapshot requires commute binding state")
+		}
+		if !cityEngineSupportsOpenWorldCommuteBindings(simulationVersion) && state.OpenWorldRuntime != nil &&
+			state.OpenWorldRuntime.Commutes != nil {
+			return cityHashState{}, nil, fmt.Errorf("pre-V12 open-world snapshot cannot contain commute binding state")
+		}
+		if cityEngineSupportsOpenWorldCommuteSources(simulationVersion) &&
+			(state.OpenWorldRuntime == nil || state.OpenWorldRuntime.CommuteSources == nil) {
+			return cityHashState{}, nil, fmt.Errorf("city open-world V13 snapshot requires commute source state")
+		}
+		if !cityEngineSupportsOpenWorldCommuteSources(simulationVersion) && state.OpenWorldRuntime != nil &&
+			state.OpenWorldRuntime.CommuteSources != nil {
+			return cityHashState{}, nil, fmt.Errorf("pre-V13 open-world snapshot cannot contain commute source state")
+		}
+		if cityEngineSupportsOpenWorldCommuteLifecycle(simulationVersion) &&
+			(state.OpenWorldRuntime == nil || state.OpenWorldRuntime.CommuteLifecycle == nil) {
+			return cityHashState{}, nil, fmt.Errorf("city open-world V14 snapshot requires commute lifecycle state")
+		}
+		if !cityEngineSupportsOpenWorldCommuteLifecycle(simulationVersion) && state.OpenWorldRuntime != nil &&
+			state.OpenWorldRuntime.CommuteLifecycle != nil {
+			return cityHashState{}, nil, fmt.Errorf("pre-V14 open-world snapshot cannot contain commute lifecycle state")
+		}
+		if cityEngineSupportsOpenWorldSupplyChain(simulationVersion) &&
+			(state.OpenWorldRuntime == nil || state.OpenWorldRuntime.SupplyChain == nil) {
+			return cityHashState{}, nil, fmt.Errorf("city open-world V15 snapshot requires supply-chain state")
+		}
+		if !cityEngineSupportsOpenWorldSupplyChain(simulationVersion) && state.OpenWorldRuntime != nil &&
+			state.OpenWorldRuntime.SupplyChain != nil {
+			return cityHashState{}, nil, fmt.Errorf("pre-V15 open-world snapshot cannot contain supply-chain state")
+		}
+		if cityEngineSupportsOpenWorldEnterpriseFreight(simulationVersion) &&
+			(state.OpenWorldRuntime == nil || state.OpenWorldRuntime.EnterpriseFreight == nil) {
+			return cityHashState{}, nil, fmt.Errorf("city open-world V16 snapshot requires enterprise-freight state")
+		}
+		if !cityEngineSupportsOpenWorldEnterpriseFreight(simulationVersion) && state.OpenWorldRuntime != nil &&
+			state.OpenWorldRuntime.EnterpriseFreight != nil {
+			return cityHashState{}, nil, fmt.Errorf("pre-V16 open-world snapshot cannot contain enterprise-freight state")
+		}
+		if cityEngineSupportsOpenWorldEnterpriseFreightReceipts(simulationVersion) &&
+			(state.OpenWorldRuntime == nil || state.OpenWorldRuntime.EnterpriseFreightReceipts == nil) {
+			return cityHashState{}, nil, fmt.Errorf("city open-world V17 snapshot requires freight-receipt state")
+		}
+		if !cityEngineSupportsOpenWorldEnterpriseFreightReceipts(simulationVersion) && state.OpenWorldRuntime != nil &&
+			state.OpenWorldRuntime.EnterpriseFreightReceipts != nil {
+			return cityHashState{}, nil, fmt.Errorf("pre-V17 open-world snapshot cannot contain freight-receipt state")
+		}
+		if cityEngineSupportsOpenWorldFreightBatches(simulationVersion) &&
+			(state.OpenWorldRuntime == nil || state.OpenWorldRuntime.EnterpriseFreightBatches == nil) {
+			return cityHashState{}, nil, fmt.Errorf("city open-world V18 snapshot requires freight-batch state")
+		}
+		if !cityEngineSupportsOpenWorldFreightBatches(simulationVersion) && state.OpenWorldRuntime != nil &&
+			state.OpenWorldRuntime.EnterpriseFreightBatches != nil {
+			return cityHashState{}, nil, fmt.Errorf("pre-V18 open-world snapshot cannot contain freight-batch state")
+		}
+		if cityEngineSupportsOpenWorldSpatialNetwork(simulationVersion) &&
+			(state.OpenWorldRuntime == nil || state.OpenWorldRuntime.SpatialNetwork == nil) {
+			return cityHashState{}, nil, fmt.Errorf("city open-world V19 snapshot requires spatial-network state")
+		}
+		if !cityEngineSupportsOpenWorldSpatialNetwork(simulationVersion) && state.OpenWorldRuntime != nil &&
+			state.OpenWorldRuntime.SpatialNetwork != nil {
+			return cityHashState{}, nil, fmt.Errorf("pre-V19 open-world snapshot cannot contain spatial-network state")
+		}
+		if cityEngineSupportsOpenWorldInfrastructure(simulationVersion) &&
+			(state.OpenWorldRuntime == nil || state.OpenWorldRuntime.Infrastructure == nil) {
+			return cityHashState{}, nil, fmt.Errorf("city open-world V20 snapshot requires infrastructure state")
+		}
+		if !cityEngineSupportsOpenWorldInfrastructure(simulationVersion) && state.OpenWorldRuntime != nil &&
+			state.OpenWorldRuntime.Infrastructure != nil {
+			return cityHashState{}, nil, fmt.Errorf("pre-V20 open-world snapshot cannot contain infrastructure state")
+		}
+		if cityEngineSupportsOpenWorldEffectiveCapacity(simulationVersion) &&
+			(state.OpenWorldRuntime == nil || state.OpenWorldRuntime.EffectiveCapacity == nil) {
+			return cityHashState{}, nil, fmt.Errorf("city open-world V21 snapshot requires effective-capacity state")
+		}
+		if !cityEngineSupportsOpenWorldEffectiveCapacity(simulationVersion) && state.OpenWorldRuntime != nil &&
+			state.OpenWorldRuntime.EffectiveCapacity != nil {
+			return cityHashState{}, nil, fmt.Errorf("pre-V21 open-world snapshot cannot contain effective-capacity state")
+		}
+		if cityEngineSupportsWorldVersionVector(simulationVersion) && state.VersionVector == nil {
+			return cityHashState{}, nil, fmt.Errorf("city open-world V6 snapshot requires a version vector")
+		}
+		if !cityEngineSupportsWorldVersionVector(simulationVersion) && state.VersionVector != nil {
+			return cityHashState{}, nil, fmt.Errorf("pre-V6 city snapshot cannot contain a version vector")
+		}
+		if state.VersionVector != nil {
+			if err := validateCityWorldVersionVector(*state.VersionVector); err != nil {
+				return cityHashState{}, nil, fmt.Errorf("invalid city snapshot version vector: %w", err)
+			}
 		}
 		if cityEngineSupportsSpatial(simulationVersion) && state.Spatial == nil {
 			return cityHashState{}, nil, fmt.Errorf("city F7 snapshot requires spatial state")
@@ -894,6 +1027,40 @@ func applyCityTickFacts(
 			stageErr = replayCityResourceEntries(ctx, queryer, worldID, tick.Tick, state)
 		case cityEngineStageCalendarDemography:
 			stageErr = replayCityCalendarAndPopulation(ctx, queryer, worldID, tick.Tick, state)
+		case cityEngineStageOpenWorld:
+			stageErr = replayCityOpenWorldCheckpoint(ctx, queryer, worldID, tick.Tick, state)
+		case cityEngineStageOpenWorldServices:
+			stageErr = replayCityOpenWorldServiceCheckpoint(tick.Tick, state)
+		case cityEngineStageOpenWorldImpacts:
+			stageErr = replayCityOpenWorldImpactCheckpoint(tick.Tick, state)
+		case cityEngineStageOpenWorldMobilityOD:
+			stageErr = replayCityOpenWorldMobilityODCheckpoint(tick.Tick, state)
+		case cityEngineStageOpenWorldCommutes:
+			stageErr = replayCityOpenWorldCommuteSourceCheckpoint(tick.Tick, state)
+		case cityEngineStageOpenWorldCommuteLifecycle:
+			stageErr = replayCityOpenWorldCommuteLifecycleCheckpoint(tick.Tick, state)
+		case cityEngineStageOpenWorldSupplyChain:
+			stageErr = replayCityOpenWorldSupplyChainCheckpoint(tick.Tick, state)
+		case cityEngineStageOpenWorldEnterpriseFreight:
+			stageErr = replayCityOpenWorldEnterpriseFreightCheckpoint(tick.Tick, state)
+		case cityEngineStageOpenWorldEnterpriseFreightReceipts:
+			stageErr = replayCityOpenWorldEnterpriseFreightReceiptCheckpoint(tick.Tick, state)
+		case cityEngineStageOpenWorldEnterpriseFreightBatches:
+			stageErr = replayCityOpenWorldFreightBatchCheckpoint(tick.Tick, state)
+		case cityEngineStageOpenWorldFreightSettlements:
+			stageErr = replayCityOpenWorldFreightSettlementCheckpoint(tick.Tick, state)
+		case cityEngineStageOpenWorldCarrierRecovery:
+			stageErr = replayCityOpenWorldCarrierRecoveryCheckpoint(tick.Tick, state)
+		case cityEngineStageOpenWorldCarrierCommerce:
+			stageErr = replayCityOpenWorldCarrierCommerceCheckpoint(tick.Tick, state)
+		case cityEngineStageOpenWorldInfrastructure:
+			stageErr = replayCityOpenWorldInfrastructureCheckpoint(tick.Tick, state)
+		case cityEngineStageOpenWorldMobility:
+			stageErr = replayCityOpenWorldMobilityCheckpoint(tick.Tick, state)
+		case cityEngineStageOpenWorldEffectiveCapacity:
+			stageErr = replayCityOpenWorldEffectiveCapacityCheckpoint(tick.Tick, state)
+		case cityEngineStageOpenWorldArrivals:
+			stageErr = replayCityOpenWorldMobilityArrivalCheckpoint(tick.Tick, state)
 		case cityEngineStageSpatial:
 			stageErr = replayCitySpatialMutations(ctx, queryer, worldID, tick.Tick, state)
 		case cityEngineStageDevelopment:
@@ -1627,7 +1794,13 @@ func (s *CityEconomyService) StartRecovery(ctx context.Context, input CityRecove
 	if world.memberRole != CityMemberRoleOwner {
 		return nil, ErrCityPermissionDenied
 	}
-	if cityEngineSupportsOpenWorld(world.simulationVersion) {
+	// V1--V3 snapshots intentionally keep immutable world-generation data as
+	// provenance hashes, not as a second mutable copy of generated map rows.
+	// Their static projection therefore cannot be repaired safely by a generic
+	// recovery run. V4+ owns a complete mutable runtime projection which can be
+	// reconstructed beneath the same immutable world-gen proof.
+	if cityEngineSupportsOpenWorld(world.simulationVersion) &&
+		!cityEngineSupportsOpenWorldRuntime(world.simulationVersion) {
 		return nil, ErrCitySimulationVersion.WithMetadata(map[string]string{"version": world.simulationVersion})
 	}
 	existing, err := loadCityRecoveryByRequest(ctx, tx, input.WorldID, input.UserID, requestID)
@@ -1825,6 +1998,10 @@ func restoreCityProjection(
 	if err != nil {
 		return 0, err
 	}
+	versionVectorGeneration := 0
+	if state.VersionVector != nil {
+		versionVectorGeneration = state.VersionVector.Generation
+	}
 	count := 0
 	apply := func(label, query string, args ...any) error {
 		result, execErr := tx.ExecContext(ctx, query, args...)
@@ -1842,11 +2019,28 @@ func restoreCityProjection(
 UPDATE city_worlds
 SET name = $2, status = $3, simulation_version = $4, seed = $5,
     current_tick = $6, simulated_at = $7, speed_multiplier = ($8::numeric / 1000),
-    timezone = $9, settings = $10::jsonb, state_hash = $11, updated_at = NOW()
+    timezone = $9, settings = $10::jsonb, state_hash = $11,
+    version_vector_generation = $12, updated_at = NOW()
 WHERE id = $1`, worldID, state.Name, state.Status, state.SimulationVersion, state.Seed,
 		state.CurrentTick, simulatedAt, state.SpeedMilli, state.Timezone, []byte(state.Settings),
-		targetHash); err != nil {
+		targetHash, versionVectorGeneration); err != nil {
 		return 0, err
+	}
+	if cityEngineSupportsWorldVersionVector(state.SimulationVersion) {
+		vectorCount, vectorErr := restoreCityWorldVersionVectorProjection(ctx, tx, worldID, *state.VersionVector)
+		if vectorErr != nil {
+			return 0, vectorErr
+		}
+		count += vectorCount
+	}
+	if cityEngineSupportsOpenWorldRuntime(state.SimulationVersion) {
+		runtimeCount, runtimeErr := restoreCityOpenWorldRuntimeProjection(
+			ctx, tx, worldID, state.SimulationVersion, state.OpenWorldRuntime,
+		)
+		if runtimeErr != nil {
+			return 0, runtimeErr
+		}
+		count += runtimeCount
 	}
 	for _, unit := range state.MonetaryUnits {
 		if err = apply("monetary unit "+unit.Code, `

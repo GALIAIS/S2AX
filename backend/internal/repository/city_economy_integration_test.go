@@ -45,16 +45,19 @@ func TestCityEconomyFoundationCreatesIsolatedAuthorizedChart(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, foundation)
 	worldID := foundation.World.ID
+	worldIDs := []int64{worldID}
 
 	t.Cleanup(func() {
 		tx, beginErr := integrationDB.BeginTx(ctx, nil)
 		if beginErr == nil {
-			_, _ = tx.ExecContext(ctx, "DELETE FROM city_accounts WHERE world_id = $1", worldID)
-			_, _ = tx.ExecContext(ctx, "DELETE FROM city_account_templates WHERE world_id = $1", worldID)
-			_, _ = tx.ExecContext(ctx, "DELETE FROM city_economic_entities WHERE world_id = $1", worldID)
-			_, _ = tx.ExecContext(ctx, "DELETE FROM city_monetary_units WHERE world_id = $1", worldID)
-			_, _ = tx.ExecContext(ctx, "DELETE FROM city_members WHERE world_id = $1", worldID)
-			_, _ = tx.ExecContext(ctx, "DELETE FROM city_worlds WHERE id = $1", worldID)
+			for _, cityWorldID := range worldIDs {
+				_, _ = tx.ExecContext(ctx, "DELETE FROM city_accounts WHERE world_id = $1", cityWorldID)
+				_, _ = tx.ExecContext(ctx, "DELETE FROM city_account_templates WHERE world_id = $1", cityWorldID)
+				_, _ = tx.ExecContext(ctx, "DELETE FROM city_economic_entities WHERE world_id = $1", cityWorldID)
+				_, _ = tx.ExecContext(ctx, "DELETE FROM city_monetary_units WHERE world_id = $1", cityWorldID)
+				_, _ = tx.ExecContext(ctx, "DELETE FROM city_members WHERE world_id = $1", cityWorldID)
+				_, _ = tx.ExecContext(ctx, "DELETE FROM city_worlds WHERE id = $1", cityWorldID)
+			}
 			_ = tx.Commit()
 		}
 		_ = client.User.DeleteOneID(outsider.ID).Exec(ctx)
@@ -90,15 +93,41 @@ func TestCityEconomyFoundationCreatesIsolatedAuthorizedChart(t *testing.T) {
 		require.True(t, found, "missing required %s account for %s", wantedAccounts[entity.EntityType], entity.EntityType)
 	}
 
-	worlds, err := cityService.ListWorlds(ctx, owner.ID)
-	require.NoError(t, err)
-	require.Len(t, worlds, 1)
-	require.Equal(t, worldID, worlds[0].ID)
-
 	_, err = cityService.GetWorld(ctx, outsider.ID, worldID)
 	require.ErrorIs(t, err, service.ErrCityWorldNotFound)
-	_, err = cityService.CreateWorld(ctx, service.CityWorldCreateInput{OwnerUserID: owner.ID, Name: "Duplicate"})
-	require.ErrorIs(t, err, service.ErrCityWorldExists)
+
+	secondFoundation, err := cityService.CreateWorld(ctx, service.CityWorldCreateInput{
+		OwnerUserID: owner.ID,
+		Name:        "Second Shared City " + suffix,
+	})
+	require.NoError(t, err)
+	secondWorldID := secondFoundation.World.ID
+	worldIDs = append(worldIDs, secondWorldID)
+	require.NotEqual(t, worldID, secondWorldID)
+
+	worlds, err := cityService.ListWorlds(ctx, owner.ID)
+	require.NoError(t, err)
+	require.Len(t, worlds, 2)
+	require.ElementsMatch(t, []int64{worldID, secondWorldID}, []int64{worlds[0].ID, worlds[1].ID})
+
+	_, err = cityService.AddWorldMember(ctx, service.CityMemberAddInput{
+		UserID: owner.ID, WorldID: worldID, Identity: outsider.Email, Role: service.CityMemberRoleViewer,
+	})
+	require.NoError(t, err)
+	outsiderWorlds, err := cityService.ListWorlds(ctx, outsider.ID)
+	require.NoError(t, err)
+	require.Len(t, outsiderWorlds, 1)
+	require.Equal(t, worldID, outsiderWorlds[0].ID)
+	members, err := cityService.ListWorldMembers(ctx, outsider.ID, worldID)
+	require.NoError(t, err)
+	require.Len(t, members, 2)
+	for _, member := range members {
+		require.Empty(t, member.Email)
+	}
+	adminMembers, err := cityService.ListWorldMembers(service.WithCitySystemAdministrator(ctx), owner.ID, worldID)
+	require.NoError(t, err)
+	require.Len(t, adminMembers, 2)
+	require.NotEmpty(t, adminMembers[0].Email)
 
 	baseUnitTx, err := integrationDB.BeginTx(ctx, nil)
 	require.NoError(t, err)

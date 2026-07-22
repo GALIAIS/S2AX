@@ -1,6 +1,7 @@
 package cityspatial
 
 import (
+	"container/heap"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
@@ -60,6 +61,55 @@ type buildingLayoutBounds struct {
 }
 
 type buildingLayoutFrontage uint8
+
+// buildingLayoutPathNode is the deterministic weighted-search item used when
+// an irregular generated envelope has a narrow connector. The generator may
+// preserve a one-cell-wide wing from its source footprint; after perimeter
+// classification that connector can temporarily be all wall tiles. A
+// shortest in-envelope repair keeps the original footprint rather than
+// rejecting a valid world seed or turning the building back into a rectangle.
+type buildingLayoutPathNode struct {
+	point    buildingLayoutPoint
+	cost     int
+	steps    int
+	sequence int
+}
+
+type buildingLayoutPathQueue []buildingLayoutPathNode
+
+func (queue buildingLayoutPathQueue) Len() int { return len(queue) }
+
+func (queue buildingLayoutPathQueue) Less(left, right int) bool {
+	if queue[left].cost != queue[right].cost {
+		return queue[left].cost < queue[right].cost
+	}
+	if queue[left].steps != queue[right].steps {
+		return queue[left].steps < queue[right].steps
+	}
+	if queue[left].point.y != queue[right].point.y {
+		return queue[left].point.y < queue[right].point.y
+	}
+	if queue[left].point.x != queue[right].point.x {
+		return queue[left].point.x < queue[right].point.x
+	}
+	return queue[left].sequence < queue[right].sequence
+}
+
+func (queue buildingLayoutPathQueue) Swap(left, right int) {
+	queue[left], queue[right] = queue[right], queue[left]
+}
+
+func (queue *buildingLayoutPathQueue) Push(value any) {
+	*queue = append(*queue, value.(buildingLayoutPathNode))
+}
+
+func (queue *buildingLayoutPathQueue) Pop() any {
+	current := *queue
+	last := len(current) - 1
+	item := current[last]
+	*queue = current[:last]
+	return item
+}
 
 const (
 	buildingLayoutFrontageWest buildingLayoutFrontage = iota
@@ -727,10 +777,116 @@ func ensureBuildingLayoutConnectivity(
 			}
 		}
 		if !repaired {
-			return false
+			// Irregular open-world envelopes may retain a one-cell-wide wing.
+			// Every cell in that wing starts as a perimeter wall, so no single
+			// tile touches both walkable components. Search only within the
+			// persisted footprint and convert the minimum deterministic corridor
+			// instead of rejecting an otherwise valid seed.
+			if !repairBuildingLayoutConnectivityCorridor(tiles, visited, passable) {
+				return false
+			}
 		}
 	}
 	return false
+}
+
+// repairBuildingLayoutConnectivityCorridor finds the least-invasive path from
+// the current reachable component to any isolated walkable component. Moving
+// through an already passable cell costs zero; reopening a wall/window costs
+// one.  The priority ordering is fully stable, so a world seed and persisted
+// footprint always produce the same repaired interior.
+func repairBuildingLayoutConnectivityCorridor(
+	tiles map[buildingLayoutPoint]buildingLayoutTile,
+	reachable, passable map[buildingLayoutPoint]struct{},
+) bool {
+	if len(reachable) == 0 || len(reachable) == len(passable) {
+		return false
+	}
+	queue := make(buildingLayoutPathQueue, 0, len(tiles))
+	distance := make(map[buildingLayoutPoint]int, len(tiles))
+	steps := make(map[buildingLayoutPoint]int, len(tiles))
+	parents := make(map[buildingLayoutPoint]buildingLayoutPoint, len(tiles))
+	sequence := 0
+	for _, point := range sortedBuildingLayoutPassablePoints(reachable) {
+		distance[point] = 0
+		steps[point] = 0
+		heap.Push(&queue, buildingLayoutPathNode{point: point, sequence: sequence})
+		sequence++
+	}
+
+	var target buildingLayoutPoint
+	found := false
+	for queue.Len() > 0 {
+		current := heap.Pop(&queue).(buildingLayoutPathNode)
+		knownCost, known := distance[current.point]
+		if !known || knownCost != current.cost || steps[current.point] != current.steps {
+			continue
+		}
+		if _, isolated := passable[current.point]; isolated {
+			if _, alreadyReachable := reachable[current.point]; !alreadyReachable {
+				target = current.point
+				found = true
+				break
+			}
+		}
+		for _, offset := range buildingLayoutCardinalOffsets {
+			next := buildingLayoutPoint{x: current.point.x + offset.x, y: current.point.y + offset.y}
+			tile, exists := tiles[next]
+			if !exists {
+				continue
+			}
+			stepCost := 0
+			if !buildingLayoutCellPassable(tile.kind) {
+				stepCost = 1
+			}
+			candidateCost, candidateSteps := current.cost+stepCost, current.steps+1
+			previousCost, seen := distance[next]
+			if seen && (candidateCost > previousCost ||
+				(candidateCost == previousCost && candidateSteps >= steps[next])) {
+				continue
+			}
+			distance[next] = candidateCost
+			steps[next] = candidateSteps
+			parents[next] = current.point
+			heap.Push(&queue, buildingLayoutPathNode{
+				point: next, cost: candidateCost, steps: candidateSteps, sequence: sequence,
+			})
+			sequence++
+		}
+	}
+	if !found {
+		return false
+	}
+
+	path := make([]buildingLayoutPoint, 0)
+	for point := target; ; {
+		path = append(path, point)
+		parent, hasParent := parents[point]
+		if !hasParent {
+			break
+		}
+		point = parent
+	}
+	for left, right := 0, len(path)-1; left < right; left, right = left+1, right-1 {
+		path[left], path[right] = path[right], path[left]
+	}
+	blocking := make([]buildingLayoutPoint, 0, len(path))
+	for _, point := range path {
+		if !buildingLayoutCellPassable(tiles[point].kind) {
+			blocking = append(blocking, point)
+		}
+	}
+	if len(blocking) == 0 {
+		return false
+	}
+	for index, point := range blocking {
+		kind := BuildingLayoutCellFloor
+		if index == 0 || index == len(blocking)-1 {
+			kind = BuildingLayoutCellDoor
+		}
+		tiles[point] = buildingLayoutTile{kind: kind}
+	}
+	return true
 }
 
 func buildingLayoutReachablePassableCells(

@@ -534,6 +534,15 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.CitySimulationEnabled != after.CitySimulationEnabled {
 		changed = append(changed, "city_simulation_enabled")
 	}
+	if before.CityPixelRendererEnabled != after.CityPixelRendererEnabled {
+		changed = append(changed, "city_pixel_renderer_enabled")
+	}
+	if before.CityVisualPackPublishEnabled != after.CityVisualPackPublishEnabled {
+		changed = append(changed, "city_visual_pack_publish_enabled")
+	}
+	if before.CityRealtimeSchedulerEnabled != after.CityRealtimeSchedulerEnabled {
+		changed = append(changed, "city_realtime_scheduler_enabled")
+	}
 	if before.CyberSessionBlockEnabled != after.CyberSessionBlockEnabled {
 		changed = append(changed, "cyber_session_block_enabled")
 	}

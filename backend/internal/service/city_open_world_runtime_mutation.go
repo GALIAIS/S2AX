@@ -12,24 +12,31 @@ import (
 )
 
 const (
-	cityOpenWorldRuntimeRejectionActorLimit        = "OPEN_WORLD_ACTOR_LIMIT_REACHED"
-	cityOpenWorldRuntimeRejectionActorNotFound     = "OPEN_WORLD_ACTOR_NOT_FOUND"
-	cityOpenWorldRuntimeRejectionDefinition        = "OPEN_WORLD_RUNTIME_DEFINITION_UNAVAILABLE"
-	cityOpenWorldRuntimeRejectionRequirement       = "OPEN_WORLD_REQUIREMENT_NOT_SATISFIED"
-	cityOpenWorldRuntimeRejectionActivityLimit     = "OPEN_WORLD_ACTIVITY_TICK_LIMIT_REACHED"
-	cityOpenWorldRuntimeRejectionRoleActive        = "OPEN_WORLD_ROLE_ALREADY_ACTIVE"
-	cityOpenWorldRuntimeRejectionRoleCooldown      = "OPEN_WORLD_ROLE_TRANSITION_COOLDOWN"
-	cityOpenWorldRuntimeRejectionCellBlocked       = "OPEN_WORLD_CELL_BLOCKED"
-	cityOpenWorldRuntimeRejectionCellOccupied      = "OPEN_WORLD_CELL_OCCUPIED"
-	cityOpenWorldRuntimeRejectionLocationInvalid   = "OPEN_WORLD_LOCATION_INVALID"
-	cityOpenWorldRuntimeRejectionSectorUnavailable = "OPEN_WORLD_SECTOR_UNAVAILABLE"
-	cityOpenWorldRuntimeRejectionPortalNotFound    = "OPEN_WORLD_PORTAL_NOT_FOUND"
-	cityOpenWorldRuntimeRejectionPortalOutOfReach  = "OPEN_WORLD_PORTAL_OUT_OF_REACH"
-	cityOpenWorldRuntimeRejectionPortalState       = "OPEN_WORLD_PORTAL_STATE_INVALID"
-	cityOpenWorldRuntimeRejectionPortalAccess      = "OPEN_WORLD_PORTAL_ACCESS_DENIED"
-	cityOpenWorldRuntimeRejectionControlDenied     = "OPEN_WORLD_ACTOR_CONTROL_DENIED"
-	cityOpenWorldRuntimeRejectionControlMissing    = "OPEN_WORLD_CONTROL_GRANT_NOT_FOUND"
-	cityOpenWorldRuntimeRejectionSpawnUnavailable  = "OPEN_WORLD_SPAWN_UNAVAILABLE"
+	cityOpenWorldRuntimeRejectionActorLimit                = "OPEN_WORLD_ACTOR_LIMIT_REACHED"
+	cityOpenWorldRuntimeRejectionActorNotFound             = "OPEN_WORLD_ACTOR_NOT_FOUND"
+	cityOpenWorldRuntimeRejectionDefinition                = "OPEN_WORLD_RUNTIME_DEFINITION_UNAVAILABLE"
+	cityOpenWorldRuntimeRejectionRequirement               = "OPEN_WORLD_REQUIREMENT_NOT_SATISFIED"
+	cityOpenWorldRuntimeRejectionActivityLimit             = "OPEN_WORLD_ACTIVITY_TICK_LIMIT_REACHED"
+	cityOpenWorldRuntimeRejectionRoleActive                = "OPEN_WORLD_ROLE_ALREADY_ACTIVE"
+	cityOpenWorldRuntimeRejectionRoleCooldown              = "OPEN_WORLD_ROLE_TRANSITION_COOLDOWN"
+	cityOpenWorldRuntimeRejectionCellBlocked               = "OPEN_WORLD_CELL_BLOCKED"
+	cityOpenWorldRuntimeRejectionCellOccupied              = "OPEN_WORLD_CELL_OCCUPIED"
+	cityOpenWorldRuntimeRejectionLocationInvalid           = "OPEN_WORLD_LOCATION_INVALID"
+	cityOpenWorldRuntimeRejectionSectorUnavailable         = "OPEN_WORLD_SECTOR_UNAVAILABLE"
+	cityOpenWorldRuntimeRejectionPortalNotFound            = "OPEN_WORLD_PORTAL_NOT_FOUND"
+	cityOpenWorldRuntimeRejectionPortalOutOfReach          = "OPEN_WORLD_PORTAL_OUT_OF_REACH"
+	cityOpenWorldRuntimeRejectionPortalState               = "OPEN_WORLD_PORTAL_STATE_INVALID"
+	cityOpenWorldRuntimeRejectionPortalAccess              = "OPEN_WORLD_PORTAL_ACCESS_DENIED"
+	cityOpenWorldRuntimeRejectionControlDenied             = "OPEN_WORLD_ACTOR_CONTROL_DENIED"
+	cityOpenWorldRuntimeRejectionControlMissing            = "OPEN_WORLD_CONTROL_GRANT_NOT_FOUND"
+	cityOpenWorldRuntimeRejectionSpawnUnavailable          = "OPEN_WORLD_SPAWN_UNAVAILABLE"
+	cityOpenWorldRuntimeRejectionCommuteAssignmentNotFound = "OPEN_WORLD_COMMUTE_ASSIGNMENT_NOT_FOUND"
+	cityOpenWorldRuntimeRejectionCommuteStateUnchanged     = "OPEN_WORLD_COMMUTE_ASSIGNMENT_STATE_UNCHANGED"
+	cityOpenWorldRuntimeRejectionCommuteNotOperational     = "OPEN_WORLD_COMMUTE_ASSIGNMENT_NOT_OPERATIONAL"
+	cityOpenWorldRuntimeRejectionCommuteFacility           = "OPEN_WORLD_COMMUTE_FACILITY_UNAVAILABLE"
+	cityOpenWorldRuntimeRejectionCommuteCapacity           = "OPEN_WORLD_COMMUTE_FACILITY_CAPACITY_REACHED"
+	cityOpenWorldRuntimeRejectionCommuteAssignmentLimit    = "OPEN_WORLD_COMMUTE_ASSIGNMENT_LIMIT_REACHED"
+	cityOpenWorldRuntimeRejectionCommuteTransitionLimit    = "OPEN_WORLD_COMMUTE_TRANSITION_LIMIT_REACHED"
 )
 
 type cityOpenWorldRuntimeBusinessError struct{ code string }
@@ -176,6 +183,36 @@ func (s *CityEconomyService) postCityOpenWorldRuntimeCommand(
 			return cityOpenWorldRuntimeExecution{}, err
 		}
 		return s.cancelCityOpenWorldV5NavigationIntent(ctx, tx, worldID, targetTick, factSequence, effectSequence, caseSequence, command, payload)
+	case CityCommandTypeOpenWorldActorServiceRequest:
+		payload, err := decodeStoredCityCommandPayload[cityOpenWorldActorServiceRequestPayload](command)
+		if err != nil {
+			return cityOpenWorldRuntimeExecution{}, err
+		}
+		return s.requestCityOpenWorldActorService(ctx, tx, worldID, targetTick, factSequence, effectSequence, caseSequence, command, payload)
+	case CityCommandTypeOpenWorldActorMobilityRequest:
+		payload, err := decodeStoredCityCommandPayload[cityOpenWorldActorMobilityRequestPayload](command)
+		if err != nil {
+			return cityOpenWorldRuntimeExecution{}, err
+		}
+		return s.requestCityOpenWorldActorMobility(ctx, tx, worldID, targetTick, factSequence, effectSequence, caseSequence, command, payload)
+	case CityCommandTypeOpenWorldCommuteAssignmentSetState:
+		payload, err := decodeStoredCityCommandPayload[cityOpenWorldCommuteAssignmentSetStatePayload](command)
+		if err != nil {
+			return cityOpenWorldRuntimeExecution{}, err
+		}
+		return s.setCityOpenWorldCommuteAssignmentState(ctx, tx, worldID, targetTick, factSequence, effectSequence, caseSequence, command, payload)
+	case CityCommandTypeOpenWorldCommuteAssignmentRebind:
+		payload, err := decodeStoredCityCommandPayload[cityOpenWorldCommuteAssignmentRebindPayload](command)
+		if err != nil {
+			return cityOpenWorldRuntimeExecution{}, err
+		}
+		return s.rebindCityOpenWorldCommuteAssignment(ctx, tx, worldID, targetTick, factSequence, effectSequence, caseSequence, command, payload)
+	case CityCommandTypeOpenWorldInfrastructureAssetTransition:
+		payload, err := decodeStoredCityCommandPayload[cityOpenWorldInfrastructureAssetTransitionPayload](command)
+		if err != nil {
+			return cityOpenWorldRuntimeExecution{}, err
+		}
+		return s.transitionCityOpenWorldInfrastructureAsset(ctx, tx, worldID, targetTick, factSequence, effectSequence, caseSequence, command, payload)
 	default:
 		return cityOpenWorldRuntimeExecution{}, ErrCitySimulationInvariant.WithMetadata(map[string]string{"command_type": command.CommandType})
 	}

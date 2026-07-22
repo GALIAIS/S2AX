@@ -22,6 +22,13 @@ const (
 	CityWorldStatusPaused = "paused"
 	CityMemberRoleOwner   = "owner"
 
+	// Open-world actors and navigation intents advance only on scheduled world
+	// ticks. A newly-created player world must therefore be live at a cadence
+	// that makes the interaction loop playable, rather than inheriting the
+	// one-real-hour economic simulation default.
+	cityOpenWorldInitialSpeedMilli = int64(1_000_000)
+	cityDefaultInitialSpeedMilli   = int64(1_000)
+
 	CityEntityTypeHousehold  = "household"
 	CityEntityTypeFirm       = "firm"
 	CityEntityTypeGovernment = "government"
@@ -30,7 +37,6 @@ const (
 
 var (
 	ErrCityWorldNotFound = infraerrors.NotFound("CITY_WORLD_NOT_FOUND", "city world not found")
-	ErrCityWorldExists   = infraerrors.Conflict("CITY_WORLD_EXISTS", "an active private city already exists")
 	ErrCityInvalidInput  = infraerrors.BadRequest("CITY_INVALID_INPUT", "invalid city request")
 )
 
@@ -144,8 +150,14 @@ type CityWorldCreateInput struct {
 	// SimulationVersion is used by migrations and compatibility tests. User
 	// handlers intentionally leave it empty so new worlds always use current.
 	SimulationVersion string
-	// StyleProfileID opts into the independent V2 open-world creation path.
-	// Legacy worlds leave both fields empty.
+	// ClockProfileID is a server-only realtime clock selection. User-facing
+	// creation handlers never populate it. A realtime world may only be
+	// created from a server-marked administrator context, and the selected
+	// immutable profile is validated in the same creation transaction.
+	ClockProfileID string
+	// StyleProfileID selects a versioned open-world profile when the selected
+	// engine supports it. Empty user input receives the current V6 profile.
+	// Legacy engines leave both fields empty.
 	StyleProfileID string
 	SpawnPolicy    string
 	MonetaryUnit   CityMonetaryUnitCreateInput
@@ -173,6 +185,9 @@ type normalizedCityWorldCreateInput struct {
 	name              string
 	timezone          string
 	simulationVersion string
+	initialStatus     string
+	initialSpeedMilli int64
+	clockProfileID    string
 	styleProfileID    string
 	spawnPolicy       string
 	unitCode          string
@@ -206,6 +221,13 @@ func (s *CityEconomyService) CreateWorld(ctx context.Context, input CityWorldCre
 	if err != nil {
 		return nil, err
 	}
+	// Realtime clock profiles are an operational authority boundary, not a
+	// normal player option. The public handler never accepts an engine or
+	// profile selector, and this service-side gate protects direct callers as
+	// well.
+	if cityEngineIsRealtime(normalized.simulationVersion) && !IsCitySystemAdministrator(ctx) {
+		return nil, ErrCityManagementRequired
+	}
 	var seed int64
 	if input.Seed != nil {
 		if *input.Seed <= 0 {
@@ -228,12 +250,19 @@ func (s *CityEconomyService) CreateWorld(ctx context.Context, input CityWorldCre
 	var worldID int64
 	err = tx.QueryRowContext(ctx, `
 INSERT INTO city_worlds
-    (name, owner_user_id, status, simulation_version, seed, timezone, simulated_at, settings)
-VALUES ($1, $2, $3, $4, $5, $6, $7, '{}'::jsonb)
-RETURNING id`, normalized.name, normalized.ownerUserID, CityWorldStatusPaused,
-		normalized.simulationVersion, seed, normalized.timezone, normalized.startAt).Scan(&worldID)
+    (name, owner_user_id, status, simulation_version, seed, timezone, simulated_at, speed_multiplier, settings)
+VALUES ($1, $2, $3, $4, $5, $6, $7, ($8::numeric / 1000), '{}'::jsonb)
+RETURNING id`, normalized.name, normalized.ownerUserID, normalized.initialStatus,
+		normalized.simulationVersion, seed, normalized.timezone, normalized.startAt, normalized.initialSpeedMilli).Scan(&worldID)
 	if err != nil {
 		return nil, mapCityCreateError(err)
+	}
+	var realtimeClockProfile cityRealtimeClockProfileSelection
+	if cityEngineIsRealtime(normalized.simulationVersion) {
+		realtimeClockProfile, err = loadCityRealtimeClockProfile(ctx, tx, normalized.clockProfileID)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if _, err = tx.ExecContext(ctx, `
@@ -318,11 +347,46 @@ VALUES ($1, $2, $3, $4, $5, $6, 0, 0, 'active', '{}'::jsonb)`,
 	if _, err = tx.ExecContext(ctx, `SELECT assert_city_demography_projection($1)`, worldID); err != nil {
 		return nil, fmt.Errorf("validate city F6 foundation: %w", err)
 	}
+	if cityEngineIsRealtime(normalized.simulationVersion) {
+		// Realtime-v1 is created only through internal/admin-controlled inputs
+		// for now. Its temporal state is initialized before the genesis hash so
+		// the first shared cursor is part of canonical state from day one.
+		if err = initializeCityRealtimeFoundation(
+			ctx, tx, worldID, normalized.simulationVersion, realtimeClockProfile,
+		); err != nil {
+			return nil, err
+		}
+	}
+	if cityEngineSupportsRealtimeStaticWorldgen(normalized.simulationVersion) {
+		if err = initializeCityRealtimeStaticWorldgenFoundation(
+			ctx, tx, worldID, seed, normalized.simulationVersion,
+			normalized.styleProfileID, normalized.spawnPolicy,
+		); err != nil {
+			return nil, err
+		}
+		if err = initializeCityRealtimeActorFoundation(ctx, tx, worldID, normalized.simulationVersion); err != nil {
+			return nil, err
+		}
+		if err = initializeCityRealtimeAgentFoundation(ctx, tx, worldID, normalized.simulationVersion); err != nil {
+			return nil, err
+		}
+		if err = initializeCityRealtimeCharacterActivityFoundation(ctx, tx, worldID, normalized.simulationVersion); err != nil {
+			return nil, err
+		}
+		if err = initializeCityRealtimeVisualBinding(ctx, tx, worldID); err != nil {
+			return nil, err
+		}
+	}
 	if cityEngineSupportsOpenWorld(normalized.simulationVersion) {
 		if err = initializeCityOpenWorldFoundation(
 			ctx, tx, worldID, seed, normalized.simulationVersion,
 			normalized.styleProfileID, normalized.spawnPolicy,
 		); err != nil {
+			return nil, err
+		}
+	}
+	if cityEngineSupportsWorldVersionVector(normalized.simulationVersion) {
+		if err = initializeCityWorldVersionVector(ctx, tx, worldID); err != nil {
 			return nil, err
 		}
 	}
@@ -453,12 +517,27 @@ VALUES ($1, $2, $3, $4, $5, $6, 0, 0, 'active', '{}'::jsonb)`,
 			return nil, fmt.Errorf("validate city physical-network foundation: %w", err)
 		}
 	}
+	if cityEngineSupportsWorldVersionVector(normalized.simulationVersion) {
+		if _, err = tx.ExecContext(ctx, `SELECT assert_city_world_version_vector($1)`, worldID); err != nil {
+			return nil, fmt.Errorf("validate city world version vector: %w", err)
+		}
+	}
+	if cityEngineSupportsOpenWorldCommuteLifecycle(normalized.simulationVersion) {
+		if err = assertCityOpenWorldCommuteLifecycleFoundation(ctx, tx, worldID); err != nil {
+			return nil, fmt.Errorf("validate open-world V14 commute lifecycle foundation: %w", err)
+		}
+	}
 	_, canonical, stateHash, err := canonicalCityWorldState(ctx, tx, worldID)
 	if err != nil {
 		return nil, err
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE city_worlds SET state_hash = $2 WHERE id = $1`, worldID, stateHash); err != nil {
 		return nil, fmt.Errorf("store city genesis state hash: %w", err)
+	}
+	if cityEngineIsRealtime(normalized.simulationVersion) {
+		if err = initializeCityRealtimeGenesisFrame(ctx, tx, worldID, stateHash); err != nil {
+			return nil, err
+		}
 	}
 	if _, err = captureCitySnapshot(ctx, tx, citySnapshotCapture{
 		worldID: worldID, tick: 0, simulationVersion: normalized.simulationVersion,
@@ -763,21 +842,23 @@ func normalizeCityWorldCreateInput(input CityWorldCreateInput) (*normalizedCityW
 		return nil, ErrCityInvalidInput
 	}
 	simulationVersion := strings.TrimSpace(input.SimulationVersion)
+	clockProfileID := strings.TrimSpace(input.ClockProfileID)
 	styleProfileID := strings.TrimSpace(input.StyleProfileID)
 	spawnPolicy := strings.TrimSpace(input.SpawnPolicy)
-	if styleProfileID != "" && simulationVersion == "" {
-		// New worlds always start on the latest immutable open-world contract.
-		// Existing V1/V2/V3 worlds retain their bound generator semantics.
-		simulationVersion = CitySimulationVersionOpenWorldV5
-	}
 	if simulationVersion == "" {
 		simulationVersion = CurrentCitySimulationVersion
 	}
 	if _, err := cityEngineForVersion(simulationVersion); err != nil {
 		return nil, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "simulation_version"})
 	}
-	if cityEngineSupportsOpenWorld(simulationVersion) {
-		if styleProfileID == "" || spawnPolicy != cityOpenWorldSpawnPolicy {
+	if cityEngineSupportsOpenWorld(simulationVersion) || cityEngineSupportsRealtimeStaticWorldgen(simulationVersion) {
+		if styleProfileID == "" {
+			styleProfileID = cityspatial.DefaultWorldgenProfileID
+		}
+		if spawnPolicy == "" {
+			spawnPolicy = cityOpenWorldSpawnPolicy
+		}
+		if spawnPolicy != cityOpenWorldSpawnPolicy {
 			return nil, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "open_world_bootstrap"})
 		}
 		if _, err := cityspatial.WorldgenProfileByID(styleProfileID); err != nil {
@@ -785,6 +866,13 @@ func normalizeCityWorldCreateInput(input CityWorldCreateInput) (*normalizedCityW
 		}
 	} else if styleProfileID != "" || spawnPolicy != "" {
 		return nil, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "style_profile_id"})
+	}
+	if cityEngineIsRealtime(simulationVersion) {
+		if clockProfileID == "" {
+			clockProfileID = cityRealtimeDiagnosticClockProfileID
+		}
+	} else if clockProfileID != "" {
+		return nil, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "clock_profile_id"})
 	}
 
 	code := strings.ToLower(strings.TrimSpace(input.MonetaryUnit.Code))
@@ -822,11 +910,15 @@ func normalizeCityWorldCreateInput(input CityWorldCreateInput) (*normalizedCityW
 			return nil, ErrCityInvalidInput.WithMetadata(map[string]string{"field": "start_at"})
 		}
 	}
+	initialStatus, initialSpeedMilli := cityWorldInitialLifecycle(simulationVersion)
 	return &normalizedCityWorldCreateInput{
 		ownerUserID:       input.OwnerUserID,
 		name:              name,
 		timezone:          timezone,
 		simulationVersion: simulationVersion,
+		initialStatus:     initialStatus,
+		initialSpeedMilli: initialSpeedMilli,
+		clockProfileID:    clockProfileID,
 		styleProfileID:    styleProfileID,
 		spawnPolicy:       spawnPolicy,
 		unitCode:          code,
@@ -835,6 +927,18 @@ func normalizeCityWorldCreateInput(input CityWorldCreateInput) (*normalizedCityW
 		unitScale:         unitScale,
 		startAt:           startAt,
 	}, nil
+}
+
+func cityWorldInitialLifecycle(simulationVersion string) (status string, speedMilli int64) {
+	if cityEngineIsRealtime(simulationVersion) {
+		// The realtime engine does not consume speed_multiplier. Keep the
+		// legacy column at a neutral value until it is removed from this view.
+		return CityWorldStatusRunning, cityDefaultInitialSpeedMilli
+	}
+	if cityEngineSupportsOpenWorld(simulationVersion) {
+		return CityWorldStatusRunning, cityOpenWorldInitialSpeedMilli
+	}
+	return CityWorldStatusPaused, cityDefaultInitialSpeedMilli
 }
 
 func newCitySeed() (int64, error) {
@@ -853,9 +957,6 @@ func mapCityCreateError(err error) error {
 	var pqErr *pq.Error
 	if !errors.As(err, &pqErr) {
 		return fmt.Errorf("create city world: %w", err)
-	}
-	if pqErr.Code == "23505" && pqErr.Constraint == "idx_city_worlds_one_private_active_per_owner" {
-		return ErrCityWorldExists
 	}
 	if pqErr.Code == "23503" || pqErr.Code == "23514" {
 		return ErrCityInvalidInput

@@ -413,39 +413,9 @@ func cityOpenWorldV5NavigationNextPortalEdge(
 	if err != nil {
 		return nil, err
 	}
-	targetDomain := cityOpenWorldV5NavigationDomainKey(target)
-	reachable := map[string]bool{targetDomain: true}
-	for changed := true; changed; {
-		changed = false
-		for _, edge := range edges {
-			from, to := cityOpenWorldV5NavigationDomainKey(edge.from), cityOpenWorldV5NavigationDomainKey(edge.to)
-			if reachable[to] && !reachable[from] {
-				reachable[from] = true
-				changed = true
-			}
-		}
-	}
-	currentDomain := cityOpenWorldV5NavigationDomainKey(current)
-	if !reachable[currentDomain] {
-		return nil, cityOpenWorldRuntimeReject(cityOpenWorldV5NavigationReasonBlocked)
-	}
-	candidates := make([]cityOpenWorldV5NavigationPortalEdge, 0)
+	available := make([]cityOpenWorldV5NavigationPortalEdge, 0, len(edges))
 	for _, edge := range edges {
-		if cityOpenWorldV5NavigationDomainKey(edge.from) == currentDomain && reachable[cityOpenWorldV5NavigationDomainKey(edge.to)] {
-			candidates = append(candidates, edge)
-		}
-	}
-	sort.Slice(candidates, func(left, right int) bool {
-		leftDistance := cityOpenWorldV5NavigationDistance(current, candidates[left].from)
-		rightDistance := cityOpenWorldV5NavigationDistance(current, candidates[right].from)
-		if leftDistance != rightDistance {
-			return leftDistance < rightDistance
-		}
-		return candidates[left].portal.Code < candidates[right].portal.Code
-	})
-	for index := range candidates {
-		candidate := candidates[index]
-		state, stateErr := loadCityOpenWorldRuntimePortalStateForUse(ctx, queryer, worldID, candidate.portal)
+		state, stateErr := loadCityOpenWorldRuntimePortalStateForUse(ctx, queryer, worldID, edge.portal)
 		if stateErr != nil || state.StateCode != WorldPortalStateOpen {
 			continue
 		}
@@ -455,9 +425,85 @@ func cityOpenWorldV5NavigationNextPortalEdge(
 		if evaluationErr != nil || !evaluation.Satisfied {
 			continue
 		}
-		return &candidate, nil
+		available = append(available, edge)
+	}
+	if candidate := cityOpenWorldV5NavigationShortestPortalEdge(available, current, target); candidate != nil {
+		return candidate, nil
 	}
 	return nil, cityOpenWorldRuntimeReject(cityOpenWorldV5NavigationReasonBlocked)
+}
+
+// cityOpenWorldV5NavigationShortestPortalEdge selects the first portal on a
+// shortest directed domain route. A plain reachability check is insufficient:
+// when a floor has both a downward and upward staircase at the same cell, a
+// lexicographic tie-break can otherwise send an actor downstairs even when the
+// destination is directly upstairs. Restricting candidates to the next hop of
+// a shortest route removes those cycles while retaining deterministic local
+// tie-breaking for genuinely equivalent portals.
+func cityOpenWorldV5NavigationShortestPortalEdge(
+	edges []cityOpenWorldV5NavigationPortalEdge,
+	current, target CityOpenWorldActorLocation,
+) *cityOpenWorldV5NavigationPortalEdge {
+	currentDomain := cityOpenWorldV5NavigationDomainKey(current)
+	targetDomain := cityOpenWorldV5NavigationDomainKey(target)
+	if currentDomain == targetDomain {
+		return nil
+	}
+	hops := cityOpenWorldV5NavigationPortalHopDistances(edges, targetDomain)
+	currentHops, reachable := hops[currentDomain]
+	if !reachable || currentHops <= 0 {
+		return nil
+	}
+	candidates := make([]cityOpenWorldV5NavigationPortalEdge, 0)
+	for _, edge := range edges {
+		if cityOpenWorldV5NavigationDomainKey(edge.from) != currentDomain {
+			continue
+		}
+		nextHops, reachesTarget := hops[cityOpenWorldV5NavigationDomainKey(edge.to)]
+		if !reachesTarget || nextHops+1 != currentHops {
+			continue
+		}
+		candidates = append(candidates, edge)
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	sort.Slice(candidates, func(left, right int) bool {
+		leftDistance := cityOpenWorldV5NavigationDistance(current, candidates[left].from)
+		rightDistance := cityOpenWorldV5NavigationDistance(current, candidates[right].from)
+		if leftDistance != rightDistance {
+			return leftDistance < rightDistance
+		}
+		if candidates[left].portal.Code != candidates[right].portal.Code {
+			return candidates[left].portal.Code < candidates[right].portal.Code
+		}
+		return cityOpenWorldV5NavigationLocationKey(candidates[left].to) < cityOpenWorldV5NavigationLocationKey(candidates[right].to)
+	})
+	return &candidates[0]
+}
+
+func cityOpenWorldV5NavigationPortalHopDistances(
+	edges []cityOpenWorldV5NavigationPortalEdge,
+	targetDomain string,
+) map[string]int {
+	distances := map[string]int{targetDomain: 0}
+	queue := []string{targetDomain}
+	for len(queue) > 0 {
+		domain := queue[0]
+		queue = queue[1:]
+		for _, edge := range edges {
+			if cityOpenWorldV5NavigationDomainKey(edge.to) != domain {
+				continue
+			}
+			fromDomain := cityOpenWorldV5NavigationDomainKey(edge.from)
+			if _, seen := distances[fromDomain]; seen {
+				continue
+			}
+			distances[fromDomain] = distances[domain] + 1
+			queue = append(queue, fromDomain)
+		}
+	}
+	return distances
 }
 
 func loadCityOpenWorldV5NavigationPortalEdges(

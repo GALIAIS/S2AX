@@ -243,6 +243,24 @@ func resetIntegrationData(t testing.TB) {
 	// reference tables such as groups and city_engine_versions intact.
 	_, err := integrationDB.ExecContext(ctx, "TRUNCATE TABLE public.users RESTART IDENTITY CASCADE")
 	require.NoError(t, err, "reset integration tenant data")
+
+	// The release-policy table records administrator actors and therefore is
+	// transitively cleared by the user-rooted reset even when its bootstrap row
+	// has NULL actor columns. Restore the immutable migration default so every
+	// realtime V2 genesis has the same fail-closed policy baseline as production.
+	_, err = integrationDB.ExecContext(ctx, `
+INSERT INTO city_visual_pack_release_policies
+    (semantic_projection_version, spatial_profile_id, pack_id, pack_version)
+SELECT 'city-realtime-semantic-pixel-v1', '*', 'city-pixel-core', '1.0.0'
+WHERE EXISTS (
+    SELECT 1
+    FROM city_visual_packs pack
+    WHERE pack.pack_id = 'city-pixel-core'
+      AND pack.pack_version = '1.0.0'
+      AND pack.status = 'published'
+)
+ON CONFLICT (semantic_projection_version, spatial_profile_id) DO NOTHING`)
+	require.NoError(t, err, "restore integration realtime visual release policy")
 }
 
 // testEntTx 返回一个 ent 事务，用于需要事务隔离的测试。

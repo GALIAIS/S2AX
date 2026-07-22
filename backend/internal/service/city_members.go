@@ -88,6 +88,11 @@ ORDER BY CASE member.role WHEN 'owner' THEN 0 ELSE 1 END,
 	if err = closeCityRows(rows, "iterate city world members"); err != nil {
 		return nil, err
 	}
+	if !IsCitySystemAdministrator(ctx) {
+		for index := range items {
+			items[index].Email = ""
+		}
+	}
 	return items, nil
 }
 

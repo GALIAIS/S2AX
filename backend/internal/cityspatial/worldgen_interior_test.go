@@ -59,6 +59,78 @@ func TestGenerateWorldgenBuildingInteriorRejectsBrokenEnvelope(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidWorldgenInput)
 }
 
+func TestGenerateWorldgenBuildingInteriorRepairsNarrowIrregularWing(t *testing.T) {
+	plan := testWorldgenPlan(t, 8110042)
+	building := GeneratedWorldgenBuilding{
+		Code:          "building_v2_narrow_wing",
+		CityCode:      "city_v2",
+		LotCode:       "lot_v2_narrow_wing",
+		PrimaryUse:    LandUseCommercial,
+		ArchetypeCode: "commercial.shopfront",
+		LayoutStyle:   "shopfront",
+		FloorCount:    1,
+		Entrance:      WorldgenPoint{X: 10, Y: 12, Z: SurfaceZ},
+		Footprint: []WorldgenPoint{
+			{X: 10, Y: 10, Z: SurfaceZ}, {X: 11, Y: 10, Z: SurfaceZ}, {X: 12, Y: 10, Z: SurfaceZ},
+			{X: 13, Y: 10, Z: SurfaceZ}, {X: 14, Y: 10, Z: SurfaceZ}, {X: 18, Y: 10, Z: SurfaceZ},
+			{X: 19, Y: 10, Z: SurfaceZ}, {X: 20, Y: 10, Z: SurfaceZ}, {X: 21, Y: 10, Z: SurfaceZ},
+			{X: 22, Y: 10, Z: SurfaceZ}, {X: 10, Y: 11, Z: SurfaceZ}, {X: 11, Y: 11, Z: SurfaceZ},
+			{X: 12, Y: 11, Z: SurfaceZ}, {X: 13, Y: 11, Z: SurfaceZ}, {X: 14, Y: 11, Z: SurfaceZ},
+			{X: 18, Y: 11, Z: SurfaceZ}, {X: 19, Y: 11, Z: SurfaceZ}, {X: 20, Y: 11, Z: SurfaceZ},
+			{X: 21, Y: 11, Z: SurfaceZ}, {X: 22, Y: 11, Z: SurfaceZ}, {X: 10, Y: 12, Z: SurfaceZ},
+			{X: 11, Y: 12, Z: SurfaceZ}, {X: 12, Y: 12, Z: SurfaceZ}, {X: 13, Y: 12, Z: SurfaceZ},
+			{X: 14, Y: 12, Z: SurfaceZ}, {X: 15, Y: 12, Z: SurfaceZ}, {X: 16, Y: 12, Z: SurfaceZ},
+			{X: 17, Y: 12, Z: SurfaceZ}, {X: 18, Y: 12, Z: SurfaceZ}, {X: 19, Y: 12, Z: SurfaceZ},
+			{X: 20, Y: 12, Z: SurfaceZ}, {X: 21, Y: 12, Z: SurfaceZ}, {X: 22, Y: 12, Z: SurfaceZ},
+			{X: 10, Y: 13, Z: SurfaceZ}, {X: 11, Y: 13, Z: SurfaceZ}, {X: 12, Y: 13, Z: SurfaceZ},
+			{X: 13, Y: 13, Z: SurfaceZ}, {X: 14, Y: 13, Z: SurfaceZ}, {X: 18, Y: 13, Z: SurfaceZ},
+			{X: 19, Y: 13, Z: SurfaceZ}, {X: 20, Y: 13, Z: SurfaceZ}, {X: 21, Y: 13, Z: SurfaceZ},
+			{X: 22, Y: 13, Z: SurfaceZ}, {X: 10, Y: 14, Z: SurfaceZ}, {X: 11, Y: 14, Z: SurfaceZ},
+			{X: 12, Y: 14, Z: SurfaceZ}, {X: 13, Y: 14, Z: SurfaceZ}, {X: 14, Y: 14, Z: SurfaceZ},
+			{X: 18, Y: 14, Z: SurfaceZ}, {X: 19, Y: 14, Z: SurfaceZ}, {X: 20, Y: 14, Z: SurfaceZ},
+			{X: 21, Y: 14, Z: SurfaceZ}, {X: 22, Y: 14, Z: SurfaceZ},
+		},
+	}
+
+	first, err := GenerateWorldgenBuildingInterior(plan.Binding, building, 0)
+	require.NoError(t, err)
+	second, err := GenerateWorldgenBuildingInterior(plan.Binding, building, 0)
+	require.NoError(t, err)
+	require.Equal(t, first, second)
+	require.Len(t, first.Cells, len(building.Footprint))
+
+	passable := make(map[WorldgenPoint]struct{})
+	for _, cell := range first.Cells {
+		if BuildingLayoutCellPassable(cell.Kind) {
+			passable[WorldgenPoint{X: cell.X, Y: cell.Y, Z: cell.Z}] = struct{}{}
+		}
+	}
+	require.NotEmpty(t, passable)
+	var root WorldgenPoint
+	for point := range passable {
+		root = point
+		break
+	}
+	visited := map[WorldgenPoint]struct{}{root: {}}
+	queue := []WorldgenPoint{root}
+	for len(queue) > 0 {
+		point := queue[0]
+		queue = queue[1:]
+		for _, offset := range []WorldgenPoint{{X: 0, Y: -1}, {X: 1, Y: 0}, {X: 0, Y: 1}, {X: -1, Y: 0}} {
+			next := WorldgenPoint{X: point.X + offset.X, Y: point.Y + offset.Y, Z: point.Z}
+			if _, exists := passable[next]; !exists {
+				continue
+			}
+			if _, seen := visited[next]; seen {
+				continue
+			}
+			visited[next] = struct{}{}
+			queue = append(queue, next)
+		}
+	}
+	require.Len(t, visited, len(passable), "the narrow wing must remain traversable without rectangularizing its footprint")
+}
+
 func worldgenInteriorTestBuilding() GeneratedWorldgenBuilding {
 	footprint := make([]WorldgenPoint, 0, 284)
 	for y := int64(40); y < 56; y++ {

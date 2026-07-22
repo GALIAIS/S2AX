@@ -30,22 +30,23 @@ var (
 )
 
 type CityEngineInfo struct {
-	Version             string     `json:"version"`
-	CurrentVersion      string     `json:"current_version"`
-	WorldStatus         string     `json:"world_status"`
-	CurrentTick         int64      `json:"current_tick"`
-	StateHash           *string    `json:"state_hash,omitempty"`
-	Writable            bool       `json:"writable"`
-	Stages              []string   `json:"stages"`
-	UpgradeTargets      []string   `json:"upgrade_targets"`
-	PendingCommandCount int64      `json:"pending_command_count"`
-	SnapshotCount       int64      `json:"snapshot_count"`
-	SnapshotBytes       int64      `json:"snapshot_bytes"`
-	LastTickDurationMS  *int64     `json:"last_tick_duration_ms,omitempty"`
-	LastTickCompletedAt *time.Time `json:"last_tick_completed_at,omitempty"`
-	FailedTickCount     int64      `json:"failed_tick_count"`
-	LastFailureCode     *string    `json:"last_failure_code,omitempty"`
-	LastFailureAt       *time.Time `json:"last_failure_at,omitempty"`
+	Version             string                  `json:"version"`
+	CurrentVersion      string                  `json:"current_version"`
+	WorldStatus         string                  `json:"world_status"`
+	CurrentTick         int64                   `json:"current_tick"`
+	StateHash           *string                 `json:"state_hash,omitempty"`
+	Writable            bool                    `json:"writable"`
+	Stages              []string                `json:"stages"`
+	VersionVector       *CityWorldVersionVector `json:"version_vector,omitempty"`
+	UpgradeTargets      []string                `json:"upgrade_targets"`
+	PendingCommandCount int64                   `json:"pending_command_count"`
+	SnapshotCount       int64                   `json:"snapshot_count"`
+	SnapshotBytes       int64                   `json:"snapshot_bytes"`
+	LastTickDurationMS  *int64                  `json:"last_tick_duration_ms,omitempty"`
+	LastTickCompletedAt *time.Time              `json:"last_tick_completed_at,omitempty"`
+	FailedTickCount     int64                   `json:"failed_tick_count"`
+	LastFailureCode     *string                 `json:"last_failure_code,omitempty"`
+	LastFailureAt       *time.Time              `json:"last_failure_at,omitempty"`
 }
 
 type CityUpgradeRun struct {
@@ -137,11 +138,18 @@ WHERE world.id = $1`, worldID).
 	for index, stage := range engine.stages {
 		stages[index] = string(stage)
 	}
+	var versionVector *CityWorldVersionVector
+	if cityEngineSupportsWorldVersionVector(version) {
+		versionVector, err = loadCityWorldVersionVector(ctx, s.db, worldID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return &CityEngineInfo{
 		Version: version, CurrentVersion: CurrentCitySimulationVersion,
 		WorldStatus: status, CurrentTick: tick,
 		Writable: status == CityWorldStatusPaused || status == CityWorldStatusRunning,
-		Stages:   stages, UpgradeTargets: cityEngineUpgradeTargets(version),
+		Stages:   stages, UpgradeTargets: cityEngineUpgradeTargets(version), VersionVector: versionVector,
 		StateHash: nullStringPointer(stateHash), PendingCommandCount: pendingCommands,
 		SnapshotCount: snapshotCount, SnapshotBytes: snapshotBytes,
 		LastTickDurationMS: nullInt64Pointer(lastTickDuration), LastTickCompletedAt: nullTimePointer(lastTickCompleted),
@@ -307,6 +315,7 @@ func applyCityEngineUpgrade(
 	if !cityEngineCanUpgrade(fromVersion, toVersion) {
 		return nil, "", ErrCityUpgradePath
 	}
+	versionSwitched := false
 	if fromVersion == CitySimulationVersionF5 && toVersion == CitySimulationVersionF6 {
 		if _, err := tx.ExecContext(ctx, `SELECT initialize_city_f6_foundation($1)`, worldID); err != nil {
 			return nil, "", fmt.Errorf("initialize target city engine foundation: %w", err)
@@ -401,13 +410,539 @@ WHERE calendar.world_id = $1 AND world.id = calendar.world_id`, worldID); err !=
 		if err := initializeCityPhysicalNetworkFoundation(ctx, tx, worldID); err != nil {
 			return nil, "", err
 		}
+	} else if fromVersion == CitySimulationVersionOpenWorldV5 && toVersion == CitySimulationVersionOpenWorldV6 {
+		if _, err := tx.ExecContext(ctx, `
+UPDATE city_worlds SET simulation_version = $2, state_hash = NULL, updated_at = NOW()
+WHERE id = $1`, worldID, toVersion); err != nil {
+			return nil, "", fmt.Errorf("switch city engine version for version vector: %w", err)
+		}
+		versionSwitched = true
+		if err := initializeCityWorldVersionVector(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+	} else if fromVersion == CitySimulationVersionOpenWorldV6 && toVersion == CitySimulationVersionOpenWorldV7 {
+		// A V7 baseline never rewrites the V6 vector.  It advances the active
+		// generation first, initializes the service projection under the audited
+		// upgrade gate, then binds a new complete vector to that V7 baseline.
+		result, updateErr := tx.ExecContext(ctx, `
+UPDATE city_worlds
+SET simulation_version = $2,
+    state_hash = NULL,
+    version_vector_generation = version_vector_generation + 1,
+    updated_at = NOW()
+WHERE id = $1
+  AND version_vector_generation >= 1
+	  AND version_vector_generation < 32767`, worldID, toVersion)
+		if updateErr != nil {
+			return nil, "", fmt.Errorf("switch city engine version for V7 service coordination: %w", updateErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil || rows != 1 {
+			return nil, "", ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "world_version_vector_generation"})
+		}
+		var activeGeneration int
+		if err := tx.QueryRowContext(ctx, `
+SELECT version_vector_generation FROM city_worlds WHERE id = $1`, worldID).Scan(&activeGeneration); err != nil {
+			return nil, "", fmt.Errorf("load V7 version-vector generation: %w", err)
+		}
+		if activeGeneration < 2 {
+			return nil, "", ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "world_version_vector_generation"})
+		}
+		versionSwitched = true
+		if err := initializeCityOpenWorldV7ServiceFoundation(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+		if err := initializeCityWorldVersionVector(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+	} else if fromVersion == CitySimulationVersionOpenWorldV7 && toVersion == CitySimulationVersionOpenWorldV8 {
+		// V8 preserves the sealed V7 queue/response history. Its impact bridge
+		// starts at this paused upgrade tick, so older responses never acquire a
+		// retroactive cross-domain effect. A direct V7 genesis begins with
+		// generation 1, while a V6 -> V7 path begins with generation 2; both
+		// are valid historical baselines and simply gain one new V8 generation.
+		result, updateErr := tx.ExecContext(ctx, `
+UPDATE city_worlds
+SET simulation_version = $2,
+    state_hash = NULL,
+    version_vector_generation = version_vector_generation + 1,
+    updated_at = NOW()
+WHERE id = $1
+	  AND version_vector_generation >= 1
+	  AND version_vector_generation < 32767`, worldID, toVersion)
+		if updateErr != nil {
+			return nil, "", fmt.Errorf("switch city engine version for V8 impact bridge: %w", updateErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil || rows != 1 {
+			return nil, "", ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "world_version_vector_generation"})
+		}
+		var activeGeneration int
+		if err := tx.QueryRowContext(ctx, `
+SELECT version_vector_generation FROM city_worlds WHERE id = $1`, worldID).Scan(&activeGeneration); err != nil {
+			return nil, "", fmt.Errorf("load V8 version-vector generation: %w", err)
+		}
+		if activeGeneration < 2 {
+			return nil, "", ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "world_version_vector_generation"})
+		}
+		versionSwitched = true
+		if err := initializeCityOpenWorldV8ImpactFoundation(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+		if err := initializeCityWorldVersionVector(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+	} else if fromVersion == CitySimulationVersionOpenWorldV8 && toVersion == CitySimulationVersionOpenWorldV9 {
+		// V9 freezes a new aggregate-mobility topology at the paused V8 tick.
+		// Existing actor locations, service history, and impact evidence are
+		// preserved; only new demands can enter the new graph after upgrade.
+		result, updateErr := tx.ExecContext(ctx, `
+UPDATE city_worlds
+SET simulation_version = $2,
+    state_hash = NULL,
+    version_vector_generation = version_vector_generation + 1,
+    updated_at = NOW()
+WHERE id = $1
+  AND version_vector_generation >= 1
+  AND version_vector_generation < 32767`, worldID, toVersion)
+		if updateErr != nil {
+			return nil, "", fmt.Errorf("switch city engine version for V9 mobility: %w", updateErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil || rows != 1 {
+			return nil, "", ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "world_version_vector_generation"})
+		}
+		var activeGeneration int
+		if err := tx.QueryRowContext(ctx, `
+SELECT version_vector_generation FROM city_worlds WHERE id = $1`, worldID).Scan(&activeGeneration); err != nil {
+			return nil, "", fmt.Errorf("load V9 version-vector generation: %w", err)
+		}
+		if activeGeneration < 2 {
+			return nil, "", ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "world_version_vector_generation"})
+		}
+		versionSwitched = true
+		if err := initializeCityOpenWorldV9MobilityFoundation(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+		if err := initializeCityWorldVersionVector(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+	} else if fromVersion == CitySimulationVersionOpenWorldV9 && toVersion == CitySimulationVersionOpenWorldV10 {
+		// V10 only adds a future-facing local-arrival policy. The baseline tick
+		// freezes all existing V9 routes out of the bridge, because those demand
+		// rows never captured the actor's local origin contract.
+		result, updateErr := tx.ExecContext(ctx, `
+UPDATE city_worlds
+SET simulation_version = $2,
+    state_hash = NULL,
+    version_vector_generation = version_vector_generation + 1,
+    updated_at = NOW()
+WHERE id = $1
+  AND version_vector_generation >= 1
+  AND version_vector_generation < 32767`, worldID, toVersion)
+		if updateErr != nil {
+			return nil, "", fmt.Errorf("switch city engine version for V10 arrival bridge: %w", updateErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil || rows != 1 {
+			return nil, "", ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "world_version_vector_generation"})
+		}
+		versionSwitched = true
+		if err := initializeCityOpenWorldV10ArrivalFoundation(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+		if err := initializeCityWorldVersionVector(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+	} else if fromVersion == CitySimulationVersionOpenWorldV10 && toVersion == CitySimulationVersionOpenWorldV11 {
+		// V11 binds future automatic OD sources from the V5 NPC work-facility
+		// baseline. Historical V9 demand and V10 arrival evidence is preserved
+		// unchanged: no past trip is reclassified as an automatic source visit.
+		result, updateErr := tx.ExecContext(ctx, `
+UPDATE city_worlds
+SET simulation_version = $2,
+    state_hash = NULL,
+    version_vector_generation = version_vector_generation + 1,
+    updated_at = NOW()
+WHERE id = $1
+  AND version_vector_generation >= 1
+  AND version_vector_generation < 32767`, worldID, toVersion)
+		if updateErr != nil {
+			return nil, "", fmt.Errorf("switch city engine version for V11 OD sources: %w", updateErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil || rows != 1 {
+			return nil, "", ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "world_version_vector_generation"})
+		}
+		versionSwitched = true
+		if err := initializeCityOpenWorldV11MobilityODFoundation(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+		if err := initializeCityWorldVersionVector(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+	} else if fromVersion == CitySimulationVersionOpenWorldV11 && toVersion == CitySimulationVersionOpenWorldV12 {
+		// V12 freezes residence/employment bindings at the paused V11 baseline.
+		// It does not backfill a second demand stream or reinterpret historical
+		// work visits; V13+ must opt into that behavior through new source facts.
+		result, updateErr := tx.ExecContext(ctx, `
+UPDATE city_worlds
+SET simulation_version = $2,
+    state_hash = NULL,
+    version_vector_generation = version_vector_generation + 1,
+    updated_at = NOW()
+WHERE id = $1
+  AND version_vector_generation >= 1
+  AND version_vector_generation < 32767`, worldID, toVersion)
+		if updateErr != nil {
+			return nil, "", fmt.Errorf("switch city engine version for V12 commute bindings: %w", updateErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil || rows != 1 {
+			return nil, "", ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "world_version_vector_generation"})
+		}
+		versionSwitched = true
+		if err := initializeCityOpenWorldV12CommuteFoundation(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+		if err := initializeCityWorldVersionVector(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+	} else if fromVersion == CitySimulationVersionOpenWorldV12 && toVersion == CitySimulationVersionOpenWorldV13 {
+		// V13 preserves every V12 residence/employment binding byte-for-byte and
+		// adds a source baseline only for future demand. Existing V11/V9/V10
+		// traffic is never reclassified or rewritten during this upgrade.
+		result, updateErr := tx.ExecContext(ctx, `
+UPDATE city_worlds
+SET simulation_version = $2,
+    state_hash = NULL,
+    version_vector_generation = version_vector_generation + 1,
+    updated_at = NOW()
+WHERE id = $1
+  AND version_vector_generation >= 1
+  AND version_vector_generation < 32767`, worldID, toVersion)
+		if updateErr != nil {
+			return nil, "", fmt.Errorf("switch city engine version for V13 commute sources: %w", updateErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil || rows != 1 {
+			return nil, "", ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "world_version_vector_generation"})
+		}
+		versionSwitched = true
+		if err := initializeCityOpenWorldV13CommuteSourceFoundation(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+		if err := initializeCityWorldVersionVector(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+	} else if fromVersion == CitySimulationVersionOpenWorldV13 && toVersion == CitySimulationVersionOpenWorldV14 {
+		// V14 retains the immutable V13 source projection and creates a new,
+		// auditable epoch baseline for all future lifecycle changes. No source,
+		// binding, route, arrival or actor-location evidence is rewritten.
+		result, updateErr := tx.ExecContext(ctx, `
+UPDATE city_worlds
+SET simulation_version = $2,
+    state_hash = NULL,
+    version_vector_generation = version_vector_generation + 1,
+    updated_at = NOW()
+WHERE id = $1
+  AND version_vector_generation >= 1
+  AND version_vector_generation < 32767`, worldID, toVersion)
+		if updateErr != nil {
+			return nil, "", fmt.Errorf("switch city engine version for V14 commute lifecycle: %w", updateErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil || rows != 1 {
+			return nil, "", ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "world_version_vector_generation"})
+		}
+		versionSwitched = true
+		if err := initializeCityOpenWorldV14CommuteLifecycleFoundation(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+		if err := initializeCityWorldVersionVector(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+	} else if fromVersion == CitySimulationVersionOpenWorldV14 && toVersion == CitySimulationVersionOpenWorldV15 {
+		// V15 preserves the sealed V14 lifecycle history and introduces a
+		// separate fact-backed supply-chain baseline. Existing firm, account,
+		// inventory and commute projections are never rewritten; only the new
+		// buyer participant and its supply-chain nodes are initialized.
+		result, updateErr := tx.ExecContext(ctx, `
+UPDATE city_worlds
+SET simulation_version = $2,
+    state_hash = NULL,
+    version_vector_generation = version_vector_generation + 1,
+    updated_at = NOW()
+WHERE id = $1
+  AND version_vector_generation >= 1
+  AND version_vector_generation < 32767`, worldID, toVersion)
+		if updateErr != nil {
+			return nil, "", fmt.Errorf("switch city engine version for V15 supply chain: %w", updateErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil || rows != 1 {
+			return nil, "", ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "world_version_vector_generation"})
+		}
+		versionSwitched = true
+		if err := initializeCityOpenWorldV15SupplyChainFoundation(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+		if err := initializeCityWorldVersionVector(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+	} else if fromVersion == CitySimulationVersionOpenWorldV15 && toVersion == CitySimulationVersionOpenWorldV16 {
+		// V16 preserves every sealed V15 order, inventory, settlement and
+		// dispatch record. It adds only a carrier identity and a fact-backed
+		// adapter baseline; historical demand is never backfilled.
+		result, updateErr := tx.ExecContext(ctx, `
+UPDATE city_worlds
+SET simulation_version = $2,
+    state_hash = NULL,
+    version_vector_generation = version_vector_generation + 1,
+    updated_at = NOW()
+WHERE id = $1
+  AND version_vector_generation >= 1
+  AND version_vector_generation < 32767`, worldID, toVersion)
+		if updateErr != nil {
+			return nil, "", fmt.Errorf("switch city engine version for V16 enterprise freight: %w", updateErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil || rows != 1 {
+			return nil, "", ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "world_version_vector_generation"})
+		}
+		versionSwitched = true
+		if err := initializeCityOpenWorldV16EnterpriseFreightFoundation(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+		if err := initializeCityWorldVersionVector(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+	} else if fromVersion == CitySimulationVersionOpenWorldV16 && toVersion == CitySimulationVersionOpenWorldV17 {
+		// V17 preserves all V15/V16 evidence. Its baseline is intentionally
+		// forward-only: pre-upgrade freight sources stay legacy rather than
+		// receiving fabricated shipment or receipt history.
+		result, updateErr := tx.ExecContext(ctx, `
+UPDATE city_worlds
+SET simulation_version = $2,
+    state_hash = NULL,
+    version_vector_generation = version_vector_generation + 1,
+    updated_at = NOW()
+WHERE id = $1
+  AND version_vector_generation >= 1
+  AND version_vector_generation < 32767`, worldID, toVersion)
+		if updateErr != nil {
+			return nil, "", fmt.Errorf("switch city engine version for V17 freight receipts: %w", updateErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil || rows != 1 {
+			return nil, "", ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "world_version_vector_generation"})
+		}
+		versionSwitched = true
+		if err := initializeCityOpenWorldV17EnterpriseFreightReceiptFoundation(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+		if err := initializeCityWorldVersionVector(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+	} else if fromVersion == CitySimulationVersionOpenWorldV17 && toVersion == CitySimulationVersionOpenWorldV18 {
+		// V18 is forward-only. Historical overflow sources retain their V16
+		// suppressed state; the new batch adapter observes only sources created
+		// after this upgrade's baseline tick and never fabricates transport or
+		// inventory history for an older order.
+		result, updateErr := tx.ExecContext(ctx, `
+UPDATE city_worlds
+SET simulation_version = $2,
+    state_hash = NULL,
+    version_vector_generation = version_vector_generation + 1,
+    updated_at = NOW()
+WHERE id = $1
+  AND version_vector_generation >= 1
+  AND version_vector_generation < 32767`, worldID, toVersion)
+		if updateErr != nil {
+			return nil, "", fmt.Errorf("switch city engine version for V18 freight batches: %w", updateErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil || rows != 1 {
+			return nil, "", ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "world_version_vector_generation"})
+		}
+		versionSwitched = true
+		if err := initializeCityOpenWorldV18FreightBatchFoundation(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+		if err := initializeCityWorldVersionVector(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+	} else if fromVersion == CitySimulationVersionOpenWorldV18 && toVersion == CitySimulationVersionOpenWorldV19 {
+		// V19 is a paused, static topology upgrade. It maps the already-frozen
+		// V9 hub/edge facts and never backfills demands, routes, consignments,
+		// receipts, inventory movements, or journal entries.
+		result, updateErr := tx.ExecContext(ctx, `
+UPDATE city_worlds
+SET simulation_version = $2,
+    state_hash = NULL,
+    version_vector_generation = version_vector_generation + 1,
+    updated_at = NOW()
+WHERE id = $1
+  AND version_vector_generation >= 1
+  AND version_vector_generation < 32767`, worldID, toVersion)
+		if updateErr != nil {
+			return nil, "", fmt.Errorf("switch city engine version for V19 spatial network: %w", updateErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil || rows != 1 {
+			return nil, "", ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "world_version_vector_generation"})
+		}
+		versionSwitched = true
+		if err := initializeCityOpenWorldV19SpatialNetworkFoundation(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+		if err := initializeCityWorldVersionVector(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+	} else if fromVersion == CitySimulationVersionOpenWorldV19 && toVersion == CitySimulationVersionOpenWorldV20 {
+		// V20 keeps the V19 mapping immutable and seeds one generic mutable
+		// asset per node/corridor. No route, capacity, freight, receipt, or
+		// settlement history is rewritten by this upgrade.
+		result, updateErr := tx.ExecContext(ctx, `
+UPDATE city_worlds
+SET simulation_version = $2,
+    state_hash = NULL,
+    version_vector_generation = version_vector_generation + 1,
+    updated_at = NOW()
+WHERE id = $1
+  AND version_vector_generation >= 1
+  AND version_vector_generation < 32767`, worldID, toVersion)
+		if updateErr != nil {
+			return nil, "", fmt.Errorf("switch city engine version for V20 infrastructure assets: %w", updateErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil || rows != 1 {
+			return nil, "", ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "world_version_vector_generation"})
+		}
+		versionSwitched = true
+		if err := initializeCityOpenWorldV20InfrastructureFoundation(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+		if err := initializeCityWorldVersionVector(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+	} else if fromVersion == CitySimulationVersionOpenWorldV20 && toVersion == CitySimulationVersionOpenWorldV21 {
+		// V21 is deliberately forward-only: it adds an empty admission ledger
+		// at the paused upgrade tick. Existing V9 allocations retain their base
+		// capacity evidence; only routes scheduled on a later tick can consume
+		// infrastructure effective capacity.
+		result, updateErr := tx.ExecContext(ctx, `
+UPDATE city_worlds
+SET simulation_version = $2,
+    state_hash = NULL,
+    version_vector_generation = version_vector_generation + 1,
+    updated_at = NOW()
+WHERE id = $1
+  AND version_vector_generation >= 1
+  AND version_vector_generation < 32767`, worldID, toVersion)
+		if updateErr != nil {
+			return nil, "", fmt.Errorf("switch city engine version for V21 effective capacity: %w", updateErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil || rows != 1 {
+			return nil, "", ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "world_version_vector_generation"})
+		}
+		versionSwitched = true
+		if err := initializeCityOpenWorldV21EffectiveCapacityFoundation(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+		if err := initializeCityWorldVersionVector(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+	} else if fromVersion == CitySimulationVersionOpenWorldV21 && toVersion == CitySimulationVersionOpenWorldV22 {
+		// V22 is forward-only: the sealed upgrade tick becomes the settlement
+		// baseline. Existing V17/V18 evidence remains readable but is never
+		// backfilled into V22 orders, cases, receipts, refunds, or claims.
+		result, updateErr := tx.ExecContext(ctx, `
+UPDATE city_worlds
+SET simulation_version = $2,
+    state_hash = NULL,
+    version_vector_generation = version_vector_generation + 1,
+    updated_at = NOW()
+WHERE id = $1
+  AND version_vector_generation >= 1
+  AND version_vector_generation < 32767`, worldID, toVersion)
+		if updateErr != nil {
+			return nil, "", fmt.Errorf("switch city engine version for V22 freight settlement: %w", updateErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil || rows != 1 {
+			return nil, "", ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "world_version_vector_generation"})
+		}
+		versionSwitched = true
+		if err := initializeCityOpenWorldV22FreightSettlementFoundation(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+		if err := initializeCityWorldVersionVector(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+	} else if fromVersion == CitySimulationVersionOpenWorldV22 && toVersion == CitySimulationVersionOpenWorldV23 {
+		// V23 keeps every V22 receipt and claim as sealed predecessor evidence.
+		// The paused upgrade tick merely introduces an unfunded carrier reserve;
+		// no historical claim is auto-resolved or backfilled.
+		result, updateErr := tx.ExecContext(ctx, `
+UPDATE city_worlds
+SET simulation_version = $2,
+    state_hash = NULL,
+    version_vector_generation = version_vector_generation + 1,
+    updated_at = NOW()
+WHERE id = $1
+  AND version_vector_generation >= 1
+  AND version_vector_generation < 32767`, worldID, toVersion)
+		if updateErr != nil {
+			return nil, "", fmt.Errorf("switch city engine version for V23 carrier recovery: %w", updateErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil || rows != 1 {
+			return nil, "", ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "world_version_vector_generation"})
+		}
+		versionSwitched = true
+		if err := initializeCityOpenWorldV23CarrierRecoveryFoundation(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+		if err := initializeCityWorldVersionVector(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+	} else if fromVersion == CitySimulationVersionOpenWorldV23 && toVersion == CitySimulationVersionOpenWorldV24 {
+		// V24 freezes its fee baseline at the paused upgrade tick. Historic V22
+		// cases remain evidence only and must never receive a retroactive quote.
+		result, updateErr := tx.ExecContext(ctx, `
+UPDATE city_worlds
+SET simulation_version = $2,
+    state_hash = NULL,
+    version_vector_generation = version_vector_generation + 1,
+    updated_at = NOW()
+WHERE id = $1
+  AND version_vector_generation >= 1
+  AND version_vector_generation < 32767`, worldID, toVersion)
+		if updateErr != nil {
+			return nil, "", fmt.Errorf("switch city engine version for V24 carrier commerce: %w", updateErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil || rows != 1 {
+			return nil, "", ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "world_version_vector_generation"})
+		}
+		versionSwitched = true
+		if err := initializeCityOpenWorldV24CarrierCommerceFoundation(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
+		if err := initializeCityWorldVersionVector(ctx, tx, worldID); err != nil {
+			return nil, "", err
+		}
 	} else if fromVersion != CitySimulationVersionF6 || toVersion != CitySimulationVersionF6V2 {
 		return nil, "", ErrCityUpgradePath
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if !versionSwitched {
+		if _, err := tx.ExecContext(ctx, `
 UPDATE city_worlds SET simulation_version = $2, state_hash = NULL, updated_at = NOW()
 WHERE id = $1`, worldID, toVersion); err != nil {
-		return nil, "", fmt.Errorf("switch city engine version: %w", err)
+			return nil, "", fmt.Errorf("switch city engine version: %w", err)
+		}
 	}
 	for _, assertion := range []string{
 		"assert_city_world_foundation",
@@ -427,9 +962,30 @@ WHERE id = $1`, worldID, toVersion); err != nil {
 		"assert_city_service_foundation",
 		"assert_city_facility_lifecycle_foundation",
 		"assert_city_physical_network_foundation",
+		"assert_city_open_world_service_foundation",
+		"assert_city_open_world_impact_foundation",
+		"assert_city_open_world_mobility_foundation",
+		"assert_city_open_world_arrival_foundation",
+		"assert_city_open_world_mobility_od_foundation",
+		"assert_city_open_world_commute_foundation",
+		"assert_city_open_world_commute_source_foundation",
+		"assert_city_open_world_commute_lifecycle_foundation",
+		"assert_city_open_world_commute_lifecycle_successor_integrity",
+		"assert_city_open_world_supply_chain_foundation",
+		"assert_city_open_world_enterprise_freight_foundation",
+		"assert_city_open_world_enterprise_freight_receipt_foundation",
+		"assert_city_open_world_freight_batch_foundation",
+		"assert_city_open_world_spatial_network_foundation",
+		"assert_city_open_world_infrastructure_foundation",
+		"assert_city_open_world_effective_capacity_foundation",
 	} {
 		if _, err := tx.ExecContext(ctx, `SELECT `+assertion+`($1)`, worldID); err != nil {
 			return nil, "", fmt.Errorf("validate target city engine with %s: %w", assertion, err)
+		}
+	}
+	if cityEngineSupportsWorldVersionVector(toVersion) {
+		if _, err := tx.ExecContext(ctx, `SELECT assert_city_world_version_vector($1)`, worldID); err != nil {
+			return nil, "", fmt.Errorf("validate target city world version vector: %w", err)
 		}
 	}
 	state, canonical, stateHash, err := canonicalCityWorldState(ctx, tx, worldID)

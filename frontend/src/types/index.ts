@@ -213,6 +213,7 @@ export interface PublicSettings {
   payment_enabled: boolean
   risk_control_enabled: boolean
   city_simulation_enabled: boolean
+  city_pixel_renderer_enabled: boolean
   table_default_page_size: number
   table_page_size_options: number[]
   custom_menu_items: CustomMenuItem[]

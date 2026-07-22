@@ -104,6 +104,32 @@ func TestSettingService_GetPublicSettings_ExposesAllowUserViewErrorRequests(t *t
 	require.True(t, settings.AllowUserViewErrorRequests)
 }
 
+func TestSettingService_GetPublicSettings_ExposesCityPixelRendererOnlyWithCitySimulation(t *testing.T) {
+	t.Run("renderer is visible when both gates are enabled", func(t *testing.T) {
+		svc := NewSettingService(&settingPublicRepoStub{values: map[string]string{
+			SettingKeyCitySimulationEnabled:    "true",
+			SettingKeyCityPixelRendererEnabled: "true",
+		}}, &config.Config{})
+
+		settings, err := svc.GetPublicSettings(context.Background())
+		require.NoError(t, err)
+		require.True(t, settings.CitySimulationEnabled)
+		require.True(t, settings.CityPixelRendererEnabled)
+	})
+
+	t.Run("renderer stays hidden when parent city feature is disabled", func(t *testing.T) {
+		svc := NewSettingService(&settingPublicRepoStub{values: map[string]string{
+			SettingKeyCitySimulationEnabled:    "false",
+			SettingKeyCityPixelRendererEnabled: "true",
+		}}, &config.Config{})
+
+		settings, err := svc.GetPublicSettings(context.Background())
+		require.NoError(t, err)
+		require.False(t, settings.CitySimulationEnabled)
+		require.False(t, settings.CityPixelRendererEnabled)
+	})
+}
+
 func TestSettingService_GetPublicSettings_ExposesWeChatOAuthModeCapabilities(t *testing.T) {
 	svc := NewSettingService(&settingPublicRepoStub{
 		values: map[string]string{

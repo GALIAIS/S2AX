@@ -37,6 +37,32 @@ func TestLoadServerTimingConfig(t *testing.T) {
 	})
 }
 
+func TestCityRealtimeClockConfigFailsClosedAndRequiresExplicitHostTrust(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.False(t, cfg.CityRealtimeClock.Enabled)
+	require.False(t, cfg.CityRealtimeClock.TrustHostClock)
+	require.Equal(t, "realtime-host", cfg.CityRealtimeClock.NodeID)
+	require.Equal(t, "system_ntp", cfg.CityRealtimeClock.SourceClockMode)
+
+	cfg.CityRealtimeClock.Enabled = true
+	require.ErrorContains(t, cfg.Validate(), "city_realtime_clock.trust_host_clock")
+
+	cfg.CityRealtimeClock.TrustHostClock = true
+	cfg.CityRealtimeClock.NodeID = "Realtime Host"
+	require.ErrorContains(t, cfg.Validate(), "city_realtime_clock.node_id")
+
+	cfg.CityRealtimeClock.NodeID = "realtime-host-1"
+	cfg.CityRealtimeClock.SourceClockMode = "private_time_service"
+	require.ErrorContains(t, cfg.Validate(), "city_realtime_clock.source_clock_mode")
+
+	cfg.CityRealtimeClock.SourceClockMode = "system_nts"
+	cfg.CityRealtimeClock.UncertaintyUS = 0
+	cfg.CityRealtimeClock.MaximumWallClockStepUS = 5_000_000
+	require.NoError(t, cfg.Validate())
+}
+
 func TestLoadHTTPIngressSafetyDefaults(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	cfg, err := Load()

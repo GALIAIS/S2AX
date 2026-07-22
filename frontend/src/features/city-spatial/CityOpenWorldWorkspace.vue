@@ -57,6 +57,45 @@
       </div>
     </header>
 
+    <section class="open-world-lifecycle" :data-status="world.status">
+      <div class="open-world-lifecycle-state" aria-live="polite">
+        <span>{{ t('citySpatial.openWorld.lifecycle.title') }}</span>
+        <strong>{{ lifecycleStatusLabel(world.status) }}</strong>
+        <small>{{ t('citySpatial.openWorld.lifecycle.tick', {
+          tick: world.current_tick,
+          cadence: lifecycleCadence
+        }) }}</small>
+      </div>
+      <p v-if="world.status !== 'running'" class="open-world-lifecycle-notice">
+        {{ t('citySpatial.openWorld.lifecycle.pausedHint') }}
+      </p>
+      <div v-if="systemAdmin" class="open-world-lifecycle-controls">
+        <label>
+          <span>{{ t('citySpatial.openWorld.lifecycle.speed') }}</span>
+          <Select
+            :model-value="currentWorldSpeedMilli"
+            :options="worldSpeedOptions"
+            :searchable="false"
+            :disabled="Boolean(lifecycleBusyCommandCode)"
+            @update:model-value="setWorldSpeed"
+          />
+        </label>
+        <button
+          type="button"
+          class="btn btn-primary btn-sm"
+          data-test="open-world-lifecycle-toggle"
+          :disabled="Boolean(lifecycleBusyCommandCode)"
+          @click="toggleWorldLifecycle"
+        >
+          {{ lifecycleBusyCommandCode
+            ? t('citySpatial.runtime.processing')
+            : world.status === 'running'
+              ? t('citySpatial.openWorld.lifecycle.pause')
+              : t('citySpatial.openWorld.lifecycle.start') }}
+        </button>
+      </div>
+    </section>
+
     <div v-if="error" class="open-world-error" role="alert">
       <Icon name="exclamationTriangle" size="sm" />
       <span>{{ error }}</span>
@@ -67,7 +106,7 @@
       <article class="open-world-map-panel">
         <header>
           <div>
-            <span class="open-world-status" />
+            <span class="open-world-status" :data-status="world.status" />
             <strong>{{ t('citySpatial.openWorld.mapTitle') }}</strong>
             <small>{{ t('citySpatial.openWorld.mapSubtitle', { chunks: projectedChunks.size, buildings: materializedInteriorCount }) }}</small>
           </div>
@@ -311,7 +350,8 @@ import type {
   CityOpenWorldPortal,
   CityOpenWorldVerification,
   CitySpatialRuleSet,
-  CityWorld
+  CityWorld,
+  CityWorldControlCommandType
 } from '@/api/citySpatial'
 import {
   getCitySpatialRuleSet,
@@ -343,12 +383,15 @@ const props = withDefaults(defineProps<{
   world: CityWorld
   worlds: CityWorld[]
   systemAdmin?: boolean
+  lifecycleBusyCommandCode?: string | null
 }>(), {
-  systemAdmin: false
+  systemAdmin: false,
+  lifecycleBusyCommandCode: null
 })
 
 const emit = defineEmits<{
   (event: 'select-world', worldID: number): void
+  (event: 'world-control', commandType: CityWorldControlCommandType, payload: Record<string, unknown>, commandCode: string): void
 }>()
 
 const { t } = useI18n()
@@ -383,6 +426,17 @@ const worldOptions = computed<SelectOption[]>(() => props.worlds.map(world => ({
   value: world.id,
   label: world.name
 })))
+const currentWorldSpeedMilli = computed(() => Math.max(1, Math.round(props.world.speed_multiplier * 1000)))
+const worldSpeedOptions = computed<SelectOption[]>(() => {
+  const presetValues = [1_000, 60_000, 300_000, 1_000_000]
+  const values = presetValues.includes(currentWorldSpeedMilli.value)
+    ? presetValues
+    : [currentWorldSpeedMilli.value, ...presetValues]
+  return values.map(value => ({
+    value,
+    label: lifecycleSpeedLabel(value)
+  }))
+})
 const glyphCharacters = computed(() => ruleSet.value?.definitions.map(item => item.glyph ?? '').join('') ?? '')
 const isV2 = computed(() => (
   props.world.simulation_version === 'city-openworld-v2' ||
@@ -508,6 +562,42 @@ function shortHash(value: string): string {
 function selectWorld(value: string | number | boolean | null): void {
   const worldID = Number(value)
   if (Number.isSafeInteger(worldID) && worldID > 0 && worldID !== props.world.id) emit('select-world', worldID)
+}
+
+function lifecycleStatusLabel(status: string): string {
+  return status === 'running'
+    ? t('citySpatial.openWorld.lifecycle.status.running')
+    : status === 'paused'
+      ? t('citySpatial.openWorld.lifecycle.status.paused')
+      : status
+}
+
+function lifecycleSpeedLabel(speedMilli: number): string {
+  const multiplier = speedMilli / 1000
+  const seconds = Math.ceil(3_600_000_000 / speedMilli) / 1000
+  const multiplierText = Number.isInteger(multiplier) ? String(multiplier) : multiplier.toFixed(3)
+  const cadence = seconds < 60
+    ? `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`
+    : `${Math.ceil(seconds / 60)}m`
+  return `${multiplierText}× · ${cadence}/TICK`
+}
+
+const lifecycleCadence = computed(() => lifecycleSpeedLabel(currentWorldSpeedMilli.value))
+
+function setWorldSpeed(value: string | number | boolean | null): void {
+  if (!props.systemAdmin || props.lifecycleBusyCommandCode) return
+  const speedMilli = Number(value)
+  if (!Number.isSafeInteger(speedMilli) || speedMilli < 1 || speedMilli > 1_000_000) return
+  if (speedMilli === currentWorldSpeedMilli.value) return
+  emit('world-control', 'world.set_speed', { speed_milli: speedMilli }, `world:set-speed:${speedMilli}`)
+}
+
+function toggleWorldLifecycle(): void {
+  if (!props.systemAdmin || props.lifecycleBusyCommandCode) return
+  const commandType: CityWorldControlCommandType = props.world.status === 'running'
+    ? 'world.pause'
+    : 'world.resume'
+  emit('world-control', commandType, {}, commandType)
 }
 
 function clampCamera(next: CameraState): CameraState {
@@ -868,6 +958,17 @@ watch(() => props.world.current_tick, tick => {
 .open-world-actions button:disabled { cursor: not-allowed; opacity: 0.35; }
 .open-world-actions span { display: grid; min-width: 3.4rem; place-items: center; border-right: 1px solid var(--ui-separator); font: 0.65rem ui-monospace, monospace; }
 
+.open-world-lifecycle { display: grid; grid-template-columns: minmax(9rem, auto) minmax(0, 1fr) auto; gap: 0.75rem; align-items: center; min-height: 4.25rem; padding: 0.65rem 0.85rem; border-bottom: 1px solid var(--ui-separator); background: var(--ui-canvas-raised); }
+.open-world-lifecycle-state { display: grid; grid-template-columns: auto auto; column-gap: 0.5rem; align-items: baseline; }
+.open-world-lifecycle-state > span, .open-world-lifecycle-state small, .open-world-lifecycle-controls label > span { color: var(--ui-label-secondary); font: 0.62rem ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; letter-spacing: 0.08em; text-transform: uppercase; }
+.open-world-lifecycle-state strong { color: var(--ui-label); font-size: 0.78rem; }
+.open-world-lifecycle-state small { grid-column: 1 / -1; margin-top: 0.18rem; letter-spacing: 0.03em; }
+.open-world-lifecycle[data-status='running'] .open-world-lifecycle-state strong { color: #31d17c; }
+.open-world-lifecycle-notice { min-width: 0; margin: 0; color: var(--ui-label-secondary); font-size: 0.72rem; line-height: 1.45; }
+.open-world-lifecycle-controls { display: flex; align-items: end; gap: 0.55rem; }
+.open-world-lifecycle-controls label { display: grid; gap: 0.3rem; min-width: 11.5rem; }
+.open-world-lifecycle-controls .btn { min-height: 2.35rem; white-space: nowrap; }
+
 .open-world-error { display: flex; align-items: center; gap: 0.65rem; margin: 0.8rem; border: 1px solid rgb(239 68 68 / 42%); border-left-width: 3px; padding: 0.7rem 0.85rem; color: #dc2626; background: rgb(239 68 68 / 6%); font-size: 0.8rem; }
 .open-world-error span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .open-world-error button { color: inherit; font-weight: 700; text-decoration: underline; }
@@ -966,6 +1067,8 @@ watch(() => props.world.current_tick, tick => {
 
 @media (max-width: 60rem) {
   .open-world-command-bar { grid-template-columns: minmax(12rem, 1fr) minmax(10rem, 1fr) auto; }
+  .open-world-lifecycle { grid-template-columns: minmax(9rem, auto) minmax(0, 1fr); }
+  .open-world-lifecycle-controls { grid-column: 1 / -1; justify-content: flex-end; }
   .open-world-coordinate { display: none; }
   .open-world-layout { grid-template-columns: 1fr; }
   .open-world-map-panel { border-right: 0; }
@@ -979,6 +1082,9 @@ watch(() => props.world.current_tick, tick => {
 
 @media (max-width: 40rem) {
   .open-world-command-bar { grid-template-columns: 1fr auto; }
+  .open-world-lifecycle { grid-template-columns: 1fr; }
+  .open-world-lifecycle-controls { justify-content: stretch; }
+  .open-world-lifecycle-controls label { min-width: 0; flex: 1; }
   .open-world-binding { display: none; }
   .open-world-map-panel { grid-template-rows: auto minmax(23rem, 1fr) auto; }
   .open-world-interior-header { align-items: flex-start; flex-direction: column; }

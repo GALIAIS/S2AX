@@ -29,6 +29,511 @@ export interface CityWorld {
   updated_at: string
 }
 
+export type CityRealtimeEngineVersion = 'city-openworld-realtime-v2'
+
+export interface CityRealtimeViewerScope {
+  membership_role: string
+  can_view_shared_world: boolean
+  can_manage_world: boolean
+  redaction_policy: string
+  projection_scope_epoch: number
+}
+
+export interface CityRealtimeSpatialBinding {
+  generator_id: string
+  generator_version: string
+  rule_set_id: string
+  rule_set_version: string
+  rule_set_hash: string
+  profile_id: string
+  profile_version: string
+  profile_hash: string
+  context_hash: string
+  seed: number
+  spawn_sector_x: number
+  spawn_sector_y: number
+  spawn_x: number
+  spawn_y: number
+  spawn_z: number
+  chunk_size: number
+  sector_size_chunks: number
+  epoch: number
+  bootstrap_plan_hash: string
+  genesis_hash: string
+}
+
+export type CityRealtimeVisualRenderContract = 'procedural_pixel_v1' | 'atlas_pixel_v1'
+
+export interface CityRealtimeVisualBinding {
+  pack_id: string
+  pack_version: string
+  spatial_profile_id: string
+  semantic_projection_version: string
+  render_contract_version: CityRealtimeVisualRenderContract
+  manifest_hash: string
+  asset_set_hash: string
+  binding_hash: string
+}
+
+export interface CityRealtimeVisualManifestPayload {
+  schema_version: number
+  render_mode: CityRealtimeVisualRenderContract
+  logical_tile_px: number
+  profile_palettes?: Record<string, Record<string, string>>
+  semantic_rules?: Record<string, string[]>
+  assets?: unknown[]
+}
+
+export interface CityRealtimeVisualManifest {
+  world_id: number
+  binding: CityRealtimeVisualBinding
+  manifest: CityRealtimeVisualManifestPayload
+}
+
+export interface CityRealtimeWorldProjection {
+  world_id: number
+  world_status: string
+  temporal_engine_version: CityRealtimeEngineVersion
+  timeline_frame_sequence: number
+  timeline_cursor: string
+  semantic_projection_version: string
+  static_projection_hash: string
+  viewer: CityRealtimeViewerScope
+  spatial: CityRealtimeSpatialBinding
+  visual: CityRealtimeVisualBinding
+}
+
+export interface CityRealtimeTerrainRun {
+  definition_id: string
+  length: number
+}
+
+export interface CityRealtimeSemanticLayer {
+  x: number
+  y: number
+  kind: CitySpatialRuleKind
+  definition_id: string
+}
+
+export interface CityRealtimeChunkPayload {
+  format: string
+  width: number
+  height: number
+  terrain_runs: CityRealtimeTerrainRun[]
+  layers: CityRealtimeSemanticLayer[]
+}
+
+export interface CityRealtimeSemanticChunk {
+  chunk_x: number
+  chunk_y: number
+  z: number
+  payload: CityRealtimeChunkPayload
+  payload_hash: string
+  revision: number
+}
+
+export interface CityRealtimeWorldPoint {
+  x: number
+  y: number
+  z: number
+}
+
+export interface CityRealtimeSemanticBuilding {
+  code: string
+  primary_use: string
+  archetype_code: string
+  layout_style: string
+  floor_count: number
+  entrance: CityRealtimeWorldPoint
+  footprint: CityRealtimeWorldPoint[]
+  footprint_hash: string
+  revision: number
+}
+
+export interface CityRealtimePixelChunkProjection {
+  world_id: number
+  timeline_frame_sequence: number
+  timeline_cursor: string
+  semantic_projection_version: string
+  static_projection_hash: string
+  chunk: CityRealtimeSemanticChunk
+  buildings: CityRealtimeSemanticBuilding[]
+}
+
+export interface CityRealtimeTemporalFrame {
+  world_id: number
+  frame_sequence: number
+  timeline_cursor: string
+  world_time_from_us: number
+  world_time_to_us: number
+  clock_segment_sequence: number
+  frame_kind: string
+  state_hash: string
+  previous_state_hash?: string
+  due_event_digest: string
+  phase_summary: Record<string, unknown>
+  effective_utc_from: string
+  effective_utc_to: string
+  created_at: string
+}
+
+export interface CityRealtimePatchPage {
+  world_id: number
+  after_frame_sequence: number
+  current_frame_sequence: number
+  current_cursor: string
+  static_projection_hash: string
+  full_resync_required: boolean
+  items: CityRealtimeTemporalFrame[]
+  next_after_frame_sequence?: number
+}
+
+export type CityRealtimeActorKind = 'npc' | 'character' | 'service'
+export type CityRealtimeActorMotionState = 'idle' | 'walking' | 'inside' | 'unavailable'
+export type CityRealtimeCharacterControlMode = 'manual' | 'assisted' | 'autonomous' | 'suspended'
+
+// This contract is intentionally account-blind. The actor code and label are
+// simulation-facing facts; the shared map never receives a user's email,
+// username, ownership metadata, agent prompt, model, memory, or control grant.
+export interface CityRealtimePublicActor {
+  actor_code: string
+  actor_kind: CityRealtimeActorKind
+  public_label: string
+  appearance_variant: string
+  lifecycle_status: 'active' | 'inactive' | 'retired'
+  x: number
+  y: number
+  z: number
+  motion_state: CityRealtimeActorMotionState
+  position_revision: number
+  last_frame_sequence: number
+}
+
+// This owner-only projection is intentionally separate from
+// CityRealtimePublicActor. The shared actor stream must remain account-blind,
+// while the requesting user needs to know which public Actor is theirs.
+export interface CityRealtimeCharacter {
+  actor_code: string
+  public_label: string
+  appearance_variant: string
+  lifecycle_status: 'active' | 'inactive' | 'retired'
+  control_mode: CityRealtimeCharacterControlMode
+  x: number
+  y: number
+  z: number
+  motion_state: CityRealtimeActorMotionState
+  position_revision: number
+  last_frame_sequence: number
+}
+
+// Owner-private life state. City credits are limited to the simulated world;
+// they are not a platform wallet, balance, or redemption entitlement.
+export interface CityRealtimeCharacterLife {
+  energy_milli: number
+  satiety_milli: number
+  morale_milli: number
+  civic_standing_milli: number
+  city_credit_units: number
+  revision: number
+  activity_revision: number
+  law_revision: number
+  metabolism_revision: number
+  last_frame_sequence: number
+  last_activity_world_time_us: number
+  last_metabolism_world_time_us: number
+  inventory: CityRealtimeCharacterInventoryStack[]
+  progression?: CityRealtimeCharacterProgression
+}
+
+export interface CityRealtimeCharacterInventoryStack {
+  item_code: string
+  quantity: number
+  revision: number
+  last_frame_sequence: number
+}
+
+export interface CityRealtimeCharacterExperienceDelta {
+  attribute_code: string
+  experience_units: number
+}
+
+export interface CityRealtimeCharacterAttribute {
+  code: string
+  value_milli: number
+  experience_units: number
+  revision: number
+  last_frame_sequence: number
+}
+
+export interface CityRealtimeCharacterRole {
+  code: string
+  category_code: string
+  granted_frame_sequence: number
+  revision: number
+}
+
+export interface CityRealtimeCharacterAttributeRequirement {
+  attribute_code: string
+  minimum_value_milli: number
+}
+
+export interface CityRealtimeCharacterRoleRequirements {
+  minimum_civic_standing_milli?: number
+  minimum_total_experience_units?: number
+  attributes?: CityRealtimeCharacterAttributeRequirement[]
+  required_role_codes?: string[]
+}
+
+export interface CityRealtimeCharacterRoleAvailability {
+  code: string
+  category_code: string
+  available: boolean
+  reason_code?: 'active' | 'civic_standing' | 'experience' | 'role' | 'attribute'
+  requirements: CityRealtimeCharacterRoleRequirements
+}
+
+export interface CityRealtimeCharacterArchetypeOption {
+  code: string
+  initial_role_code: string
+  initial_attributes: CityRealtimeCharacterAttribute[]
+}
+
+export interface CityRealtimeCharacterProgression {
+  schema_version: number
+  archetype_code: string
+  revision: number
+  attributes: CityRealtimeCharacterAttribute[]
+  roles: CityRealtimeCharacterRole[]
+  available_roles: CityRealtimeCharacterRoleAvailability[]
+}
+
+export interface CityRealtimeCharacterActivityAvailability {
+  code: string
+  category_code: string
+  available: boolean
+  reason_code?: 'cooldown' | 'location' | 'inventory' | 'needs' | 'role' | 'progression'
+  cooldown_remaining_us?: number
+  required_role_codes?: string[]
+}
+
+export interface CityRealtimeCharacterLocation {
+	x: number
+	y: number
+	z: number
+}
+
+export interface CityRealtimeCharacterPortalTransition {
+	portal_code: string
+	portal_type: 'entrance' | 'stairs'
+	direction: 'enter' | 'exit' | 'ascend' | 'descend'
+	building_code: string
+	target: CityRealtimeCharacterLocation
+}
+
+export type CityRealtimeCharacterInteriorCellKind = 'wall' | 'window' | 'floor' | 'door' | 'furniture'
+
+export interface CityRealtimeCharacterInteriorCell {
+	x: number
+	y: number
+	z: number
+	kind: CityRealtimeCharacterInteriorCellKind
+	feature?: string
+	traversable: boolean
+}
+
+export interface CityRealtimeCharacterInteriorProjection {
+	building_code: string
+	floor_index: number
+	z: number
+	layout_style: string
+	cells: CityRealtimeCharacterInteriorCell[]
+}
+
+export interface CityRealtimeCharacterActivityResult {
+  code: string
+  category_code: string
+  outcome: 'completed' | 'penalized'
+  public_visibility: boolean
+  energy_delta_milli: number
+  satiety_delta_milli: number
+  morale_delta_milli: number
+  civic_standing_delta_milli: number
+  city_credit_delta_units: number
+  item_code?: string
+  item_quantity_delta?: number
+  law_case_code?: string
+  experience_deltas?: CityRealtimeCharacterExperienceDelta[]
+}
+
+export interface CityRealtimeCharacterActivityEvent {
+  sequence: number
+  frame_sequence: number
+  activity_code: string
+  category_code: string
+  outcome: 'completed' | 'penalized'
+  public_visibility: boolean
+  energy_delta_milli: number
+  satiety_delta_milli: number
+  morale_delta_milli: number
+  civic_standing_delta_milli: number
+  city_credit_delta_units: number
+  item_code?: string
+  item_quantity_delta?: number
+  law_case_code?: string
+  law_rule_code?: string
+  law_disposition?: string
+  law_penalty_city_credit_units?: number
+}
+
+export interface CityRealtimeCharacterEventPage {
+  items: CityRealtimeCharacterActivityEvent[]
+  next_before_sequence?: number
+}
+
+export interface CityRealtimePublicCharacterEvent {
+  frame_sequence: number
+  actor_code: string
+  public_label: string
+  activity_code: string
+  category_code: string
+  outcome: 'completed' | 'penalized'
+  law_rule_code?: string
+  law_disposition?: string
+}
+
+export interface CityRealtimePublicCharacterEventPage {
+  items: CityRealtimePublicCharacterEvent[]
+  next_cursor?: string
+}
+
+// Owner-private personality data. This is deliberately absent from shared
+// actor projections, event feeds and model observation APIs.
+export interface CityRealtimeCharacterPersonalitySeed {
+  values: string[]
+  preferences: Record<string, string>
+  background: string
+  hard_boundaries: string[]
+  freeform_notes: string
+}
+
+export interface CityRealtimeCharacterPersonalityProjection {
+  schema_version: number
+  revision: number
+  seed_hash: string
+  seed: CityRealtimeCharacterPersonalitySeed
+}
+
+export interface CityRealtimeCharacterAgentConfiguration {
+  control_mode: CityRealtimeCharacterControlMode
+  personality?: CityRealtimeCharacterPersonalityProjection
+  pending_decision: boolean
+  pending_intent: boolean
+  autonomy_runtime_available: boolean
+}
+
+export interface CityRealtimeMyCharacterProjection {
+  world_id: number
+  timeline_frame_sequence: number
+  timeline_cursor: string
+  runtime_ready: boolean
+  exists: boolean
+  character?: CityRealtimeCharacter
+  life?: CityRealtimeCharacterLife
+  agent?: CityRealtimeCharacterAgentConfiguration
+  available_archetypes?: CityRealtimeCharacterArchetypeOption[]
+  available_activities?: CityRealtimeCharacterActivityAvailability[]
+  available_portals?: CityRealtimeCharacterPortalTransition[]
+  current_interior?: CityRealtimeCharacterInteriorProjection
+}
+
+export interface CityRealtimeCharacterMutationResult {
+  character: CityRealtimeCharacter
+  life?: CityRealtimeCharacterLife
+  activity?: CityRealtimeCharacterActivityResult
+  role_change?: CityRealtimeCharacterRoleChangeResult
+  agent?: CityRealtimeCharacterAgentConfiguration
+  frame: CityRealtimeTemporalFrame
+}
+
+export interface CityRealtimeCharacterRoleChangeResult {
+  category_code: string
+  from_role_code: string
+  to_role_code: string
+}
+
+export interface CityRealtimeCreateCharacterRequest {
+  public_label: string
+  archetype_code?: string
+}
+
+export interface CityRealtimeConfigureCharacterAgentRequest {
+  control_mode?: Extract<CityRealtimeCharacterControlMode, 'autonomous' | 'suspended'>
+  personality?: CityRealtimeCharacterPersonalitySeed
+}
+
+export interface CityRealtimeMoveCharacterRequest {
+	x: number
+	y: number
+	z: number
+}
+
+export interface CityRealtimeTraverseCharacterPortalRequest {
+	portal_code: string
+}
+
+export interface CityRealtimePerformCharacterActivityRequest {
+  activity_code: string
+}
+
+export interface CityRealtimeChangeCharacterRoleRequest {
+  role_code: string
+}
+
+export interface CityRealtimeActorSnapshot {
+  world_id: number
+  timeline_frame_sequence: number
+  timeline_cursor: string
+  static_projection_hash: string
+  projection_scope_epoch: number
+  minimum_chunk_x: number
+  maximum_chunk_x: number
+  minimum_chunk_y: number
+  maximum_chunk_y: number
+  z: number
+  actor_projection_hash: string
+  actors: CityRealtimePublicActor[]
+}
+
+export interface CityRealtimeActorSnapshotQuery {
+  min_chunk_x: number
+  max_chunk_x: number
+  min_chunk_y: number
+  max_chunk_y: number
+  z?: number
+  limit?: number
+}
+
+export interface CityRealtimeClock {
+  world_id: number
+  temporal_engine_version: CityRealtimeEngineVersion
+  timeline_cursor: string
+  clock_profile_id: string
+  clock_profile_hash: string
+  time_quantum_us: number
+  world_time: {
+    elapsed_us: number
+    committed_elapsed_us: number
+    live_projection: boolean
+    timezone: string
+    local_time: string
+    source_effective_utc: string
+    clock_state: string
+    recovery_state: string
+    catchup_target_world_time_us?: number
+    source_clock_mode: string
+  }
+}
+
 export interface CityWorldFoundation {
   world: CityWorld
   monetary_units: unknown[]
@@ -68,6 +573,9 @@ export interface CreateCityWorldRequest {
   timezone?: string
   style_profile_id?: string
   spawn_policy?: 'city_center'
+  // Realtime is a server-owned world mode. The browser cannot select an
+  // engine version, clock profile, source, or clock tolerance.
+  realtime?: boolean
   monetary_unit?: {
     code?: string
     name?: string
@@ -1239,6 +1747,28 @@ export type WorldRuntimeCommandType =
   | 'actor.navigation.intent.set'
   | 'actor.navigation.intent.cancel'
 
+export type CityOpenWorldRuntimeCommandType =
+  | 'open_world.actor.create'
+  | 'open_world.actor.activity.perform'
+  | 'open_world.actor.role.transition'
+  | 'open_world.actor.move'
+  | 'open_world.actor.portal.use'
+  | 'open_world.actor.control.grant'
+  | 'open_world.actor.control.revoke'
+  | 'open_world.portal.state.set'
+  | 'open_world.portal.access.set'
+  | 'open_world.actor.navigation.set'
+  | 'open_world.actor.navigation.cancel'
+
+export type CityRuntimeCommandType = WorldRuntimeCommandType | CityOpenWorldRuntimeCommandType
+
+// These are world-lifecycle controls, deliberately separate from player
+// runtime commands. The server keeps them administrator-only.
+export type CityWorldControlCommandType =
+  | 'world.pause'
+  | 'world.resume'
+  | 'world.set_speed'
+
 export type CityServiceAvailability = 'available' | 'unsupported'
 export type CityFacilityStatus = 'offline' | 'operational' | 'degraded' | 'retired'
 export type CityServiceProjectionStatus = 'active' | 'suspended' | 'retired'
@@ -1902,6 +2432,146 @@ export interface CityChunkBoundsQuery {
 
 const worldPath = (worldID: number): string => `/city/worlds/${worldID}`
 
+export async function getRealtimeWorldProjection(worldID: number): Promise<CityRealtimeWorldProjection> {
+  const { data } = await apiClient.get<CityRealtimeWorldProjection>(`${worldPath(worldID)}/realtime/projection`)
+  return data
+}
+
+export async function getRealtimeVisualManifest(worldID: number): Promise<CityRealtimeVisualManifest> {
+  const { data } = await apiClient.get<CityRealtimeVisualManifest>(`${worldPath(worldID)}/realtime/visual-manifest`)
+  return data
+}
+
+export async function getRealtimePixelChunk(
+  worldID: number,
+  chunkX: number,
+  chunkY: number,
+  z = 0
+): Promise<CityRealtimePixelChunkProjection> {
+  const { data } = await apiClient.get<CityRealtimePixelChunkProjection>(
+    `${worldPath(worldID)}/realtime/pixel-chunks/${chunkX}/${chunkY}/${z}`
+  )
+  return data
+}
+
+export async function listRealtimePatches(
+  worldID: number,
+  afterFrameSequence: number,
+  limit = 100
+): Promise<CityRealtimePatchPage> {
+  const { data } = await apiClient.get<CityRealtimePatchPage>(`${worldPath(worldID)}/realtime/patches`, {
+    params: { after_frame_sequence: afterFrameSequence, limit }
+  })
+  return data
+}
+
+export async function getRealtimeActors(
+  worldID: number,
+  query: CityRealtimeActorSnapshotQuery
+): Promise<CityRealtimeActorSnapshot> {
+  const { data } = await apiClient.get<CityRealtimeActorSnapshot>(`${worldPath(worldID)}/realtime/actors`, {
+    params: query
+  })
+  return data
+}
+
+export async function getRealtimeMyCharacter(worldID: number): Promise<CityRealtimeMyCharacterProjection> {
+  const { data } = await apiClient.get<CityRealtimeMyCharacterProjection>(`${worldPath(worldID)}/realtime/character`)
+  return data
+}
+
+export async function createRealtimeCharacter(
+  worldID: number,
+  request: CityRealtimeCreateCharacterRequest,
+  key = idempotencyKey(`realtime-character-create-${worldID}`)
+): Promise<CityRealtimeCharacterMutationResult> {
+  const { data } = await apiClient.post<CityRealtimeCharacterMutationResult>(
+    `${worldPath(worldID)}/realtime/character`,
+    request,
+    { headers: { 'Idempotency-Key': key } }
+  )
+  return data
+}
+
+export async function configureRealtimeCharacterAgent(
+  worldID: number,
+  request: CityRealtimeConfigureCharacterAgentRequest,
+  key = idempotencyKey(`realtime-character-agent-configure-${worldID}`)
+): Promise<CityRealtimeCharacterMutationResult> {
+  const { data } = await apiClient.post<CityRealtimeCharacterMutationResult>(
+    `${worldPath(worldID)}/realtime/character/agent`,
+    request,
+    { headers: { 'Idempotency-Key': key } }
+  )
+  return data
+}
+
+export async function moveRealtimeCharacter(
+  worldID: number,
+  request: CityRealtimeMoveCharacterRequest,
+  key = idempotencyKey(`realtime-character-move-${worldID}`)
+): Promise<CityRealtimeCharacterMutationResult> {
+  const { data } = await apiClient.post<CityRealtimeCharacterMutationResult>(
+    `${worldPath(worldID)}/realtime/character/move`,
+    request,
+    { headers: { 'Idempotency-Key': key } }
+  )
+  return data
+}
+
+export async function performRealtimeCharacterActivity(
+  worldID: number,
+  request: CityRealtimePerformCharacterActivityRequest,
+  key = idempotencyKey(`realtime-character-activity-${worldID}-${request.activity_code}`)
+): Promise<CityRealtimeCharacterMutationResult> {
+  const { data } = await apiClient.post<CityRealtimeCharacterMutationResult>(
+    `${worldPath(worldID)}/realtime/character/activities`,
+    request,
+    { headers: { 'Idempotency-Key': key } }
+  )
+  return data
+}
+
+export async function changeRealtimeCharacterRole(
+  worldID: number,
+  request: CityRealtimeChangeCharacterRoleRequest,
+  key = idempotencyKey(`realtime-character-role-${worldID}-${request.role_code}`)
+): Promise<CityRealtimeCharacterMutationResult> {
+  const { data } = await apiClient.post<CityRealtimeCharacterMutationResult>(
+    `${worldPath(worldID)}/realtime/character/roles`,
+    request,
+    { headers: { 'Idempotency-Key': key } }
+  )
+  return data
+}
+
+export async function listRealtimeMyCharacterEvents(
+  worldID: number,
+  query: { before_sequence?: number; limit?: number } = {}
+): Promise<CityRealtimeCharacterEventPage> {
+  const { data } = await apiClient.get<CityRealtimeCharacterEventPage>(
+    `${worldPath(worldID)}/realtime/character/events`,
+    { params: query }
+  )
+  return data
+}
+
+export async function listRealtimePublicCharacterEvents(
+  worldID: number,
+  query: { before_cursor?: string; limit?: number } = {}
+): Promise<CityRealtimePublicCharacterEventPage> {
+  const { data } = await apiClient.get<CityRealtimePublicCharacterEventPage>(
+    `${worldPath(worldID)}/realtime/events`,
+    { params: query }
+  )
+  return data
+}
+
+export async function getRealtimeClock(worldID: number): Promise<CityRealtimeClock> {
+  const { data } = await apiClient.get<CityRealtimeClock>(`${worldPath(worldID)}/clock`)
+  return data
+}
+
 function idempotencyKey(prefix: string): string {
   const id = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
   return `${prefix}-${id}`
@@ -1964,6 +2634,19 @@ export async function listOpenWorldStyleProfiles(): Promise<CityOpenWorldStylePr
 
 export async function getOpenWorldGeneration(worldID: number): Promise<CityOpenWorldGenerationState> {
 	const { data } = await apiClient.get<CityOpenWorldGenerationState>(`${worldPath(worldID)}/open-world/generation`)
+	return data
+}
+
+export async function traverseRealtimeCharacterPortal(
+	worldID: number,
+	request: CityRealtimeTraverseCharacterPortalRequest,
+	key = idempotencyKey(`realtime-character-portal-${worldID}-${request.portal_code}`)
+): Promise<CityRealtimeCharacterMutationResult> {
+	const { data } = await apiClient.post<CityRealtimeCharacterMutationResult>(
+		`${worldPath(worldID)}/realtime/character/portals`,
+		request,
+		{ headers: { 'Idempotency-Key': key } }
+	)
 	return data
 }
 
@@ -2415,16 +3098,42 @@ export async function listWorldRuleCases(
 
 export async function submitWorldRuntimeCommand(
   worldID: number,
-  commandType: WorldRuntimeCommandType,
+  commandType: CityRuntimeCommandType,
   payload: Record<string, unknown>,
-  expectedWorldTick: number
+  expectedWorldTick?: number
 ): Promise<CityCommand> {
   const { data } = await apiClient.post<CityCommand>(
     `${worldPath(worldID)}/commands`,
-    { command_type: commandType, payload, expected_world_tick: expectedWorldTick },
+    {
+      command_type: commandType,
+      payload,
+      ...(expectedWorldTick === undefined ? {} : { expected_world_tick: expectedWorldTick })
+    },
     {
       headers: {
         'Idempotency-Key': idempotencyKey(`world-runtime-${worldID}-${commandType}`)
+      }
+    }
+  )
+  return data
+}
+
+export async function submitWorldControlCommand(
+  worldID: number,
+  commandType: CityWorldControlCommandType,
+  payload: Record<string, unknown>,
+  expectedWorldTick?: number
+): Promise<CityCommand> {
+  const { data } = await apiClient.post<CityCommand>(
+    `${worldPath(worldID)}/commands`,
+    {
+      command_type: commandType,
+      payload,
+      ...(expectedWorldTick === undefined ? {} : { expected_world_tick: expectedWorldTick })
+    },
+    {
+      headers: {
+        'Idempotency-Key': idempotencyKey(`world-control-${worldID}-${commandType}`)
       }
     }
   )
@@ -2459,6 +3168,19 @@ const citySpatialAPI = {
   listWorlds: listCityWorlds,
   getWorld: getCityWorld,
   createWorld: createCityWorld,
+  getRealtimeWorldProjection,
+  getRealtimePixelChunk,
+  listRealtimePatches,
+  getRealtimeMyCharacter,
+	createRealtimeCharacter,
+	configureRealtimeCharacterAgent,
+	moveRealtimeCharacter,
+	traverseRealtimeCharacterPortal,
+  performRealtimeCharacterActivity,
+  changeRealtimeCharacterRole,
+  listRealtimeMyCharacterEvents,
+  listRealtimePublicCharacterEvents,
+  getRealtimeClock,
   getSpatialRuleSet: getCitySpatialRuleSet,
 	listOpenWorldStyleProfiles,
 	getOpenWorldGeneration,
@@ -2504,6 +3226,7 @@ const citySpatialAPI = {
   listWorldRuntimeRules,
   listWorldRuleCases,
   submitWorldRuntimeCommand,
+  submitWorldControlCommand,
   getCommand: getCityCommand,
   listCommands: listCityCommands,
   stepWorld: stepCityWorld

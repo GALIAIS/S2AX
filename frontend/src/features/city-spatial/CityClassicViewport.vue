@@ -26,13 +26,8 @@
   </div>
 </template>
 
-<script lang="ts">
-let classicViewportInstance = 0
-</script>
-
 <script setup lang="ts">
-import 'pixi.js/unsafe-eval'
-import { Application, BitmapFont, BitmapText, Container, Graphics } from 'pixi.js'
+import { Application, Container, Graphics, Text } from 'pixi.js'
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { CityNavigationPath, CityOvermapTile } from '@/api/citySpatial'
 import {
@@ -94,14 +89,11 @@ let app: Application | null = null
 let sceneLayer: Container | null = null
 let resizeObserver: ResizeObserver | null = null
 let renderFrame: number | null = null
-let fontInstalled = false
 let pointerID: number | null = null
 let pointerStart = { x: 0, y: 0 }
 let pointerLast = { x: 0, y: 0 }
 let dragRemainder = { x: 0, y: 0 }
 let pointerMoved = false
-
-const fontName = `Sub2APICityClassic${++classicViewportInstance}`
 
 function pointFromPointer(event: PointerEvent | MouseEvent): { x: number; y: number } {
   const host = hostRef.value
@@ -111,25 +103,6 @@ function pointFromPointer(event: PointerEvent | MouseEvent): { x: number; y: num
     x: (event.clientX - rect.left) * (props.scene.width / Math.max(1, rect.width)),
     y: (event.clientY - rect.top) * (props.scene.height / Math.max(1, rect.height))
   }
-}
-
-function installBitmapFont(): void {
-  if (fontInstalled) return
-  const baseCharacters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,:;!?@#$%^&*()[]{}<>+-=/\\\\|_~`\\\"\'·≈♣π□╫↕■§•╵╶└╷│┌├╴┘─┴┐┤┬┼"
-  const characters = [...new Set(`${baseCharacters}${props.glyphCharacters}`)].join('')
-  BitmapFont.install({
-    name: fontName,
-    style: {
-      fontFamily: 'Consolas, Menlo, Monaco, monospace',
-      fontSize: 32,
-      fill: '#ffffff'
-    },
-    chars: characters,
-    resolution: Math.min(2, globalThis.devicePixelRatio || 1),
-    padding: 2,
-    textureStyle: { scaleMode: 'nearest' }
-  })
-  fontInstalled = true
 }
 
 function destroySceneChildren(): void {
@@ -146,15 +119,16 @@ function addGlyph(
   y: number,
   size: number
 ): void {
-  const text = new BitmapText({
+  const text = new Text({
     text: glyph,
     style: {
-      fontFamily: fontName,
-      // Match a terminal's compact glyph cell rather than treating map cells
-      // like icon tiles. The 8 px zoom remains readable without glyphs
-      // spilling into neighbouring cells.
+      // Keep the legacy terminal viewport independent of Pixi's bitmap-font
+      // compiler. BitmapFont requires unsafe-eval in CSP-constrained browsers;
+      // ordinary text stays readable without weakening the page policy.
+      fontFamily: 'Consolas, Menlo, Monaco, monospace',
       fontSize: Math.max(7, Math.floor(size * 0.9)),
-      fill: color
+      fill: color,
+      padding: 1
     }
   })
   text.anchor.set(0.5)
@@ -357,7 +331,6 @@ async function initializeRenderer(): Promise<void> {
     sceneLayer = new Container()
     app.stage.addChild(sceneLayer)
     host.appendChild(app.canvas)
-    installBitmapFont()
     renderScene()
   } catch (error: unknown) {
     rendererError.value = error instanceof Error ? error.message : 'CLASSIC renderer unavailable'
@@ -480,15 +453,6 @@ watch(
   { flush: 'post' }
 )
 
-watch(() => props.glyphCharacters, () => {
-  if (fontInstalled) {
-    BitmapFont.uninstall(fontName)
-    fontInstalled = false
-    installBitmapFont()
-    scheduleRender()
-  }
-})
-
 onMounted(async () => {
   await nextTick()
   resizeObserver = new ResizeObserver(handleResize)
@@ -503,8 +467,6 @@ onBeforeUnmount(() => {
   if (app) app.destroy(true, { children: true })
   app = null
   sceneLayer = null
-  if (fontInstalled) BitmapFont.uninstall(fontName)
-  fontInstalled = false
 })
 </script>
 

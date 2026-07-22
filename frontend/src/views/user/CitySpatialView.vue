@@ -47,13 +47,75 @@
         </div>
       </section>
 
-      <CityOpenWorldWorkspace
-        v-else-if="activeWorld?.simulation_version === 'city-openworld-v1' || activeWorld?.simulation_version === 'city-openworld-v2' || activeWorld?.simulation_version === 'city-openworld-v3'"
-        :world="activeWorld"
-        :worlds="store.worlds"
-        :system-admin="isCityAdministrator"
-        @select-world="worldID => void store.selectWorld(worldID)"
-      />
+      <template v-else-if="isRealtimePixelWorld">
+        <CityRealtimePixelWorkspace
+          :world="activeWorld!"
+          :worlds="store.worlds"
+          @select-world="worldID => void store.selectWorld(worldID)"
+        />
+      </template>
+
+      <section v-else-if="isRealtimePixelWorldRendererDisabled" class="city-empty-world" aria-live="polite">
+        <div class="city-empty-map" aria-hidden="true">
+          <span>· · · · · · ·</span>
+          <span>· · ▦ ▦ ▦ · ·</span>
+          <span>· · · ⌁ · · ·</span>
+          <span>· · ▦ ▦ ▦ · ·</span>
+          <span>· · · · · · ·</span>
+        </div>
+        <div>
+          <p class="city-panel-eyebrow">{{ t('citySpatial.realtime.sharedWorld') }}</p>
+          <h2>{{ t('citySpatial.realtime.rendererDisabledTitle') }}</h2>
+          <p>{{ t('citySpatial.realtime.rendererDisabledDescription') }}</p>
+        </div>
+      </section>
+
+      <template v-else-if="isOpenWorld">
+        <CityOpenWorldWorkspace
+          :world="activeWorld!"
+          :worlds="store.worlds"
+          :system-admin="isCityAdministrator"
+          :lifecycle-busy-command-code="store.worldLifecycleCommandCode ?? store.worldRuntimeCommandCode"
+          @select-world="worldID => void store.selectWorld(worldID)"
+          @world-control="runWorldLifecycleCommand"
+        />
+
+        <CityWorldRuntimePanel
+          :catalog="store.worldRuntimeCatalog"
+          :actors="store.worldActors"
+          :selected-actor-code="store.selectedActorCode"
+          :actor-state="store.worldActorState"
+          :role-options="store.worldActorRoleOptions"
+          :rules="store.worldRuntimeRules"
+          :cases="store.worldRuleCases"
+          :members="store.worldMembers"
+          :command-receipts="store.worldCommandReceipts"
+          :member-role="activeWorld?.member_role ?? 'viewer'"
+          :system-admin="isCityAdministrator"
+          :loading="store.worldRuntimeLoading"
+          :busy-command-code="store.worldRuntimeCommandCode ?? store.worldLifecycleCommandCode"
+          :member-busy-key="store.worldMemberMutationKey"
+          :navigation-path="store.navigationPath"
+          :navigation-loading="store.navigationLoading"
+          :navigation-error="store.navigationError"
+          :navigation-destination="undefined"
+          :navigation-intents="store.worldNavigationIntents"
+          :navigation-reservations="store.worldNavigationReservations"
+          :navigation-intent-availability="store.worldNavigationIntentAvailability"
+          :navigation-intent-loading="store.worldNavigationIntentLoading"
+          :navigation-intent-error="store.worldNavigationIntentError"
+          :portals="store.worldPortalStates"
+          :portal-access-availability="store.worldPortalAccessAvailability"
+          :portal-loading="store.worldPortalLoading"
+          @select-actor="actorCode => void store.selectWorldActor(actorCode)"
+          @focus-actor="actorCode => void store.focusWorldActor(actorCode)"
+          @preview-path="previewNavigationPath"
+          @clear-path="store.clearNavigationPath"
+          @command="runWorldRuntimeCommand"
+          @member-add="addWorldMember"
+          @member-update="updateWorldMember"
+        />
+      </template>
 
       <template v-else-if="store.ruleSet && store.overmap && store.profile">
         <section class="city-command-deck" aria-label="Map controls">
@@ -351,6 +413,16 @@
           <p class="input-hint">{{ t('citySpatial.createWorld.timezoneHint') }}</p>
         </div>
         <div>
+          <label class="input-label">{{ t('citySpatial.createWorld.mode') }}</label>
+          <Select
+            :model-value="createForm.mode"
+            :options="worldModeOptions"
+            :searchable="false"
+            @update:model-value="value => createForm.mode = value === 'realtime' ? 'realtime' : 'standard'"
+          />
+          <p class="input-hint">{{ createForm.mode === 'realtime' ? t('citySpatial.createWorld.realtimeHint') : t('citySpatial.createWorld.standardHint') }}</p>
+        </div>
+        <div>
           <label class="input-label">{{ t('citySpatial.createWorld.style') }}</label>
           <Select
             :model-value="createForm.styleProfileID"
@@ -396,7 +468,8 @@ import type {
   CityOpenWorldStyleProfile,
   CitySpatialMutationLine,
   UpdateCityWorldMemberRequest,
-  WorldRuntimeCommandType
+  CityRuntimeCommandType,
+  CityWorldControlCommandType
 } from '@/api/citySpatial'
 import { listOpenWorldStyleProfiles } from '@/api/citySpatial'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -408,6 +481,7 @@ import CityDevelopmentPanel from '@/features/city-spatial/CityDevelopmentPanel.v
 import CityEnterpriseLocationPanel from '@/features/city-spatial/CityEnterpriseLocationPanel.vue'
 import CityOpenWorldWorkspace from '@/features/city-spatial/CityOpenWorldWorkspace.vue'
 import CityPublicServicePanel from '@/features/city-spatial/CityPublicServicePanel.vue'
+import CityRealtimePixelWorkspace from '@/features/city-spatial/CityRealtimePixelWorkspace.vue'
 import CitySpatialInspector from '@/features/city-spatial/CitySpatialInspector.vue'
 import CityWorldRuntimePanel from '@/features/city-spatial/CityWorldRuntimePanel.vue'
 import {
@@ -421,6 +495,7 @@ import {
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useCitySpatialStore } from '@/stores/citySpatial'
+import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -434,12 +509,23 @@ const showHelpDialog = ref(false)
 const createForm = reactive({
   name: '',
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+  mode: 'standard' as 'standard' | 'realtime',
   styleProfileID: ''
 })
 const styleProfiles = ref<CityOpenWorldStyleProfile[]>([])
 const styleProfilesLoading = ref(false)
 
 const activeWorld = computed(() => store.activeWorld)
+const realtimePixelRendererEnabled = computed(() => isFeatureFlagEnabled(FeatureFlags.cityPixelRenderer))
+const isRealtimePixelWorld = computed(() => (
+  activeWorld.value?.simulation_version === 'city-openworld-realtime-v2' &&
+  realtimePixelRendererEnabled.value
+))
+const isRealtimePixelWorldRendererDisabled = computed(() => (
+  activeWorld.value?.simulation_version === 'city-openworld-realtime-v2' &&
+  !realtimePixelRendererEnabled.value
+))
+const isOpenWorld = computed(() => activeWorld.value?.simulation_version.startsWith('city-openworld-') ?? false)
 const isCityAdministrator = computed(() => authStore.isAdmin)
 const worldOptions = computed<SelectOption[]>(() => store.worlds.map(world => ({
   value: world.id,
@@ -449,6 +535,15 @@ const openWorldStyleOptions = computed<SelectOption[]>(() => styleProfiles.value
   value: profile.id,
   label: profile.name
 })))
+const worldModeOptions = computed<SelectOption[]>(() => {
+  const options: SelectOption[] = [
+    { value: 'standard', label: t('citySpatial.createWorld.standardMode') }
+  ]
+  if (realtimePixelRendererEnabled.value) {
+    options.push({ value: 'realtime', label: t('citySpatial.createWorld.realtimeMode') })
+  }
+  return options
+})
 const glyphCharacters = computed(() => `${store.ruleSet?.definitions.map(definition => definition.glyph ?? '').join('') ?? ''}#+↕%&@`)
 const scene = computed<ClassicScene>(() => {
   if (!store.ruleSet || !store.overmap || !store.profile) {
@@ -652,7 +747,7 @@ async function runCityServiceCommand(input: {
 }
 
 async function runWorldRuntimeCommand(
-  commandType: WorldRuntimeCommandType,
+  commandType: CityRuntimeCommandType,
   payload: Record<string, unknown>,
   commandCode: string
 ): Promise<void> {
@@ -666,6 +761,22 @@ async function runWorldRuntimeCommand(
     }
   } catch {
     appStore.showError(store.loadError ?? t('citySpatial.runtime.commandFailed'))
+  }
+}
+
+async function runWorldLifecycleCommand(
+  commandType: CityWorldControlCommandType,
+  payload: Record<string, unknown>,
+  commandCode: string
+): Promise<void> {
+  if (!isCityAdministrator.value) return
+  try {
+    const status = await store.runWorldLifecycleCommand(commandType, payload, commandCode)
+    appStore.showSuccess(t(status === 'queued'
+      ? 'citySpatial.runtime.lifecycle.queued'
+      : 'citySpatial.runtime.lifecycle.success'))
+  } catch {
+    appStore.showError(store.loadError ?? t('citySpatial.runtime.lifecycle.failed'))
   }
 }
 
@@ -719,16 +830,22 @@ function exportSelectedChunk(): void {
 }
 
 async function createWorld(): Promise<void> {
-  if (!isCityAdministrator.value || !createForm.name || store.creatingWorld) return
+	if (!isCityAdministrator.value || !createForm.name || store.creatingWorld) return
+	if (createForm.mode === 'realtime' && !realtimePixelRendererEnabled.value) {
+		appStore.showError(t('citySpatial.realtime.rendererDisabledDescription'))
+		return
+	}
   try {
     await store.createWorld({
       name: createForm.name,
       timezone: createForm.timezone,
       style_profile_id: createForm.styleProfileID,
-      spawn_policy: 'city_center'
+      spawn_policy: 'city_center',
+      realtime: createForm.mode === 'realtime'
     })
     showCreateDialog.value = false
     createForm.name = ''
+    createForm.mode = 'standard'
     appStore.showSuccess(t('citySpatial.createWorld.success'))
   } catch {
     appStore.showError(store.loadError ?? t('citySpatial.createWorld.failed'))
@@ -770,6 +887,10 @@ function formatChangeTime(value: string): string {
 watch(() => store.activeWorldID, worldID => {
   if (!worldID || String(route.query.world ?? '') === String(worldID)) return
   void router.replace({ query: { ...route.query, world: String(worldID) } })
+})
+
+watch(realtimePixelRendererEnabled, enabled => {
+  if (!enabled && createForm.mode === 'realtime') createForm.mode = 'standard'
 })
 
 onMounted(() => {

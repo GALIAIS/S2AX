@@ -77,6 +77,7 @@ const apiMocks = vi.hoisted(() => ({
   submitEnterpriseLocationCommand: vi.fn(),
   submitServiceCommand: vi.fn(),
   submitWorldRuntimeCommand: vi.fn(),
+  submitWorldControlCommand: vi.fn(),
   getCommand: vi.fn(),
   listCommands: vi.fn(),
   stepWorld: vi.fn()
@@ -705,24 +706,463 @@ describe('city spatial store', () => {
     expect(store.enterpriseLocationAvailability).toBe('unavailable')
   })
 
-  it('selects V2 open worlds without probing legacy F7 endpoints', async () => {
+  it('selects current open-world generations without probing legacy F7 endpoints', async () => {
     configureReadAPI()
-    apiMocks.listWorlds.mockResolvedValue([{ ...world, simulation_version: 'city-openworld-v1' }])
+    apiMocks.listWorlds.mockResolvedValue([{ ...world, simulation_version: 'city-openworld-v24' }])
+    apiMocks.getWorldRuntimeCatalog.mockResolvedValue(runtimeCatalog)
     const store = useCitySpatialStore()
 
     await store.initialize(7)
 
-    expect(store.activeWorld?.simulation_version).toBe('city-openworld-v1')
+    expect(store.activeWorld?.simulation_version).toBe('city-openworld-v24')
     expect(store.ruleSet).toBeNull()
     expect(store.overmap).toBeNull()
     expect(apiMocks.getWorldSpatialRuleSet).not.toHaveBeenCalled()
     expect(apiMocks.getOvermap).not.toHaveBeenCalled()
     expect(apiMocks.listMapChunks).not.toHaveBeenCalled()
     expect(apiMocks.getLandState).not.toHaveBeenCalled()
+    expect(apiMocks.getWorldRuntimeCatalog).toHaveBeenCalledWith(7)
 
     await store.refresh()
     expect(apiMocks.getWorldSpatialRuleSet).not.toHaveBeenCalled()
     expect(apiMocks.getOvermap).not.toHaveBeenCalled()
+  })
+
+  it('uses the open-world command contract when a current open-world player moves', async () => {
+    configureReadAPI()
+    apiMocks.listWorlds.mockResolvedValue([{ ...world, simulation_version: 'city-openworld-v24' }])
+    apiMocks.getWorldRuntimeCatalog.mockResolvedValue(runtimeCatalog)
+    apiMocks.listWorldActors.mockResolvedValue([{
+      ...runtimeActor,
+      location: {
+        ...runtimeActor.location!, space_kind: 'surface', space_code: 'surface',
+        anchor_kind: 'chunk', anchor_code: 'chunk.0.0'
+      }
+    }])
+    apiMocks.getWorldActorState
+      .mockResolvedValueOnce({
+        ...runtimeActorState(16000, 1),
+        actor: {
+          ...runtimeActor,
+          location: {
+            ...runtimeActor.location!, space_kind: 'surface', space_code: 'surface',
+            anchor_kind: 'chunk', anchor_code: 'chunk.0.0'
+          }
+        },
+        location: {
+          ...runtimeActor.location!, space_kind: 'surface', space_code: 'surface',
+          anchor_kind: 'chunk', anchor_code: 'chunk.0.0'
+        }
+      })
+      .mockResolvedValueOnce(runtimeActorState(16000, 2))
+    apiMocks.getWorldActorRoleOptions.mockResolvedValue(runtimeRoleOptions)
+    apiMocks.listWorldRuntimeRules.mockResolvedValue([])
+    apiMocks.listWorldRuleCases.mockResolvedValue({ items: [] })
+    apiMocks.submitWorldRuntimeCommand.mockResolvedValue({
+      id: 31, world_id: 7, user_id: 1, sequence: 5,
+      client_request_id: 'open-world-move', command_type: 'open_world.actor.move',
+      payload: { actor_code: runtimeActor.code, space_kind: 'surface', floor_index: 0, x: 7, y: 7, z: 0 },
+      expected_world_tick: 0, status: 'pending', result: {},
+      submitted_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z'
+    })
+    apiMocks.stepWorld.mockResolvedValue({
+      tick: {
+        id: 1, world_id: 7, tick: 1, state_hash: 'state', command_count: 1,
+        applied_command_count: 1, rejected_command_count: 0, event_count: 1, duration_ms: 1
+      },
+      commands: [{ id: 31, status: 'applied' }], spatial_mutations: [], development_facts: [],
+      building_adjustments: [], enterprise_location_facts: [], world_runtime_facts: [],
+      world_effect_operations: [], world_rule_cases: [], events: []
+    })
+
+    const store = useCitySpatialStore()
+    await store.initialize(7)
+
+    await expect(store.runWorldRuntimeCommand(
+      'actor.location.move',
+      { actor_code: runtimeActor.code, x: 7, y: 7, z: 0 },
+      'move:east'
+    )).resolves.toBe('applied')
+
+    expect(apiMocks.submitWorldRuntimeCommand).toHaveBeenCalledWith(
+      7,
+      'open_world.actor.move',
+      {
+        actor_code: runtimeActor.code,
+        space_kind: 'surface',
+        floor_index: 0,
+        x: 7,
+        y: 7,
+        z: 0
+      },
+      0
+    )
+  })
+
+  it('queues a running open-world player command without a stale client tick precondition', async () => {
+    configureReadAPI()
+    const runningOpenWorld: CityWorld = {
+      ...world,
+      status: 'running',
+      simulation_version: 'city-openworld-v24',
+      speed_multiplier: 1000,
+      current_tick: 42
+    }
+    apiMocks.listWorlds.mockResolvedValue([runningOpenWorld])
+    apiMocks.getWorld.mockResolvedValue({ ...runningOpenWorld, current_tick: 43 })
+    apiMocks.getWorldRuntimeCatalog.mockResolvedValue(runtimeCatalog)
+    apiMocks.listWorldActors.mockResolvedValue([runtimeActor])
+    apiMocks.getWorldActorState.mockResolvedValue(runtimeActorState(16000, 43))
+    apiMocks.getWorldActorRoleOptions.mockResolvedValue(runtimeRoleOptions)
+    apiMocks.listWorldRuntimeRules.mockResolvedValue([])
+    apiMocks.listWorldRuleCases.mockResolvedValue({ items: [] })
+    apiMocks.submitWorldRuntimeCommand.mockResolvedValue({
+      id: 32, world_id: 7, user_id: 1, sequence: 6,
+      client_request_id: 'running-portal-use', command_type: 'open_world.actor.portal.use',
+      payload: { actor_code: runtimeActor.code, portal_code: 'building_central.entrance_main' },
+      status: 'pending', result: {},
+      submitted_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z'
+    })
+    apiMocks.stepWorld.mockRejectedValue({
+      status: 409,
+      code: 409,
+      reason: 'CITY_EXPECTED_TICK_CONFLICT',
+      message: 'city world tick no longer matches the expected tick'
+    })
+    apiMocks.getCommand.mockResolvedValue({
+      id: 32, world_id: 7, user_id: 1, sequence: 6,
+      client_request_id: 'running-portal-use', command_type: 'open_world.actor.portal.use',
+      payload: { actor_code: runtimeActor.code, portal_code: 'building_central.entrance_main' },
+      status: 'applied', processed_tick: 43, result: {},
+      submitted_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:01Z'
+    })
+
+    const store = useCitySpatialStore()
+    await store.initialize(7)
+
+    await expect(store.runWorldRuntimeCommand(
+      'open_world.actor.portal.use',
+      { actor_code: runtimeActor.code, portal_code: 'building_central.entrance_main' },
+      'portal:use:building_central/entrance_main'
+    )).resolves.toBe('applied')
+
+    expect(apiMocks.submitWorldRuntimeCommand).toHaveBeenCalledWith(
+      7,
+      'open_world.actor.portal.use',
+      { actor_code: runtimeActor.code, portal_code: 'building_central.entrance_main' },
+      undefined
+    )
+    expect(apiMocks.stepWorld).toHaveBeenCalledWith(7, 42)
+    expect(apiMocks.getCommand).toHaveBeenCalledWith(7, 32)
+    expect(store.activeWorld?.current_tick).toBe(43)
+  })
+
+  it('starts an open world at a playable cadence through the administrator lifecycle command', async () => {
+    configureReadAPI()
+    const pausedOpenWorld: CityWorld = {
+      ...world,
+      status: 'paused',
+      simulation_version: 'city-openworld-v24',
+      speed_multiplier: 1
+    }
+    const runningOpenWorld: CityWorld = {
+      ...pausedOpenWorld,
+      status: 'running',
+      speed_multiplier: 1000,
+      current_tick: 1
+    }
+    apiMocks.listWorlds.mockResolvedValue([pausedOpenWorld])
+    apiMocks.getWorld.mockResolvedValue(runningOpenWorld)
+    apiMocks.getWorldRuntimeCatalog.mockResolvedValue(runtimeCatalog)
+    apiMocks.listWorldActors.mockResolvedValue([])
+    apiMocks.listWorldRuntimeRules.mockResolvedValue([])
+    apiMocks.listWorldRuleCases.mockResolvedValue({ items: [] })
+    apiMocks.submitWorldControlCommand.mockResolvedValue({
+      id: 41, world_id: 7, user_id: 1, sequence: 9,
+      client_request_id: 'world-resume', command_type: 'world.resume',
+      payload: {}, expected_world_tick: 0, status: 'pending', result: {},
+      submitted_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z'
+    })
+    apiMocks.stepWorld.mockResolvedValue({
+      tick: {
+        id: 1, world_id: 7, tick: 1, state_hash: 'state', command_count: 1,
+        applied_command_count: 1, rejected_command_count: 0, event_count: 1, duration_ms: 1
+      },
+      commands: [{ id: 41, status: 'applied' }], spatial_mutations: [], development_facts: [],
+      building_adjustments: [], enterprise_location_facts: [], world_runtime_facts: [],
+      world_effect_operations: [], world_rule_cases: [], events: []
+    })
+
+    const store = useCitySpatialStore()
+    await store.initialize(7)
+
+    await expect(store.runWorldLifecycleCommand('world.resume')).resolves.toBe('applied')
+
+    expect(apiMocks.submitWorldControlCommand).toHaveBeenCalledWith(7, 'world.resume', {}, 0)
+    expect(apiMocks.stepWorld).toHaveBeenCalledWith(7, 0)
+    expect(store.activeWorld).toMatchObject({ status: 'running', speed_multiplier: 1000, current_tick: 1 })
+    expect(store.worldLifecycleCommandCode).toBeNull()
+  })
+
+  it('reconciles a lifecycle command when the scheduler has already advanced the world tick', async () => {
+    configureReadAPI()
+    const pausedOpenWorld: CityWorld = {
+      ...world,
+      status: 'paused',
+      simulation_version: 'city-openworld-v24',
+      speed_multiplier: 1000
+    }
+    const runningOpenWorld: CityWorld = {
+      ...pausedOpenWorld,
+      status: 'running',
+      current_tick: 2
+    }
+    apiMocks.listWorlds.mockResolvedValue([pausedOpenWorld])
+    apiMocks.getWorld.mockResolvedValue(runningOpenWorld)
+    apiMocks.getWorldRuntimeCatalog.mockResolvedValue(runtimeCatalog)
+    apiMocks.listWorldActors.mockResolvedValue([])
+    apiMocks.listWorldRuntimeRules.mockResolvedValue([])
+    apiMocks.listWorldRuleCases.mockResolvedValue({ items: [] })
+    apiMocks.submitWorldControlCommand.mockResolvedValue({
+      id: 42, world_id: 7, user_id: 1, sequence: 10,
+      client_request_id: 'world-resume-race', command_type: 'world.resume',
+      payload: {}, expected_world_tick: 0, status: 'pending', result: {},
+      submitted_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z'
+    })
+    apiMocks.stepWorld.mockRejectedValue({
+      status: 409,
+      code: 409,
+      reason: 'CITY_EXPECTED_TICK_CONFLICT',
+      message: 'city world tick no longer matches the expected tick'
+    })
+    apiMocks.getCommand.mockResolvedValue({
+      id: 42, world_id: 7, user_id: 1, sequence: 10,
+      client_request_id: 'world-resume-race', command_type: 'world.resume',
+      payload: {}, expected_world_tick: 0, status: 'applied', processed_tick: 2, result: { status: 'running' },
+      submitted_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:01Z'
+    })
+
+    const store = useCitySpatialStore()
+    await store.initialize(7)
+
+    await expect(store.runWorldLifecycleCommand('world.resume')).resolves.toBe('applied')
+
+    expect(apiMocks.getCommand).toHaveBeenCalledWith(7, 42)
+    expect(apiMocks.getWorld).toHaveBeenCalledWith(7)
+    expect(store.activeWorld).toMatchObject({ status: 'running', speed_multiplier: 1000, current_tick: 2 })
+    expect(store.loadError).toBeNull()
+  })
+
+  it('preserves the active interior floor and forwards registered portal traversal unchanged', async () => {
+    configureReadAPI()
+    const interiorLocation = {
+      ...runtimeActor.location!,
+      space_kind: 'interior',
+      space_code: 'building_central',
+      anchor_kind: 'building' as const,
+      anchor_code: 'building_central',
+      x: 4,
+      y: 5,
+      z: 2,
+      version: 2
+    }
+    const interiorActor = { ...runtimeActor, location: interiorLocation }
+    const interiorState = {
+      ...runtimeActorState(16000, 2),
+      actor: interiorActor,
+      location: interiorLocation
+    }
+    const delegatedOpenWorld = {
+      ...world, simulation_version: 'city-openworld-v24', member_role: 'planner', owner_user_id: 9
+    }
+    apiMocks.listWorlds.mockResolvedValue([delegatedOpenWorld])
+    apiMocks.getWorld.mockResolvedValue(delegatedOpenWorld)
+    apiMocks.getWorldRuntimeCatalog.mockResolvedValue(runtimeCatalog)
+    apiMocks.listWorldActors.mockResolvedValue([interiorActor])
+    apiMocks.getWorldActorState.mockResolvedValue(interiorState)
+    apiMocks.getWorldActorRoleOptions.mockResolvedValue(runtimeRoleOptions)
+    apiMocks.listWorldRuntimeRules.mockResolvedValue([])
+    apiMocks.listWorldRuleCases.mockResolvedValue({ items: [] })
+    apiMocks.submitWorldRuntimeCommand
+      .mockResolvedValueOnce({
+        id: 33, world_id: 7, user_id: 2, sequence: 7,
+        client_request_id: 'interior-move', command_type: 'open_world.actor.move',
+        payload: {}, expected_world_tick: 0, status: 'pending', result: {},
+        submitted_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z'
+      })
+      .mockResolvedValueOnce({
+        id: 34, world_id: 7, user_id: 2, sequence: 8,
+        client_request_id: 'portal-use', command_type: 'open_world.actor.portal.use',
+        payload: {}, expected_world_tick: 0, status: 'pending', result: {},
+        submitted_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z'
+      })
+    apiMocks.getCommand.mockResolvedValue({
+      id: 34, world_id: 7, user_id: 2, sequence: 8,
+      client_request_id: 'portal-use', command_type: 'open_world.actor.portal.use',
+      payload: {}, expected_world_tick: 0, status: 'applied', processed_tick: 1, result: {},
+      submitted_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:01Z'
+    })
+
+    const store = useCitySpatialStore()
+    await store.initialize(7)
+
+    await expect(store.runWorldRuntimeCommand(
+      'actor.location.move',
+      { actor_code: runtimeActor.code, x: 5, y: 5, z: 2 },
+      'move:interior-east'
+    )).resolves.toBe('queued')
+    await expect(store.runWorldRuntimeCommand(
+      'open_world.actor.portal.use',
+      { actor_code: runtimeActor.code, portal_code: 'building_central.entrance_main' },
+      'portal:use:building_central/entrance_main'
+    )).resolves.toBe('queued')
+
+    expect(apiMocks.submitWorldRuntimeCommand).toHaveBeenNthCalledWith(
+      1,
+      7,
+      'open_world.actor.move',
+      {
+        actor_code: runtimeActor.code,
+        space_kind: 'interior',
+        building_code: 'building_central',
+        floor_index: 2,
+        x: 5,
+        y: 5,
+        z: 2
+      },
+      0
+    )
+    expect(apiMocks.submitWorldRuntimeCommand).toHaveBeenNthCalledWith(
+      2,
+      7,
+      'open_world.actor.portal.use',
+      { actor_code: runtimeActor.code, portal_code: 'building_central.entrance_main' },
+      0
+    )
+    expect(apiMocks.stepWorld).not.toHaveBeenCalled()
+  })
+
+  it('uses the target interior floor when an open-world navigation intent crosses levels', async () => {
+    configureReadAPI()
+    const interiorLocation = {
+      ...runtimeActor.location!,
+      space_kind: 'interior',
+      space_code: 'building_central',
+      anchor_kind: 'building' as const,
+      anchor_code: 'building_central',
+      x: 4,
+      y: 5,
+      z: 2,
+      version: 2
+    }
+    const interiorActor = { ...runtimeActor, location: interiorLocation }
+    const interiorState: WorldActorState = {
+      ...runtimeActorState(16000, 2),
+      actor: interiorActor,
+      location: interiorLocation
+    }
+    apiMocks.listWorlds.mockResolvedValue([{ ...world, simulation_version: 'city-openworld-v24' }])
+    apiMocks.getWorldRuntimeCatalog.mockResolvedValue(runtimeCatalog)
+    apiMocks.listWorldActors.mockResolvedValue([interiorActor])
+    apiMocks.getWorldActorState.mockResolvedValue(interiorState)
+    apiMocks.getWorldActorRoleOptions.mockResolvedValue(runtimeRoleOptions)
+    apiMocks.listWorldRuntimeRules.mockResolvedValue([])
+    apiMocks.listWorldRuleCases.mockResolvedValue({ items: [] })
+    apiMocks.submitWorldRuntimeCommand.mockResolvedValue({
+      id: 35, world_id: 7, user_id: 1, sequence: 9,
+      client_request_id: 'cross-floor-navigation', command_type: 'open_world.actor.navigation.set',
+      payload: {}, expected_world_tick: 0, status: 'pending', result: {},
+      submitted_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z'
+    })
+    apiMocks.stepWorld.mockResolvedValue({
+      tick: {
+        id: 1, world_id: 7, tick: 1, state_hash: 'state', command_count: 1,
+        applied_command_count: 1, rejected_command_count: 0, event_count: 1, duration_ms: 1
+      },
+      commands: [{ id: 35, status: 'applied' }], spatial_mutations: [], development_facts: [],
+      building_adjustments: [], enterprise_location_facts: [], world_runtime_facts: [],
+      world_effect_operations: [], world_rule_cases: [], events: []
+    })
+
+    const store = useCitySpatialStore()
+    await store.initialize(7)
+
+    await expect(store.runWorldRuntimeCommand(
+      'actor.navigation.intent.set',
+      {
+        actor_code: runtimeActor.code,
+        destination: { x: 2, y: 8, z: 3 },
+        priority: 0,
+        max_steps: 256,
+        on_blocked: 'retry'
+      },
+      'navigation:intent:set:actor_00000001'
+    )).resolves.toBe('applied')
+
+    expect(apiMocks.submitWorldRuntimeCommand).toHaveBeenCalledWith(
+      7,
+      'open_world.actor.navigation.set',
+      {
+        actor_code: runtimeActor.code,
+        space_kind: 'interior',
+        building_code: 'building_central',
+        floor_index: 3,
+        x: 2,
+        y: 8,
+        z: 3,
+        priority: 0,
+        maximum_steps: 256
+      },
+      0
+    )
+  })
+
+  it('reconciles an owner command when the scheduler seals its tick first', async () => {
+    configureReadAPI()
+    apiMocks.listWorlds.mockResolvedValue([{ ...world, simulation_version: 'city-openworld-v24' }])
+    apiMocks.getWorld.mockResolvedValue({ ...world, simulation_version: 'city-openworld-v24', current_tick: 1 })
+    apiMocks.getWorldRuntimeCatalog.mockResolvedValue(runtimeCatalog)
+    apiMocks.listWorldActors.mockResolvedValue([runtimeActor])
+    apiMocks.getWorldActorState.mockResolvedValue(runtimeActorState(16000, 1))
+    apiMocks.getWorldActorRoleOptions.mockResolvedValue(runtimeRoleOptions)
+    apiMocks.listWorldRuntimeRules.mockResolvedValue([])
+    apiMocks.listWorldRuleCases.mockResolvedValue({ items: [] })
+    apiMocks.submitWorldRuntimeCommand.mockResolvedValue({
+      id: 32, world_id: 7, user_id: 1, sequence: 6,
+      client_request_id: 'scheduler-race', command_type: 'open_world.actor.activity.perform',
+      payload: { actor_code: runtimeActor.code, activity_code: 'technical_study' },
+      expected_world_tick: 0, status: 'pending', result: {},
+      submitted_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z'
+    })
+    apiMocks.stepWorld.mockRejectedValue({
+      status: 409,
+      code: 409,
+      reason: 'CITY_EXPECTED_TICK_CONFLICT',
+      message: 'city world tick no longer matches the expected tick'
+    })
+    apiMocks.getCommand.mockResolvedValue({
+      id: 32, world_id: 7, user_id: 1, sequence: 6,
+      client_request_id: 'scheduler-race', command_type: 'open_world.actor.activity.perform',
+      payload: { actor_code: runtimeActor.code, activity_code: 'technical_study' },
+      expected_world_tick: 0, status: 'applied', processed_tick: 1,
+      result: { actor_code: runtimeActor.code },
+      submitted_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:01Z'
+    })
+
+    const store = useCitySpatialStore()
+    await store.initialize(7)
+
+    await expect(store.runWorldRuntimeCommand(
+      'actor.activity.perform',
+      { actor_code: runtimeActor.code, activity_code: 'technical_study' },
+      'activity:technical_study'
+    )).resolves.toBe('applied')
+
+    expect(apiMocks.stepWorld).toHaveBeenCalledWith(7, 0)
+    expect(apiMocks.getCommand).toHaveBeenCalledWith(7, 32)
+    expect(store.worldCommandReceipts[0]?.status).toBe('applied')
+    expect(store.activeWorld?.current_tick).toBe(1)
+    expect(store.loadError).toBeNull()
   })
 
   it('keeps the current projection visible during a refresh', async () => {
@@ -1132,6 +1572,114 @@ describe('city spatial store', () => {
     expect(store.worldNavigationIntents).toEqual([latestIntent])
     expect(store.worldNavigationReservations).toEqual([])
     expect(store.worldNavigationIntentLoading).toBe(false)
+  })
+
+  it('silently projects a running selected actor navigation until its server intent arrives', async () => {
+    vi.useFakeTimers()
+    try {
+      configureReadAPI()
+      const runningOpenWorld: CityWorld = {
+        ...world,
+        status: 'running',
+        simulation_version: 'city-openworld-v24',
+        speed_multiplier: 1000,
+        current_tick: 4
+      }
+      const initialLocation = {
+        ...runtimeActor.location!,
+        space_kind: 'interior',
+        space_code: 'building_central',
+        anchor_kind: 'building' as const,
+        anchor_code: 'building_central',
+        x: 7,
+        y: 7,
+        z: 0,
+        moved_tick: 4,
+        version: 4
+      }
+      const arrivedLocation = {
+        ...initialLocation,
+        x: 9,
+        y: 8,
+        z: 1,
+        moved_tick: 6,
+        version: 6
+      }
+      const activeIntent: WorldActorNavigationIntent = {
+        ...runtimeNavigationIntent,
+        destination: { x: 9, y: 8, z: 1 },
+        status: 'active',
+        updated_tick: 4
+      }
+      const arrivedIntent: WorldActorNavigationIntent = {
+        ...activeIntent,
+        status: 'arrived',
+        updated_tick: 6,
+        version: 2
+      }
+      const activeState: WorldActorState = {
+        ...runtimeActorState(16000, 4),
+        actor: { ...runtimeActor, location: initialLocation, updated_tick: 4, version: 4 },
+        location: initialLocation,
+        navigation_intent: activeIntent
+      }
+      const arrivedState: WorldActorState = {
+        ...runtimeActorState(16000, 6),
+        actor: { ...runtimeActor, location: arrivedLocation, updated_tick: 6, version: 6 },
+        location: arrivedLocation,
+        navigation_intent: arrivedIntent
+      }
+      const refreshedPortal: WorldPortalAccessView = { ...runtimePortal, accessible: true }
+
+      apiMocks.listWorlds.mockResolvedValue([runningOpenWorld])
+      apiMocks.getWorld.mockResolvedValue({ ...runningOpenWorld, current_tick: 6 })
+      apiMocks.getWorldRuntimeCatalog.mockResolvedValue(runtimeCatalog)
+      apiMocks.listWorldActors.mockResolvedValue([{ ...runtimeActor, location: initialLocation }])
+      apiMocks.getWorldActorState
+        .mockResolvedValueOnce(activeState)
+        .mockResolvedValueOnce(arrivedState)
+      apiMocks.getWorldActorRoleOptions.mockResolvedValue(runtimeRoleOptions)
+      apiMocks.listWorldRuntimeRules.mockResolvedValue([])
+      apiMocks.listWorldRuleCases.mockResolvedValue({ items: [] })
+      apiMocks.listWorldNavigationIntents
+        .mockResolvedValueOnce([activeIntent])
+        .mockResolvedValueOnce([arrivedIntent])
+      apiMocks.listWorldNavigationReservations
+        .mockResolvedValueOnce([runtimeNavigationReservation])
+        .mockResolvedValueOnce([])
+      apiMocks.listWorldPortalStates
+        .mockResolvedValueOnce([runtimePortal])
+        .mockResolvedValueOnce([refreshedPortal])
+
+      const store = useCitySpatialStore()
+      await store.initialize(7)
+
+      expect(store.worldActorState?.location).toMatchObject({ x: 7, y: 7, z: 0 })
+      expect(store.worldNavigationIntents[0]?.status).toBe('active')
+      expect(store.worldRuntimeLoading).toBe(false)
+      expect(store.worldPortalLoading).toBe(false)
+      expect(store.worldNavigationIntentLoading).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(1200)
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(store.activeWorld?.current_tick).toBe(6)
+      expect(store.worldActorState?.location).toMatchObject({ x: 9, y: 8, z: 1 })
+      expect(store.worldActors[0]?.location).toMatchObject({ x: 9, y: 8, z: 1 })
+      expect(store.worldNavigationIntents[0]?.status).toBe('arrived')
+      expect(store.worldNavigationReservations).toEqual([])
+      expect(store.worldPortalStates).toEqual([refreshedPortal])
+      expect(store.worldRuntimeLoading).toBe(false)
+      expect(store.worldPortalLoading).toBe(false)
+      expect(store.worldNavigationIntentLoading).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(3600)
+      expect(apiMocks.getWorldActorState).toHaveBeenCalledTimes(2)
+    } finally {
+      useCitySpatialStore().clear()
+      vi.useRealTimers()
+    }
   })
 
   it('queues an authorized member command without attempting the owner-only world tick', async () => {

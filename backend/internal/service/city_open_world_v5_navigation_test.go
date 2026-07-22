@@ -83,3 +83,49 @@ func TestCityOpenWorldV5NavigationHelpersStayDeterministicAndBounded(t *testing.
 	require.Equal(t, int64(2), cityOpenWorldV5NavigationRetryDelay(4))
 	require.Equal(t, int64(cityOpenWorldV5NavigationMaximumRetryDelay), cityOpenWorldV5NavigationRetryDelay(99))
 }
+
+func TestCityOpenWorldV5NavigationShortestPortalEdgeAvoidsReverseFloorCycle(t *testing.T) {
+	location := func(floor int32, x, y int64) CityOpenWorldActorLocation {
+		value, err := cityOpenWorldRuntimeLocationFromPayload(cityOpenWorldActorMovePayload{
+			ActorCode: "actor.17", SpaceKind: "interior", BuildingCode: "building.central",
+			FloorIndex: floor, X: x, Y: y, Z: floor,
+		})
+		require.NoError(t, err)
+		return value
+	}
+	current := location(2, 702, 374)
+	target := location(3, 698, 379)
+	lower := location(1, 699, 376)
+
+	edges := []cityOpenWorldV5NavigationPortalEdge{
+		{
+			portal: &cityOpenWorldStaticPortal{Code: "building.central.stairs.01.02"},
+			from:   current,
+			to:     lower,
+		},
+		{
+			portal: &cityOpenWorldStaticPortal{Code: "building.central.stairs.01.02"},
+			from:   lower,
+			to:     current,
+		},
+		{
+			portal: &cityOpenWorldStaticPortal{Code: "building.central.stairs.02.03"},
+			from:   current,
+			to:     target,
+		},
+		{
+			portal: &cityOpenWorldStaticPortal{Code: "building.central.stairs.02.03"},
+			from:   target,
+			to:     current,
+		},
+	}
+
+	selected := cityOpenWorldV5NavigationShortestPortalEdge(edges, current, target)
+	require.NotNil(t, selected)
+	require.Equal(t, "building.central.stairs.02.03", selected.portal.Code)
+	require.True(t, cityOpenWorldRuntimeLocationEqual(target, selected.to))
+
+	hops := cityOpenWorldV5NavigationPortalHopDistances(edges, cityOpenWorldV5NavigationDomainKey(target))
+	require.Equal(t, 1, hops[cityOpenWorldV5NavigationDomainKey(current)])
+	require.Equal(t, 2, hops[cityOpenWorldV5NavigationDomainKey(lower)])
+}

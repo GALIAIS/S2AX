@@ -37,6 +37,7 @@ import auditAPI from './audit'
 import virtualCurrenciesAPI from './virtualCurrencies'
 import virtualCurrencyIntegrationsAPI from './virtualCurrencyIntegrations'
 import accountAllocationsAPI from './accountAllocations'
+import cityVisualPacksAPI from './cityVisualPacks'
 
 /**
  * Unified admin API object for convenient access
@@ -75,7 +76,8 @@ export const adminAPI = {
   audit: auditAPI,
   virtualCurrencies: virtualCurrenciesAPI,
   virtualCurrencyIntegrations: virtualCurrencyIntegrationsAPI,
-  accountAllocations: accountAllocationsAPI
+  accountAllocations: accountAllocationsAPI,
+  cityVisualPacks: cityVisualPacksAPI
 }
 
 export {
@@ -112,7 +114,8 @@ export {
   auditAPI,
   virtualCurrenciesAPI,
   virtualCurrencyIntegrationsAPI,
-  accountAllocationsAPI
+  accountAllocationsAPI,
+  cityVisualPacksAPI
 }
 
 export default adminAPI

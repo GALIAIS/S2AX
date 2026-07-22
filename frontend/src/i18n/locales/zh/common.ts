@@ -55,7 +55,9 @@ export default {
     disable: '停用',
     more: '更多',
     menu: '菜单',
+    toggleMenu: '切换菜单',
     userMenu: '用户菜单',
+    pageNotFound: '页面不存在',
     close: '关闭',
     clear: '清除',
     enabled: '已启用',
@@ -182,6 +184,7 @@ export default {
     virtualCurrency: '资产',
     accountAllocations: '账号分配',
     citySimulation: '城市模拟',
+    cityVisualPacks: '城市视觉包',
     virtualCurrencies: '虚拟货币',
     virtualCurrencyIntegrations: '货币接入',
     accounts: '账号管理',
@@ -505,6 +508,11 @@ export default {
       noCases: '当前角色没有规则案件。', commandSuccess: '角色事实已通过城市 Tick 封账。',
       commandQueued: '角色命令已进入世界队列，将由世界调度 Tick 统一封账。',
       commandFailed: '开放世界操作失败',
+      lifecycle: {
+        queued: '世界调度命令已进入队列。',
+        success: '世界调度状态已通过城市 Tick 更新。',
+        failed: '世界调度操作失败'
+      },
       counters: { actors: '角色', facts: '事实', cases: '案件' },
       members: {
         title: '世界成员与职责', count: '{count} 名生效成员', identity: '邮箱或用户名',
@@ -577,7 +585,7 @@ export default {
       portals: {
         title: '入口状态与访问控制', loading: '正在读取入口投影…', count: '{count} 个入口', empty: '当前世界没有生效入口。',
         direction: '方向', version: '版本', policy: '访问策略', actorAccess: '当前角色', fixedOpen: '楼梯保持开放',
-        outOfRange: '角色需到达入口相邻 Cell', editPolicy: '编辑策略', policyEditor: '入口访问策略编辑器',
+        outOfRange: '角色需到达入口相邻 Cell', endpointRequired: '角色需站在入口端点', traverse: '通过入口', editPolicy: '编辑策略', policyEditor: '入口访问策略编辑器',
         policyHint: '策略由服务端校验并作为事实封账；保存会替换该入口的完整访问条件。', portal: '目标入口',
         policyMode: '策略条件', noDefinitions: '没有可用定义', minimumStacks: '最低状态层数', factType: '事实类型',
         windowTicks: '统计窗口（Tick）', scaledThreshold: '属性阈值', integerThreshold: '整数阈值', savePolicy: '保存访问策略',
@@ -617,15 +625,110 @@ export default {
       action: '新建城市', title: '创建城市世界', name: '城市名称',
       namePlaceholder: '例如：港湾实验城', timezone: 'IANA 时区',
       timezoneHint: '用于城市日历边界，例如 Asia/Shanghai。', creating: '正在创建…',
+      mode: '世界模式', standardMode: '标准开放世界', realtimeMode: '共享实时像素世界',
+      standardHint: '使用现有开放世界运行时；适合兼容性测试和既有城市功能。',
+      realtimeHint: '仅当服务端 NTP/NTS 时钟已受信任并启用时可创建；时钟、引擎和资料版本均由服务端固定。',
       style: '世界生成风格', stylePlaceholder: '选择风格',
       styleHint: '创建后会冻结生成器、国家/地区风格与字符规则集，不复用旧版 F7 固定地图。',
       styleLoadFailed: '无法读取开放世界风格目录',
       confirm: '创建并生成开放世界', success: '城市世界已创建', failed: '创建城市世界失败'
     },
+    realtime: {
+      world: '城市世界', sharedWorld: '共享实时世界', worldTime: '世界时间',
+      zoomOut: '缩小像素地图', zoomIn: '放大像素地图', refresh: '同步世界投影', returnToSpawn: '返回出生地',
+      mapTitle: 'PIXEL WORLD / 共享局部地图', mapSubtitle: '{chunks} 个缓存 Chunk · {actors} 个可见角色 · {cursor}',
+      viewportAria: '共享像素世界地图。可拖动、使用方向键平移、滚轮缩放并点击查看地图事实。',
+      loading: '正在装载共享像素世界', loadingDescription: '正在校验服务端空间哈希并按视野读取 Chunk…',
+      loadingChunks: '正在读取相邻 Chunk', loadFailed: '无法读取共享实时世界',
+      rendererDisabledTitle: '共享像素渲染已关闭',
+      rendererDisabledDescription: '管理员暂时关闭了该实时世界的像素内容面。世界数据与时间线未删除，重新开启后可继续访问。',
+      dragHint: '拖动地图浏览同一座城市；视野缓存不会重置世界状态。', panHint: '平移', zoomHint: '缩放', spawnHint: '返回出生地',
+      clock: { live: '服务端实时投影', committed: '已提交时间线' },
+      character: {
+        eyebrow: '我的角色', title: '共享世界身份', loading: '正在读取你的角色状态…',
+        label: '公开角色名', labelPlaceholder: '例如：春日 花子', createHint: '只显示在共享地图中；不会公开账号、提示词或 Agent 配置。',
+        create: '创建角色', creating: '正在创建角色…', createFailed: '创建角色失败', loadFailed: '无法读取你的角色状态',
+        runtimeUnavailable: '此历史世界尚未绑定角色运行时；可继续查看，但不能在其中创建角色。',
+        selectTarget: '点击相邻的可见 Cell 作为移动目标。', selectedTarget: '目标：{x} / {y} / {z}',
+        move: '移动到目标', moving: '正在提交移动…', moveFailed: '移动角色失败', adjacentOnly: '只能移动到同一层相邻的一格。',
+        portals: {
+          title: '通道转换', serverAuthoritative: '静态路线由服务端校验',
+          completed: '已完成：{direction}', failed: '无法通过该通道',
+          directions: { enter: '进入建筑', exit: '离开建筑', ascend: '上楼', descend: '下楼' }
+        },
+        interior: {
+          title: '室内导航', floor: '第 {floor} 层', cellDescription: '{kind}：{x} / {y} / {z}',
+          kinds: { wall: '墙体', window: '窗户', floor: '地面', door: '门', furniture: '陈设' }
+        },
+        life: {
+          title: '生活状态', localOnly: '城市内本地状态，不兑换平台余额',
+          energy: '精力', satiety: '饱腹', morale: '士气', standing: '市民评价',
+          cityCredit: '城市信用', rations: '口粮'
+        },
+        progression: {
+          title: '角色发展', private: '仅你可见 · 服务端封存', archetypeSelect: '起始原型', archetype: '原型',
+          experience: '累计经验', currentRoles: '当前角色', available: '可转任', active: '当前任职',
+          change: '转任', changing: '正在转任…', changeFailed: '转任失败', none: '无',
+          changed: '角色已从「{from}」转为「{to}」',
+          unavailable: {
+            civic_standing: '市民评价尚未满足', experience: '累计经验尚未满足',
+            role: '前置角色尚未满足', attribute: '属性尚未满足', requirements: '尚未满足条件'
+          },
+          requirements: {
+            none: '无额外条件', standing: '市民评价 {value}', experience: '经验 {value}',
+            attribute: '{attribute} {value}', role: '前置：{role}'
+          },
+          attributes: { communication: '沟通', coordination: '协调', discipline: '自律', reasoning: '推理', vitality: '体能' },
+          archetypes: { residentGeneralist: '城市通才', residentSocial: '社群居民', residentTechnical: '技术居民' },
+          roles: { resident: '居民', civicAide: '市政助理', maintenanceWorker: '维护工', communitySteward: '社区管事' }
+        },
+        activities: {
+          title: '当前行动', serverAuthoritative: '可用性由服务端封账状态决定',
+          available: '可执行', unavailable: '暂不可执行', cooldown: '冷却 {seconds}s',
+          locationRequired: '需要道路或人行道', inventoryRequired: '缺少口粮', needsRequired: '精力或饱腹不足，先休息或进食',
+          roleRequired: '需要对应角色', progressionRequired: '角色发展状态不可用',
+          completed: '已完成「{activity}」', completedWithExperience: '已完成「{activity}」：{experience}', penalized: '「{activity}」触发处罚，城市信用 {amount}',
+          failed: '执行行动失败',
+          labels: {
+            restShort: '短暂休息', civicShift: '市政轮班', consumeRation: '食用口粮',
+            civicCleanup: '公共清洁', conductDisruption: '扰乱秩序', publicServiceStudy: '公共服务研习',
+            civicService: '市政服务', maintenanceShift: '维护轮班'
+          }
+        },
+        history: { title: '我的行动记录', private: '仅你可见', completed: '完成', penalized: '处罚' },
+        agent: {
+          title: '角色 Agent', description: '人格和控制模式只属于当前角色；行动仍由服务端世界规则校验并在后续时间线中结算。',
+          mode: '控制模式', personalityRevision: '人格修订', queue: '队列状态',
+          values: '核心价值', valuesPlaceholder: '例如：社群、好奇心（逗号或换行分隔）',
+          boundaries: '硬边界', boundariesPlaceholder: '例如：避免伤害、尊重同意（逗号或换行分隔）',
+          background: '背景', backgroundPlaceholder: '可选：角色已知的背景事实',
+          notes: '补充说明', notesPlaceholder: '可选：仅作为人格数据，不是可执行指令',
+          ownerPrivate: '人格仅返回给角色拥有者；不会出现在共享地图、其他成员投影或 Agent 观察载荷中。',
+          save: '保存并应用', saving: '正在封存配置…', saved: '角色 Agent 已切换至「{mode}」。', saveFailed: '保存角色 Agent 配置失败',
+          personalityRequired: '启用自主模式前，至少需要填写一项核心价值。',
+          personalityInvalid: '人格字段无效：核心价值至少一项，且每类列表最多八项、不能重复。',
+          manualControlUnavailable: '当前为「{mode}」模式，移动、通道、行动和职业变更由角色 Agent 管理。',
+          queueIdle: '空闲', queueDecision: '等待决策', queueIntent: '等待执行',
+          modes: { manual: '手动', assisted: '辅助', autonomous: '自主', suspended: '已暂停' }
+        }
+      },
+      inspector: {
+        eyebrow: '成员安全空间事实', title: '地图检查器', coordinate: '世界坐标', chunk: 'Chunk', terrain: '基础地形',
+        building: '建筑', actor: '可见角色', floors: '层', layers: '内容层', noLayers: '该 Cell 没有额外的可见内容层。',
+        emptyTitle: '选择地图位置', emptyDescription: '点击已读取的像素 Cell 查看服务端返回的地形、结构与可见语义层。',
+        viewerScope: '查看权限', staticHash: '静态投影哈希'
+      }
+    },
     openWorld: {
       world: '开放世界', profile: '世界风格', generator: '生成器 {version}',
       refresh: '重新读取服务端世界事实', returnToSpawn: '返回出生地', nearestInterior: '定位最近的已物化室内',
       materializeSector: '按当前视野生成并封存相邻分区', materializeFailed: '分区生成命令未成功应用',
+      lifecycle: {
+        title: '世界调度', tick: 'T{tick} · {cadence}', speed: '游玩速度',
+        start: '启动世界', pause: '暂停世界',
+        pausedHint: '世界已暂停。持续移动与自动行动会在管理员启动世界后继续推进。',
+        status: { running: '运行中', paused: '已暂停' }
+      },
 	  verifyCurrentRegion: '验证当前 Region 的已封存地图事实', regionVerified: '当前 Region 的地图事实已验证',
 	  worldVerified: '完整世界状态与规范哈希已验证', verificationSummary: '{sectors} 个分区 · {chunks} 个 Chunk',
 	  verificationFailed: '地图事实验证返回了不匹配的范围',

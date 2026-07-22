@@ -305,6 +305,44 @@ func initializeCityOpenWorldFoundation(
 		return initializeCityOpenWorldV4Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy)
 	case CitySimulationVersionOpenWorldV5:
 		return initializeCityOpenWorldV5Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy)
+	case CitySimulationVersionOpenWorldV6:
+		return initializeCityOpenWorldV6Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy)
+	case CitySimulationVersionOpenWorldV7:
+		return initializeCityOpenWorldV7Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy)
+	case CitySimulationVersionOpenWorldV8:
+		return initializeCityOpenWorldV8Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy)
+	case CitySimulationVersionOpenWorldV9:
+		return initializeCityOpenWorldV9Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy)
+	case CitySimulationVersionOpenWorldV10:
+		return initializeCityOpenWorldV10Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy)
+	case CitySimulationVersionOpenWorldV11:
+		return initializeCityOpenWorldV11Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy)
+	case CitySimulationVersionOpenWorldV12:
+		return initializeCityOpenWorldV12Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy)
+	case CitySimulationVersionOpenWorldV13:
+		return initializeCityOpenWorldV13Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy)
+	case CitySimulationVersionOpenWorldV14:
+		return initializeCityOpenWorldV14Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy)
+	case CitySimulationVersionOpenWorldV15:
+		return initializeCityOpenWorldV15Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy)
+	case CitySimulationVersionOpenWorldV16:
+		return initializeCityOpenWorldV16Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy)
+	case CitySimulationVersionOpenWorldV17:
+		return initializeCityOpenWorldV17Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy)
+	case CitySimulationVersionOpenWorldV18:
+		return initializeCityOpenWorldV18Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy)
+	case CitySimulationVersionOpenWorldV19:
+		return initializeCityOpenWorldV19Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy)
+	case CitySimulationVersionOpenWorldV20:
+		return initializeCityOpenWorldV20Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy)
+	case CitySimulationVersionOpenWorldV21:
+		return initializeCityOpenWorldV21Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy)
+	case CitySimulationVersionOpenWorldV22:
+		return initializeCityOpenWorldV22Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy)
+	case CitySimulationVersionOpenWorldV23:
+		return initializeCityOpenWorldV23Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy)
+	case CitySimulationVersionOpenWorldV24:
+		return initializeCityOpenWorldV24Foundation(ctx, tx, worldID, seed, simulationVersion, profileID, spawnPolicy)
 	default:
 		return ErrCitySimulationVersion.WithMetadata(map[string]string{"version": simulationVersion})
 	}

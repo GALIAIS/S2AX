@@ -31,7 +31,11 @@ func TestCitySnapshotCompressionIsDeterministicAndTamperEvident(t *testing.T) {
 	require.ErrorIs(t, err, ErrCitySnapshotIntegrity)
 
 	fullState := cityHashState{
-		SimulationVersion: CitySimulationVersionV1,
+		// This test exercises deterministic snapshot compression rather than the
+		// latest open-world projection contract. Pin it to the self-contained F5
+		// schema so advancing CurrentCitySimulationVersion cannot make its fixture
+		// incomplete.
+		SimulationVersion: CitySimulationVersionF5,
 		CurrentTick:       0,
 		Spatial: &citySpatialHashState{
 			Profile: cityHashSpatialProfile{Metadata: json.RawMessage(`{}`)},
@@ -122,7 +126,7 @@ func TestCitySnapshotCompressionIsDeterministicAndTamperEvident(t *testing.T) {
 	require.NoError(t, err)
 	payloadHash = sha256.Sum256(compressed)
 	snapshot = &CitySnapshot{
-		Tick: 0, SimulationVersion: CitySimulationVersionV1, SnapshotFormat: citySnapshotFormat,
+		Tick: 0, SimulationVersion: CitySimulationVersionF5, SnapshotFormat: citySnapshotFormat,
 		StateHash: hash, PayloadHash: hex.EncodeToString(payloadHash[:]),
 		UncompressedSize: int64(len(canonical)), CompressedSize: int64(len(compressed)), payload: compressed,
 	}

@@ -164,6 +164,13 @@ func ProvideSettingHandler(settingService *service.SettingService, buildInfo Bui
 	return h
 }
 
+func ProvideCityEconomyHandler(
+	cityEconomy *service.CityEconomyService,
+	realtimeLifecycle *service.CityRealtimeLifecycleController,
+) *CityEconomyHandler {
+	return NewCityEconomyHandler(cityEconomy, realtimeLifecycle)
+}
+
 // ProvideAdminSettingHandler creates admin.SettingHandler with notification template APIs.
 func ProvideAdminSettingHandler(settingService *service.SettingService, emailService *service.EmailService, turnstileService *service.TurnstileService, opsService *service.OpsService, paymentConfigService *service.PaymentConfigService, paymentService *service.PaymentService, userAttributeService *service.UserAttributeService, notificationEmailService *service.NotificationEmailService, totpService *service.TotpService, userService *service.UserService) *admin.SettingHandler {
 	h := admin.NewSettingHandler(settingService, emailService, turnstileService, opsService, paymentConfigService, paymentService, userAttributeService)
@@ -243,7 +250,7 @@ var ProviderSet = wire.NewSet(
 	NewTotpHandler,
 	ProvideSettingHandler,
 	NewPaymentHandler,
-	NewCityEconomyHandler,
+	ProvideCityEconomyHandler,
 	NewVirtualCurrencyHandler,
 	NewVirtualCurrencyIntegrationHandler,
 	NewPaymentWebhookHandler,

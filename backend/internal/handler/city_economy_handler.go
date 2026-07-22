@@ -16,11 +16,19 @@ import (
 )
 
 type CityEconomyHandler struct {
-	service *service.CityEconomyService
+	service           *service.CityEconomyService
+	realtimeLifecycle *service.CityRealtimeLifecycleController
 }
 
-func NewCityEconomyHandler(cityService *service.CityEconomyService) *CityEconomyHandler {
-	return &CityEconomyHandler{service: cityService}
+func NewCityEconomyHandler(
+	cityService *service.CityEconomyService,
+	realtimeLifecycle ...*service.CityRealtimeLifecycleController,
+) *CityEconomyHandler {
+	handler := &CityEconomyHandler{service: cityService}
+	if len(realtimeLifecycle) > 0 {
+		handler.realtimeLifecycle = realtimeLifecycle[0]
+	}
+	return handler
 }
 
 type createCityWorldRequest struct {
@@ -28,7 +36,11 @@ type createCityWorldRequest struct {
 	Timezone       string `json:"timezone"`
 	StyleProfileID string `json:"style_profile_id"`
 	SpawnPolicy    string `json:"spawn_policy"`
-	MonetaryUnit   struct {
+	// Realtime requests never accept an engine version or a clock profile from
+	// the browser. The production lifecycle controller derives both from the
+	// server-owned, NTP/NTS-attested authority.
+	Realtime     bool `json:"realtime"`
+	MonetaryUnit struct {
 		Code   string `json:"code"`
 		Name   string `json:"name"`
 		Symbol string `json:"symbol"`
@@ -54,6 +66,57 @@ type addCityWorldMemberRequest struct {
 type updateCityWorldMemberRequest struct {
 	Role   string `json:"role"`
 	Status string `json:"status"`
+}
+
+type cityRealtimeLifecycleRequest struct {
+	WorldID   int64  `json:"world_id"`
+	Operation string `json:"operation"`
+}
+
+// createCityRealtimeCharacterRequest intentionally accepts only a public
+// simulation label. The server owns identity codes, visual selection, spawn
+// placement, Agent linkage, and all time authority.
+type createCityRealtimeCharacterRequest struct {
+	PublicLabel   string `json:"public_label" binding:"required"`
+	ArchetypeCode string `json:"archetype_code"`
+}
+
+// configureCityRealtimeCharacterAgentRequest contains only owner-scoped
+// declarative control and personality data.  It cannot name an Actor, Agent,
+// provider, worker, position, action, or city-side effect.
+type configureCityRealtimeCharacterAgentRequest struct {
+	ControlMode string                                        `json:"control_mode"`
+	Personality *service.CityRealtimeCharacterPersonalitySeed `json:"personality"`
+}
+
+// moveCityRealtimeCharacterRequest is a target Cell rather than a client-side
+// path. The realtime service verifies adjacency, terrain, structures,
+// occupancy, frame order, and ownership inside one sealed temporal frame.
+type moveCityRealtimeCharacterRequest struct {
+	X int64 `json:"x"`
+	Y int64 `json:"y"`
+	Z int32 `json:"z"`
+}
+
+// traverseCityRealtimeCharacterPortalRequest selects an immutable portal
+// topology edge. The server still derives the current endpoint, direction,
+// target cell, occupancy, and all temporal state.
+type traverseCityRealtimeCharacterPortalRequest struct {
+	PortalCode string `json:"portal_code" binding:"required"`
+}
+
+// performCityRealtimeCharacterActivityRequest contains only a server-bound
+// catalog code. Effects, item use, credit movement, law outcomes, actor
+// identity, and world time are all derived inside the sealed reducer.
+type performCityRealtimeCharacterActivityRequest struct {
+	ActivityCode string `json:"activity_code" binding:"required"`
+}
+
+// changeCityRealtimeCharacterRoleRequest contains only a pinned catalog role
+// code. The service owns the previous role, category, requirements, and all
+// effects of the sealed transition.
+type changeCityRealtimeCharacterRoleRequest struct {
+	RoleCode string `json:"role_code" binding:"required"`
 }
 
 type findCityNavigationPathRequest struct {
@@ -168,7 +231,7 @@ func (h *CityEconomyHandler) CreateWorld(c *gin.Context) {
 		return
 	}
 	executeUserIdempotentJSON(c, "user.city.worlds.create", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
-		return h.service.CreateWorld(ctx, service.CityWorldCreateInput{
+		input := service.CityWorldCreateInput{
 			OwnerUserID:    subject.UserID,
 			Name:           req.Name,
 			Timezone:       req.Timezone,
@@ -178,7 +241,14 @@ func (h *CityEconomyHandler) CreateWorld(c *gin.Context) {
 				Code: req.MonetaryUnit.Code, Name: req.MonetaryUnit.Name,
 				Symbol: req.MonetaryUnit.Symbol, Scale: req.MonetaryUnit.Scale,
 			},
-		})
+		}
+		if req.Realtime {
+			if h.realtimeLifecycle == nil {
+				return nil, service.ErrCityRealtimeClockUnsafe
+			}
+			return h.realtimeLifecycle.CreateRealtimeWorld(ctx, input)
+		}
+		return h.service.CreateWorld(ctx, input)
 	})
 }
 
@@ -340,6 +410,417 @@ func (h *CityEconomyHandler) ListOpenWorldBuildingPortals(c *gin.Context) {
 	response.Success(c, items)
 }
 
+func (h *CityEconomyHandler) GetOpenWorldServiceState(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetCityOpenWorldServiceState(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+func (h *CityEconomyHandler) GetOpenWorldImpactState(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetCityOpenWorldImpactState(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+func (h *CityEconomyHandler) GetOpenWorldMobilityState(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetCityOpenWorldMobilityState(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+func (h *CityEconomyHandler) GetOpenWorldMobilityArrivalState(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetCityOpenWorldMobilityArrivalState(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+func (h *CityEconomyHandler) GetOpenWorldMobilityODState(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetCityOpenWorldMobilityODState(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+func (h *CityEconomyHandler) GetOpenWorldCommuteState(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetCityOpenWorldCommuteState(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+func (h *CityEconomyHandler) GetOpenWorldCommuteSourceState(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetCityOpenWorldCommuteSourceState(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+// GetOpenWorldCommuteLifecycleState exposes V14's effective assignment
+// timeline. The service enforces actor-scoped visibility for non-administrators
+// so this endpoint never turns the sealed account/world evidence into a
+// cross-player data leak.
+func (h *CityEconomyHandler) GetOpenWorldCommuteLifecycleState(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetCityOpenWorldCommuteLifecycleState(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+// GetOpenWorldSupplyChainState exposes the V15 public supply-chain
+// projection. The service deliberately returns only node codes, aggregate
+// inventory movement, prices, lifecycle evidence, and ledger cursors; account
+// balances, credentials, and other sensitive owner data remain unavailable.
+func (h *CityEconomyHandler) GetOpenWorldSupplyChainState(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetCityOpenWorldSupplyChainState(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+// GetOpenWorldEnterpriseFreightState exposes the V16 logistics adapter. The
+// service scopes ordinary members to their contract-side sources and never
+// promotes a route status into a delivery or balance mutation.
+func (h *CityEconomyHandler) GetOpenWorldEnterpriseFreightState(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetCityOpenWorldEnterpriseFreightState(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+// GetOpenWorldEnterpriseFreightReceiptState exposes V17's custody and receipt
+// projection. Regular users see only shipments involving firms they own;
+// inventory balances and any upstream account material stay server-side.
+func (h *CityEconomyHandler) GetOpenWorldEnterpriseFreightReceiptState(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetCityOpenWorldEnterpriseFreightReceiptState(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+// GetOpenWorldFreightBatchState exposes V18's capacity-bounded overflow plan.
+// Regular users are restricted to plans involving firms they own.
+func (h *CityEconomyHandler) GetOpenWorldFreightBatchState(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetCityOpenWorldFreightBatchState(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+// GetOpenWorldSpatialNetworkState exposes V19's static public mapping of V9
+// hubs and edges. It contains no account, command, inventory, or route data.
+func (h *CityEconomyHandler) GetOpenWorldSpatialNetworkState(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetCityOpenWorldSpatialNetworkState(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+// GetOpenWorldInfrastructureState exposes V20's fact-backed infrastructure
+// asset state to world members. Administrative mutations still go through the
+// generic command endpoint and are owner-authorized by the reducer.
+func (h *CityEconomyHandler) GetOpenWorldInfrastructureState(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetCityOpenWorldInfrastructureState(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+// GetOpenWorldEffectiveCapacityState exposes V21's fact-backed capacity
+// admission audit projection to world members. Infrastructure mutations remain
+// owner-authorized generic commands and are not exposed by this read route.
+func (h *CityEconomyHandler) GetOpenWorldEffectiveCapacityState(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetCityOpenWorldEffectiveCapacityState(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+// GetOpenWorldFreightSettlementState exposes V22's partial receipt, refund,
+// and carrier-liability evidence. Settlement mutations remain available only
+// through the generic world command endpoint and its reducer authorization.
+func (h *CityEconomyHandler) GetOpenWorldFreightSettlementState(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetCityOpenWorldFreightSettlementState(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+// GetOpenWorldCarrierRecoveryState exposes V23's audited manual carrier
+// reserve and claim-recovery projection. The service applies seller-scoped
+// redaction for regular members; mutations remain generic world commands.
+func (h *CityEconomyHandler) GetOpenWorldCarrierRecoveryState(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetCityOpenWorldCarrierRecoveryState(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+// GetOpenWorldCarrierCommerceState exposes V24's immutable carrier service
+// quotes and cash-only payments. The service applies seller-scoped redaction
+// for members; this endpoint never exposes upstream or reserve credentials.
+func (h *CityEconomyHandler) GetOpenWorldCarrierCommerceState(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetCityOpenWorldCarrierCommerceState(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+func (h *CityEconomyHandler) ListOpenWorldServiceProviders(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	items, err := h.service.ListCityOpenWorldServiceProviders(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, items)
+}
+
+func (h *CityEconomyHandler) ListOpenWorldServiceRequests(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	items, err := h.service.ListCityOpenWorldServiceRequests(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, items)
+}
+
+func (h *CityEconomyHandler) ListOpenWorldServiceResponses(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	items, err := h.service.ListCityOpenWorldServiceResponses(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, items)
+}
+
 func (h *CityEconomyHandler) GetWorld(c *gin.Context) {
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
@@ -357,6 +838,601 @@ func (h *CityEconomyHandler) GetWorld(c *gin.Context) {
 		return
 	}
 	response.Success(c, item)
+}
+
+func (h *CityEconomyHandler) GetRealtimeClock(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	var item *service.CityRealtimeClock
+	var err error
+	if h.realtimeLifecycle != nil {
+		item, err = h.realtimeLifecycle.GetRealtimeClock(c.Request.Context(), subject.UserID, worldID)
+	} else {
+		item, err = h.service.GetRealtimeClock(c.Request.Context(), subject.UserID, worldID)
+	}
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+func (h *CityEconomyHandler) ListTemporalFrames(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	afterFrameSequence, ok := parseCitySignedQueryInt(c, "after_frame_sequence", -1)
+	if !ok {
+		return
+	}
+	limit, ok := parseCityQueryInt(c, "limit", 0)
+	if !ok || limit > int64(^uint(0)>>1) {
+		response.BadRequest(c, "Invalid city realtime timeline query")
+		return
+	}
+	page, err := h.service.ListTemporalFrames(c.Request.Context(), service.CityTemporalFrameListInput{
+		UserID:             subject.UserID,
+		WorldID:            worldID,
+		AfterFrameSequence: afterFrameSequence,
+		Limit:              int(limit),
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, page)
+}
+
+// GetRealtimeWorldProjection returns the member-safe shared-world bootstrap
+// contract for the realtime static-worldgen engine. It intentionally contains
+// no roster or control-grant data; clients obtain their own viewer capability
+// only and then fetch immutable semantic chunks by coordinate.
+func (h *CityEconomyHandler) GetRealtimeWorldProjection(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetRealtimeWorldProjection(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+// GetRealtimeVisualManifest returns the immutable, member-safe renderer
+// manifest bound to a realtime V2 world. It never accepts a pack ID, asset
+// path, or browser-provided visual version.
+func (h *CityEconomyHandler) GetRealtimeVisualManifest(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetRealtimeVisualManifest(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+// ListRealtimePatches exposes bounded cursor-based temporal deltas for a
+// shared realtime static-worldgen world. It never accepts a browser clock or
+// a caller-supplied state hash, so the server remains the sole authority.
+func (h *CityEconomyHandler) ListRealtimePatches(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	afterFrameSequence, ok := parseCitySignedQueryInt(c, "after_frame_sequence", -1)
+	if !ok {
+		return
+	}
+	limit, ok := parseCityQueryInt(c, "limit", 0)
+	if !ok || limit > int64(^uint(0)>>1) {
+		response.BadRequest(c, "Invalid city realtime patch query")
+		return
+	}
+	page, err := h.service.ListRealtimePatches(c.Request.Context(), service.CityRealtimePatchListInput{
+		UserID:             subject.UserID,
+		WorldID:            worldID,
+		AfterFrameSequence: afterFrameSequence,
+		Limit:              int(limit),
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, page)
+}
+
+// GetRealtimeActors returns the bounded, member-safe shared actor overlay for
+// the realtime pixel renderer. It never exposes account identities, ownership,
+// model configuration, prompts, agent memory, or control grants.
+func (h *CityEconomyHandler) GetRealtimeActors(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	minimumChunkX, ok := parseCitySignedQueryInt(c, "min_chunk_x", -4)
+	if !ok {
+		return
+	}
+	maximumChunkX, ok := parseCitySignedQueryInt(c, "max_chunk_x", 3)
+	if !ok {
+		return
+	}
+	minimumChunkY, ok := parseCitySignedQueryInt(c, "min_chunk_y", -4)
+	if !ok {
+		return
+	}
+	maximumChunkY, ok := parseCitySignedQueryInt(c, "max_chunk_y", 3)
+	if !ok {
+		return
+	}
+	zValue, ok := parseCitySignedQueryInt(c, "z", 0)
+	if !ok || zValue < -1<<31 || zValue > 1<<31-1 {
+		if ok {
+			response.BadRequest(c, "Invalid z")
+		}
+		return
+	}
+	limit, ok := parseCityQueryInt(c, "limit", 0)
+	if !ok || limit > int64(^uint(0)>>1) {
+		response.BadRequest(c, "Invalid city realtime actor query")
+		return
+	}
+	item, err := h.service.GetRealtimeActors(c.Request.Context(), service.CityRealtimeActorSnapshotInput{
+		UserID: subject.UserID, WorldID: worldID,
+		MinimumChunkX: minimumChunkX, MaximumChunkX: maximumChunkX,
+		MinimumChunkY: minimumChunkY, MaximumChunkY: maximumChunkY,
+		Z: int32(zValue), Limit: int(limit),
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+// GetRealtimeMyCharacter returns only the caller's own Character projection.
+// The common actor snapshot remains account-blind, so this endpoint is the
+// sole place where the relationship between a user and an Actor is revealed.
+func (h *CityEconomyHandler) GetRealtimeMyCharacter(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetRealtimeMyCharacter(c.Request.Context(), subject.UserID, worldID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+// CreateRealtimeCharacter opens a durable user Character only in a current,
+// server-sealed realtime world. Both the standard request coordinator and the
+// character receipt protect retries; the service receipt remains authoritative
+// if an outer request has already reached the temporal frame transaction.
+func (h *CityEconomyHandler) CreateRealtimeCharacter(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	var req createCityRealtimeCharacterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	payload := struct {
+		WorldID int64 `json:"world_id"`
+		createCityRealtimeCharacterRequest
+	}{WorldID: worldID, createCityRealtimeCharacterRequest: req}
+	executeUserIdempotentJSON(
+		c,
+		fmt.Sprintf("user.city.realtime-character.%d.create", worldID),
+		payload,
+		service.DefaultWriteIdempotencyTTL(),
+		func(ctx context.Context) (any, error) {
+			return h.service.CreateRealtimeCharacter(ctx, service.CityRealtimeCharacterCreateInput{
+				UserID: subject.UserID, WorldID: worldID,
+				PublicLabel: req.PublicLabel, ArchetypeCode: req.ArchetypeCode,
+				IdempotencyKey: c.GetHeader("Idempotency-Key"),
+			})
+		},
+	)
+}
+
+// ConfigureRealtimeCharacterAgent changes only the caller's own Character
+// Agent control mode and/or private, versioned personality seed.  The service
+// records the change in a sealed frame and invalidates queued old-scope work;
+// it does not execute a character action from this browser request.
+func (h *CityEconomyHandler) ConfigureRealtimeCharacterAgent(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	var req configureCityRealtimeCharacterAgentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	payload := struct {
+		WorldID int64 `json:"world_id"`
+		configureCityRealtimeCharacterAgentRequest
+	}{WorldID: worldID, configureCityRealtimeCharacterAgentRequest: req}
+	executeUserIdempotentJSON(
+		c,
+		fmt.Sprintf("user.city.realtime-character.%d.agent.configure", worldID),
+		payload,
+		service.DefaultWriteIdempotencyTTL(),
+		func(ctx context.Context) (any, error) {
+			return h.service.ConfigureRealtimeCharacterAgent(ctx, service.CityRealtimeCharacterAgentConfigureInput{
+				UserID: subject.UserID, WorldID: worldID, ControlMode: req.ControlMode,
+				Personality: req.Personality, IdempotencyKey: c.GetHeader("Idempotency-Key"),
+			})
+		},
+	)
+}
+
+// MoveRealtimeCharacter accepts an owner-local Cell command. It never accepts
+// an Actor code, current position, client time, path, or model directives.
+func (h *CityEconomyHandler) MoveRealtimeCharacter(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	var req moveCityRealtimeCharacterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	payload := struct {
+		WorldID int64 `json:"world_id"`
+		moveCityRealtimeCharacterRequest
+	}{WorldID: worldID, moveCityRealtimeCharacterRequest: req}
+	executeUserIdempotentJSON(
+		c,
+		fmt.Sprintf("user.city.realtime-character.%d.move", worldID),
+		payload,
+		service.DefaultWriteIdempotencyTTL(),
+		func(ctx context.Context) (any, error) {
+			return h.service.MoveRealtimeCharacter(ctx, service.CityRealtimeCharacterMoveInput{
+				UserID: subject.UserID, WorldID: worldID,
+				X: req.X, Y: req.Y, Z: req.Z, IdempotencyKey: c.GetHeader("Idempotency-Key"),
+			})
+		},
+	)
+}
+
+// TraverseRealtimeCharacterPortal crosses an immutable entrance or stair
+// edge for the caller's own character. It does not accept coordinates, paths,
+// building access policy, or client-side time.
+func (h *CityEconomyHandler) TraverseRealtimeCharacterPortal(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	var req traverseCityRealtimeCharacterPortalRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	payload := struct {
+		WorldID int64 `json:"world_id"`
+		traverseCityRealtimeCharacterPortalRequest
+	}{WorldID: worldID, traverseCityRealtimeCharacterPortalRequest: req}
+	executeUserIdempotentJSON(
+		c,
+		fmt.Sprintf("user.city.realtime-character.%d.portal", worldID),
+		payload,
+		service.DefaultWriteIdempotencyTTL(),
+		func(ctx context.Context) (any, error) {
+			return h.service.TraverseRealtimeCharacterPortal(ctx, service.CityRealtimeCharacterPortalTraverseInput{
+				UserID: subject.UserID, WorldID: worldID,
+				PortalCode: req.PortalCode, IdempotencyKey: c.GetHeader("Idempotency-Key"),
+			})
+		},
+	)
+}
+
+// PerformRealtimeCharacterActivity executes exactly one current catalog
+// activity for the caller's own Character. The request cannot target another
+// Actor or supply simulation effects, timestamps, inventory, or reward data.
+func (h *CityEconomyHandler) PerformRealtimeCharacterActivity(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	var req performCityRealtimeCharacterActivityRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	payload := struct {
+		WorldID int64 `json:"world_id"`
+		performCityRealtimeCharacterActivityRequest
+	}{WorldID: worldID, performCityRealtimeCharacterActivityRequest: req}
+	executeUserIdempotentJSON(
+		c,
+		fmt.Sprintf("user.city.realtime-character.%d.activity", worldID),
+		payload,
+		service.DefaultWriteIdempotencyTTL(),
+		func(ctx context.Context) (any, error) {
+			return h.service.PerformRealtimeCharacterActivity(ctx, service.CityRealtimeCharacterActivityInput{
+				UserID: subject.UserID, WorldID: worldID,
+				ActivityCode: req.ActivityCode, IdempotencyKey: c.GetHeader("Idempotency-Key"),
+			})
+		},
+	)
+}
+
+// ChangeRealtimeCharacterRole changes only the caller's role in a catalog
+// category after all attribute, experience, civic, and prerequisite checks
+// have passed under the world lock.
+func (h *CityEconomyHandler) ChangeRealtimeCharacterRole(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	var req changeCityRealtimeCharacterRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	payload := struct {
+		WorldID int64 `json:"world_id"`
+		changeCityRealtimeCharacterRoleRequest
+	}{WorldID: worldID, changeCityRealtimeCharacterRoleRequest: req}
+	executeUserIdempotentJSON(
+		c,
+		fmt.Sprintf("user.city.realtime-character.%d.role", worldID),
+		payload,
+		service.DefaultWriteIdempotencyTTL(),
+		func(ctx context.Context) (any, error) {
+			return h.service.ChangeRealtimeCharacterRole(ctx, service.CityRealtimeCharacterRoleChangeInput{
+				UserID: subject.UserID, WorldID: worldID,
+				RoleCode: req.RoleCode, IdempotencyKey: c.GetHeader("Idempotency-Key"),
+			})
+		},
+	)
+}
+
+// ListRealtimeMyCharacterEvents returns only the requesting user's private
+// character timeline. The service resolves the owner relationship itself.
+func (h *CityEconomyHandler) ListRealtimeMyCharacterEvents(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	beforeSequence, ok := parseCityQueryInt(c, "before_sequence", 0)
+	if !ok {
+		return
+	}
+	limit, ok := parseCityQueryInt(c, "limit", 0)
+	if !ok || limit > int64(^uint(0)>>1) {
+		if ok {
+			response.BadRequest(c, "Invalid realtime character event query")
+		}
+		return
+	}
+	page, err := h.service.ListRealtimeMyCharacterEvents(c.Request.Context(), service.CityRealtimeCharacterEventListInput{
+		UserID: subject.UserID, WorldID: worldID, BeforeSequence: beforeSequence, Limit: int(limit),
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, page)
+}
+
+// ListRealtimePublicCharacterEvents is the member-safe shared activity
+// feed. It deliberately excludes private character life and reward data.
+func (h *CityEconomyHandler) ListRealtimePublicCharacterEvents(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	limit, ok := parseCityQueryInt(c, "limit", 0)
+	if !ok || limit > int64(^uint(0)>>1) {
+		if ok {
+			response.BadRequest(c, "Invalid realtime public character event query")
+		}
+		return
+	}
+	page, err := h.service.ListRealtimePublicCharacterEvents(c.Request.Context(), service.CityRealtimePublicCharacterEventListInput{
+		UserID: subject.UserID, WorldID: worldID,
+		BeforeCursor: strings.TrimSpace(c.Query("before_cursor")), Limit: int(limit),
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, page)
+}
+
+// GetRealtimePixelChunk returns one server-authored semantic map chunk. The
+// signed chunk coordinates deliberately support map space west/south of the
+// origin, while the service keeps the currently supported surface layer
+// closed to an explicit Z contract.
+func (h *CityEconomyHandler) GetRealtimePixelChunk(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	chunkX, ok := parseCityPathSigned(c, "chunk_x", "chunk x")
+	if !ok {
+		return
+	}
+	chunkY, ok := parseCityPathSigned(c, "chunk_y", "chunk y")
+	if !ok {
+		return
+	}
+	zValue, ok := parseCityPathSigned(c, "z", "z")
+	if !ok {
+		return
+	}
+	if zValue < -1<<31 || zValue > 1<<31-1 {
+		response.BadRequest(c, "Invalid z")
+		return
+	}
+	item, err := h.service.GetRealtimePixelChunk(c.Request.Context(), service.CityRealtimePixelChunkInput{
+		UserID: subject.UserID, WorldID: worldID, ChunkX: chunkX, ChunkY: chunkY, Z: int32(zValue),
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+// GetRealtimeOperationalHealth exposes the administrator-only operational
+// projection for the independent realtime engine. It intentionally accepts
+// only bounded read filters; clock observations and scheduler control never
+// come from a browser request.
+func (h *CityEconomyHandler) GetRealtimeOperationalHealth(c *gin.Context) {
+	worldID, ok := parseCityQueryInt(c, "world_id", 0)
+	if !ok || worldID < 0 {
+		response.BadRequest(c, "Invalid city realtime health query")
+		return
+	}
+	limit, ok := parseCityQueryInt(c, "limit", 0)
+	if !ok || limit > int64(^uint(0)>>1) {
+		response.BadRequest(c, "Invalid city realtime health query")
+		return
+	}
+	item, err := h.service.GetRealtimeOperationalHealth(c.Request.Context(), service.CityRealtimeOperationalHealthInput{
+		WorldID: worldID,
+		Limit:   int(limit),
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
+}
+
+// PauseRealtimeWorld and ResumeRealtimeWorld are admin-only routes registered
+// below /admin/city. They intentionally have no request body: their trusted
+// clock observation is obtained inside the lifecycle controller.
+func (h *CityEconomyHandler) PauseRealtimeWorld(c *gin.Context) {
+	h.cityRealtimeLifecycleTransition(c, "pause")
+}
+
+func (h *CityEconomyHandler) ResumeRealtimeWorld(c *gin.Context) {
+	h.cityRealtimeLifecycleTransition(c, "resume")
+}
+
+func (h *CityEconomyHandler) cityRealtimeLifecycleTransition(c *gin.Context, operation string) {
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	if h.realtimeLifecycle == nil {
+		response.ErrorFrom(c, service.ErrCityRealtimeClockUnsafe)
+		return
+	}
+	payload := cityRealtimeLifecycleRequest{WorldID: worldID, Operation: operation}
+	executeUserIdempotentJSON(
+		c,
+		fmt.Sprintf("admin.city.realtime.world.%d.%s", worldID, operation),
+		payload,
+		service.DefaultWriteIdempotencyTTL(),
+		func(ctx context.Context) (any, error) {
+			switch operation {
+			case "pause":
+				return h.realtimeLifecycle.Pause(ctx, worldID)
+			case "resume":
+				return h.realtimeLifecycle.Resume(ctx, worldID)
+			default:
+				return nil, service.ErrCityInvalidInput
+			}
+		},
+	)
 }
 
 func (h *CityEconomyHandler) ListWorldMembers(c *gin.Context) {
@@ -503,7 +1579,7 @@ func (h *CityEconomyHandler) GetWorldRuntimeCatalog(c *gin.Context) {
 	if !ok {
 		return
 	}
-	item, err := h.service.GetWorldRuntimeCatalog(c.Request.Context(), subject.UserID, worldID)
+	item, err := h.service.GetPlayableWorldRuntimeCatalog(c.Request.Context(), subject.UserID, worldID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -521,7 +1597,7 @@ func (h *CityEconomyHandler) ListWorldActors(c *gin.Context) {
 	if !ok {
 		return
 	}
-	items, err := h.service.ListWorldActors(c.Request.Context(), subject.UserID, worldID)
+	items, err := h.service.ListPlayableWorldActors(c.Request.Context(), subject.UserID, worldID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -544,7 +1620,7 @@ func (h *CityEconomyHandler) GetWorldActorState(c *gin.Context) {
 		response.BadRequest(c, "Invalid actor code")
 		return
 	}
-	item, err := h.service.GetWorldActorState(c.Request.Context(), subject.UserID, worldID, actorCode)
+	item, err := h.service.GetPlayableWorldActorState(c.Request.Context(), subject.UserID, worldID, actorCode)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -563,7 +1639,7 @@ func (h *CityEconomyHandler) GetWorldActorRoleOptions(c *gin.Context) {
 		return
 	}
 	actorCode := strings.ToLower(strings.TrimSpace(c.Param("actor_code")))
-	items, err := h.service.GetWorldActorRoleOptions(c.Request.Context(), subject.UserID, worldID, actorCode)
+	items, err := h.service.GetPlayableWorldActorRoleOptions(c.Request.Context(), subject.UserID, worldID, actorCode)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -581,7 +1657,7 @@ func (h *CityEconomyHandler) ListWorldRules(c *gin.Context) {
 	if !ok {
 		return
 	}
-	items, err := h.service.ListWorldRules(c.Request.Context(), subject.UserID, worldID)
+	items, err := h.service.ListPlayableWorldRules(c.Request.Context(), subject.UserID, worldID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -611,7 +1687,7 @@ func (h *CityEconomyHandler) ListWorldRuleCases(c *gin.Context) {
 	if !ok {
 		return
 	}
-	items, err := h.service.QueryWorldRuleCases(c.Request.Context(), service.WorldRuleCaseQueryInput{
+	items, err := h.service.QueryPlayableWorldRuleCases(c.Request.Context(), service.WorldRuleCaseQueryInput{
 		UserID: subject.UserID, WorldID: worldID,
 		ActorCode:    strings.ToLower(strings.TrimSpace(c.Query("actor_code"))),
 		CategoryCode: strings.ToLower(strings.TrimSpace(c.Query("category_code"))),
@@ -697,7 +1773,7 @@ func (h *CityEconomyHandler) ListWorldPortalStates(c *gin.Context) {
 	if !ok {
 		return
 	}
-	items, err := h.service.ListWorldPortalStates(c.Request.Context(), service.WorldPortalAccessQueryInput{
+	items, err := h.service.ListPlayableWorldPortalStates(c.Request.Context(), service.WorldPortalAccessQueryInput{
 		UserID: subject.UserID, WorldID: worldID, ActorCode: c.Query("actor_code"),
 	})
 	if err != nil {
@@ -717,7 +1793,7 @@ func (h *CityEconomyHandler) ListWorldNavigationIntents(c *gin.Context) {
 	if !ok {
 		return
 	}
-	items, err := h.service.ListWorldNavigationIntents(
+	items, err := h.service.ListPlayableWorldNavigationIntents(
 		c.Request.Context(),
 		service.WorldNavigationIntentQueryInput{
 			UserID: subject.UserID, WorldID: worldID,
@@ -740,7 +1816,7 @@ func (h *CityEconomyHandler) GetWorldNavigationIntent(c *gin.Context) {
 	if !ok {
 		return
 	}
-	item, err := h.service.GetWorldNavigationIntent(
+	item, err := h.service.GetPlayableWorldNavigationIntent(
 		c.Request.Context(),
 		service.WorldNavigationIntentQueryInput{
 			UserID: subject.UserID, WorldID: worldID,
@@ -773,7 +1849,7 @@ func (h *CityEconomyHandler) ListWorldNavigationReservations(c *gin.Context) {
 		}
 		tick = &value
 	}
-	items, err := h.service.ListWorldNavigationReservations(
+	items, err := h.service.ListPlayableWorldNavigationReservations(
 		c.Request.Context(),
 		service.WorldNavigationReservationQueryInput{
 			UserID: subject.UserID, WorldID: worldID, Tick: tick,
@@ -1358,7 +2434,8 @@ func isCityPlayerCommand(commandType string) bool {
 		service.CityCommandTypeOpenWorldActorMove,
 		service.CityCommandTypeOpenWorldActorPortalUse,
 		service.CityCommandTypeOpenWorldActorNavigationSet,
-		service.CityCommandTypeOpenWorldActorNavigationCancel:
+		service.CityCommandTypeOpenWorldActorNavigationCancel,
+		service.CityCommandTypeOpenWorldActorServiceRequest:
 		return true
 	default:
 		return false

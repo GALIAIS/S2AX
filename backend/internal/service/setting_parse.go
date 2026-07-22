@@ -206,6 +206,12 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 
 		// 城市模拟（默认关闭，显式启用）
 		SettingKeyCitySimulationEnabled: "false",
+		// 共享实时像素渲染（默认关闭；必须先启用城市模拟）
+		SettingKeyCityPixelRendererEnabled: "false",
+		// 视觉包发布（默认关闭；仅管理员受控工作流使用）
+		SettingKeyCityVisualPackPublishEnabled: "false",
+		// realtime 调度器（默认关闭；需要经验证的 Clock Authority 才会真正执行）
+		SettingKeyCityRealtimeSchedulerEnabled: "false",
 
 		// cyber 会话屏蔽（默认关闭，TTL 默认 3600s）
 		SettingKeyCyberSessionBlockEnabled:    "false",
@@ -780,6 +786,15 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 
 	// 城市模拟（默认关闭，严格 true 才启用）
 	result.CitySimulationEnabled = settings[SettingKeyCitySimulationEnabled] == "true"
+	// 共享实时像素渲染与视觉包发布均为城市模拟的 fail-closed 子功能。
+	// 即使遗留数据中子开关为 true，也不会在父开关关闭时生效。
+	result.CityPixelRendererEnabled = result.CitySimulationEnabled &&
+		settings[SettingKeyCityPixelRendererEnabled] == "true"
+	result.CityVisualPackPublishEnabled = result.CityPixelRendererEnabled &&
+		settings[SettingKeyCityVisualPackPublishEnabled] == "true"
+	// realtime 调度器是城市模拟的受控子功能，默认关闭并由 worker 二次校验。
+	result.CityRealtimeSchedulerEnabled = result.CitySimulationEnabled &&
+		settings[SettingKeyCityRealtimeSchedulerEnabled] == "true"
 
 	// cyber 会话屏蔽（默认关闭，TTL 默认 3600s）
 	result.CyberSessionBlockEnabled = settings[SettingKeyCyberSessionBlockEnabled] == "true"

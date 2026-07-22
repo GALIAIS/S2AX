@@ -498,6 +498,30 @@ func ProvideCityTickScheduler(db *sql.DB, cityEconomy *CityEconomyService, setti
 	return svc
 }
 
+// ProvideCityRealtimeScheduler wires the independent Temporal Frame worker.
+// It starts only when a host clock has been explicitly trusted at deployment
+// time; its per-sweep database feature switches remain fail-closed and can be
+// toggled without restarting the process.
+func ProvideCityRealtimeScheduler(
+	db *sql.DB,
+	cityEconomy *CityEconomyService,
+	clockAuthority *CityRealtimeHostClockAuthority,
+	settingService *SettingService,
+) *CityRealtimeScheduler {
+	svc := NewCityRealtimeScheduler(
+		db,
+		cityEconomy,
+		clockAuthority,
+		defaultCityRealtimeSchedulerInterval,
+		defaultCityRealtimeSchedulerBatch,
+	)
+	svc.SetFeatureChecker(settingService)
+	if clockAuthority != nil && clockAuthority.IsOperational() {
+		svc.Start()
+	}
+	return svc
+}
+
 // ProvideScheduledTestService creates ScheduledTestService.
 func ProvideScheduledTestService(
 	planRepo ScheduledTestPlanRepository,
@@ -860,6 +884,9 @@ var ProviderSet = wire.NewSet(
 	NewUserAttributeService,
 	NewCityEconomyService,
 	ProvideCityTickScheduler,
+	NewCityRealtimeHostClockAuthority,
+	NewCityRealtimeLifecycleController,
+	ProvideCityRealtimeScheduler,
 	NewVirtualCurrencyService,
 	NewVirtualCurrencyIntegrationService,
 	NewUsageCache,

@@ -250,6 +250,21 @@ describe('CityWorldRuntimePanel', () => {
     expect(wrapper.find('form.runtime-portal-policy-form').exists()).toBe(false)
   })
 
+  it('keeps a roster entry identifiable when member email is redacted', () => {
+    const wrapper = mount(CityWorldRuntimePanel, {
+      props: {
+        catalog, actors: [actor], selectedActorCode: actor.code, actorState,
+        roleOptions: [], rules: [], cases: [],
+        members: [{ ...members[0], email: '', username: '' }],
+        commandReceipts: [], memberRole: 'viewer', memberBusyKey: null,
+        loading: false, busyCommandCode: null
+      },
+      global: { plugins: [i18n] }
+    })
+
+    expect(wrapper.get('.runtime-member-identity strong').text()).toBe('#9')
+  })
+
   it('creates a character from a versioned starter archetype using an exact runtime command', async () => {
     const wrapper = mount(CityWorldRuntimePanel, {
       props: {
@@ -423,6 +438,76 @@ describe('CityWorldRuntimePanel', () => {
         actor_code: actor.code
       }, `navigation:intent:cancel:${actor.code}`]
     ])
+  })
+
+  it('keeps an untouched navigation form synchronized with authoritative movement without overwriting a manual destination', async () => {
+    const wrapper = mount(CityWorldRuntimePanel, {
+      props: {
+        catalog, actors: [actor], selectedActorCode: actor.code, actorState,
+        roleOptions: [], rules: [], cases: [], members, commandReceipts: [], memberRole: 'owner',
+        memberBusyKey: null, loading: false, busyCommandCode: null,
+        navigationIntentAvailability: 'available', navigationIntentLoading: false
+      },
+      global: { plugins: [i18n] }
+    })
+
+    const fields = wrapper.findAll('.runtime-navigation-coordinate-fields input')
+    expect((fields[0]!.element as HTMLInputElement).value).toBe('10')
+    const movedLocation = { ...actorLocation, x: 11, version: 2 }
+    await wrapper.setProps({
+      actorState: {
+        ...actorState,
+        actor: { ...actor, location: movedLocation },
+        location: movedLocation
+      }
+    })
+    expect((fields[0]!.element as HTMLInputElement).value).toBe('11')
+
+    await fields[0]!.setValue('25')
+    const laterLocation = { ...movedLocation, x: 12, version: 3 }
+    await wrapper.setProps({
+      actorState: {
+        ...actorState,
+        actor: { ...actor, location: laterLocation },
+        location: laterLocation
+      }
+    })
+    expect((fields[0]!.element as HTMLInputElement).value).toBe('25')
+  })
+
+  it('offers an open-world portal traversal only while the actor stands at its registered endpoint', async () => {
+    const wrapper = mount(CityWorldRuntimePanel, {
+      props: {
+        catalog: {
+          ...catalog,
+          profile: { ...catalog.profile, runtime_id: 'sub2api-city-open-world-social-runtime' }
+        },
+        actors: [actor], selectedActorCode: actor.code, actorState,
+        roleOptions: [], rules: [], cases: [], members, commandReceipts: [], memberRole: 'owner',
+        memberBusyKey: null, loading: false, busyCommandCode: null,
+        portals: [portal], portalAccessAvailability: 'available', portalLoading: false
+      },
+      global: { plugins: [i18n] }
+    })
+
+    await wrapper.get('.runtime-portal-traverse').trigger('click')
+
+    expect(wrapper.emitted('command')).toEqual([
+      ['open_world.actor.portal.use', {
+        actor_code: actor.code,
+        portal_code: portal.state.portal_code
+      }, 'portal:use:building_central/entrance_main']
+    ])
+
+    const remoteLocation = { ...actorLocation, x: 12, version: 2 }
+    await wrapper.setProps({
+      actorState: {
+        ...actorState,
+        actor: { ...actor, location: remoteLocation },
+        location: remoteLocation
+      }
+    })
+    expect(wrapper.find('.runtime-portal-traverse').exists()).toBe(false)
   })
 
   it('controls an adjacent portal and replaces its declarative policy through exact commands', async () => {

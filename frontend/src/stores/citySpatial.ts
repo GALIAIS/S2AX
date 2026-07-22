@@ -7,6 +7,7 @@ import citySpatialAPI, {
   type CityDevelopmentState,
   type CityEnterpriseLocationCommandType,
   type CityEnterpriseLocationState,
+  type CityOpenWorldRuntimeCommandType,
   type CityPhysicalNetworkCatalogView,
   type CityPhysicalNetworkDiagnosticQuery,
   type CityPhysicalNetworkDiagnosticsView,
@@ -23,6 +24,8 @@ import citySpatialAPI, {
   type CityServiceFacilityPage,
   type CityServiceListQuery,
   type CityServiceSettlementPage,
+  type CityRuntimeCommandType,
+  type CityWorldControlCommandType,
   type CityLandState,
   type CityMapChunkSummary,
   type CityNavigationCoordinate,
@@ -78,12 +81,26 @@ export type CityPublicServiceAvailability = 'unknown' | 'available' | 'unsupport
 const CELL_SIZE_STEPS = [8, 10, 12, 16, 20, 24, 32] as const
 const DEFAULT_VIEWPORT: ViewportSize = { width: 960, height: 560 }
 const CHUNK_CACHE_CAPACITY = 64
-const OPEN_WORLD_SIMULATION_VERSION = 'city-openworld-v1'
+const OPEN_WORLD_SIMULATION_PREFIX = 'city-openworld-'
+// A running open-world scheduler advances independently of the rendered
+// snapshot. Keep an actor's automatic travel projection fresh without
+// toggling the page-level loading state or forcing a full workspace reload.
+const OPEN_WORLD_NAVIGATION_REFRESH_MS = 1200
 
 function readableError(error: unknown): string {
   if (isApiError(error)) return error.message
   if (error instanceof Error) return error.message
   return 'Unknown city spatial error'
+}
+
+function isExpectedWorldTickConflict(error: unknown): boolean {
+  // Backend error envelopes retain the HTTP status in `code` and expose the
+  // application error identifier in `reason`. Tests and older clients may
+  // still carry the identifier in `code`, so accept both representations.
+  return isApiError(error) && (
+    error.code === 'CITY_EXPECTED_TICK_CONFLICT' ||
+    error.reason === 'CITY_EXPECTED_TICK_CONFLICT'
+  )
 }
 
 export const useCitySpatialStore = defineStore('citySpatial', () => {
@@ -157,6 +174,7 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
   const enterpriseLocationCommandCode = ref<string | null>(null)
   const cityServiceCommandCode = ref<string | null>(null)
   const worldRuntimeCommandCode = ref<string | null>(null)
+  const worldLifecycleCommandCode = ref<string | null>(null)
   const worldMemberMutationKey = ref<string | null>(null)
   const loadError = ref<string | null>(null)
 
@@ -189,6 +207,9 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
   let activeChunkLoads = 0
   let activeLandLoads = 0
   let visibleLoadTimer: ReturnType<typeof setTimeout> | null = null
+  let openWorldNavigationRefreshTimer: ReturnType<typeof setTimeout> | null = null
+  let openWorldNavigationRefreshGeneration = 0
+  let openWorldNavigationRefreshInFlight = false
 
   const activeWorld = computed(() => (
     worlds.value.find(world => world.id === activeWorldID.value) ?? null
@@ -256,7 +277,124 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
   })
 
   function isOpenWorld(world: CityWorld | null | undefined): boolean {
-    return world?.simulation_version === OPEN_WORLD_SIMULATION_VERSION
+    return typeof world?.simulation_version === 'string' &&
+      world.simulation_version.startsWith(OPEN_WORLD_SIMULATION_PREFIX)
+  }
+
+  function openWorldActorLocation(actorCode: string): WorldActorState['location'] | undefined {
+    if (worldActorState.value?.actor.code === actorCode) {
+      return worldActorState.value.location ?? worldActorState.value.actor.location
+    }
+    return worldActors.value.find(actor => actor.code === actorCode)?.location
+  }
+
+  function requireIntegerPayload(value: unknown, field: string): number {
+    const parsed = Number(value)
+    if (!Number.isSafeInteger(parsed)) throw new Error(`Open world command requires integer ${field}`)
+    return parsed
+  }
+
+  function adaptOpenWorldRuntimeCommand(
+    commandType: WorldRuntimeCommandType,
+    payload: Record<string, unknown>
+  ): { commandType: CityRuntimeCommandType; payload: Record<string, unknown> } {
+    const actorCode = typeof payload.actor_code === 'string' ? payload.actor_code : selectedActorCode.value
+    const location = actorCode ? openWorldActorLocation(actorCode) : undefined
+    const locationContext = () => ({
+      space_kind: location?.space_kind ?? 'surface',
+      ...(location?.space_kind === 'interior'
+        ? { building_code: location.anchor_code ?? location.space_code }
+        : {}),
+      // Open-world interiors use z as the authoritative floor index. Keeping
+      // that context is essential after a player has crossed an entrance or a
+      // stair; sending floor 0 would make every upper-floor move invalid.
+      floor_index: location?.space_kind === 'interior'
+        ? requireIntegerPayload(location.z, 'location.z')
+        : 0
+    })
+    switch (commandType) {
+      case 'actor.create':
+        return { commandType: 'open_world.actor.create', payload }
+      case 'actor.activity.perform':
+        return { commandType: 'open_world.actor.activity.perform', payload }
+      case 'actor.role.transition':
+        return { commandType: 'open_world.actor.role.transition', payload }
+      case 'actor.location.move':
+        if (!actorCode) throw new Error('Open world movement requires a selected actor')
+        return {
+          commandType: 'open_world.actor.move',
+          payload: {
+            actor_code: actorCode,
+            ...locationContext(),
+            x: requireIntegerPayload(payload.x, 'x'),
+            y: requireIntegerPayload(payload.y, 'y'),
+            z: requireIntegerPayload(payload.z, 'z')
+          }
+        }
+      case 'actor.control.grant':
+        return { commandType: 'open_world.actor.control.grant', payload }
+      case 'actor.control.revoke':
+        return { commandType: 'open_world.actor.control.revoke', payload }
+      case 'portal.state.transition':
+        if (!actorCode || typeof payload.portal_code !== 'string' || typeof payload.action !== 'string') {
+          throw new Error('Open world portal action requires an actor and portal')
+        }
+        return {
+          commandType: 'open_world.portal.state.set',
+          payload: { actor_code: actorCode, portal_code: payload.portal_code, action: payload.action }
+        }
+      case 'portal.access.configure':
+        if (!actorCode || typeof payload.portal_code !== 'string' || !payload.requirements) {
+          throw new Error('Open world portal policy requires an actor and portal')
+        }
+        return {
+          commandType: 'open_world.portal.access.set',
+          payload: { actor_code: actorCode, portal_code: payload.portal_code, requirements: payload.requirements }
+        }
+      case 'actor.navigation.intent.set': {
+        if (!actorCode || !payload.destination || typeof payload.destination !== 'object') {
+          throw new Error('Open world navigation requires a selected actor and destination')
+        }
+        const destination = payload.destination as Record<string, unknown>
+        const targetZ = requireIntegerPayload(destination.z, 'destination.z')
+        const targetLocationContext = location?.space_kind === 'interior'
+          ? {
+              space_kind: 'interior',
+              building_code: location.anchor_code ?? location.space_code,
+              // This payload describes the destination, not the actor's
+              // current floor. A player can therefore set an intent that
+              // walks to and traverses registered stairs in the same building.
+              floor_index: targetZ
+            }
+          : (() => {
+              if (targetZ !== 0) {
+                throw new Error('Open world surface navigation must enter a building before targeting an interior floor')
+              }
+              return { space_kind: 'surface', floor_index: 0 }
+            })()
+        return {
+          commandType: 'open_world.actor.navigation.set',
+          payload: {
+            actor_code: actorCode,
+            ...targetLocationContext,
+            x: requireIntegerPayload(destination.x, 'destination.x'),
+            y: requireIntegerPayload(destination.y, 'destination.y'),
+            z: targetZ,
+            priority: requireIntegerPayload(payload.priority, 'priority'),
+            maximum_steps: requireIntegerPayload(payload.max_steps, 'max_steps')
+          }
+        }
+      }
+      case 'actor.navigation.intent.cancel':
+        if (!actorCode) throw new Error('Open world navigation requires a selected actor')
+        return { commandType: 'open_world.actor.navigation.cancel', payload: { actor_code: actorCode } }
+    }
+  }
+
+  function isNativeOpenWorldRuntimeCommand(
+    commandType: CityRuntimeCommandType
+  ): commandType is CityOpenWorldRuntimeCommandType {
+    return commandType.startsWith('open_world.')
   }
 
   function publishCache(): void {
@@ -264,6 +402,7 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
   }
 
   function resetSpatialState(): void {
+    invalidateOpenWorldNavigationRefresh()
     ++navigationRequestGeneration
     ++worldNavigationRequestGeneration
     ++cityServiceRequestGeneration
@@ -307,6 +446,8 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
     cityPhysicalNetworkDiagnostics.value = null
     cityPhysicalNetworkAvailability.value = 'unknown'
     cityServiceCommandCode.value = null
+    worldRuntimeCommandCode.value = null
+    worldLifecycleCommandCode.value = null
     worldRuntimeCatalog.value = null
     worldActors.value = []
     selectedActorCode.value = null
@@ -343,6 +484,24 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
     worlds.value = worlds.value.map(world => (
       world.id === activeWorldID.value ? { ...world, current_tick: tick } : world
     ))
+  }
+
+  function applyWorldLifecycleResult(
+    commandType: CityWorldControlCommandType,
+    payload: Record<string, unknown>
+  ): void {
+    worlds.value = worlds.value.map(world => {
+      if (world.id !== activeWorldID.value) return world
+      if (commandType === 'world.pause') {
+        return { ...world, status: 'paused', next_tick_at: undefined }
+      }
+      if (commandType === 'world.resume') {
+        return { ...world, status: 'running' }
+      }
+      const speedMilli = Number(payload.speed_milli)
+      if (!Number.isSafeInteger(speedMilli) || speedMilli < 1) return world
+      return { ...world, speed_multiplier: speedMilli / 1000 }
+    })
   }
 
   function clampCamera(next: CameraState): CameraState {
@@ -518,6 +677,119 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
         activeWorldID.value === worldID
       ) {
         worldNavigationIntentLoading.value = false
+      }
+    }
+  }
+
+  function hasActiveSelectedNavigationIntent(actorCode = selectedActorCode.value): boolean {
+    if (!actorCode) return false
+    if (
+      worldActorState.value?.actor.code === actorCode &&
+      worldActorState.value.navigation_intent?.status === 'active'
+    ) return true
+    return worldNavigationIntents.value.some(intent => (
+      intent.actor_code === actorCode && intent.status === 'active'
+    ))
+  }
+
+  function shouldRefreshOpenWorldNavigation(): boolean {
+    const world = activeWorld.value
+    return Boolean(
+      isOpenWorld(world) &&
+      world?.status === 'running' &&
+      selectedActorCode.value &&
+      hasActiveSelectedNavigationIntent()
+    )
+  }
+
+  function invalidateOpenWorldNavigationRefresh(): void {
+    ++openWorldNavigationRefreshGeneration
+    if (openWorldNavigationRefreshTimer) clearTimeout(openWorldNavigationRefreshTimer)
+    openWorldNavigationRefreshTimer = null
+  }
+
+  function scheduleOpenWorldNavigationRefresh(delay = OPEN_WORLD_NAVIGATION_REFRESH_MS): void {
+    if (openWorldNavigationRefreshTimer) return
+    const token = openWorldNavigationRefreshGeneration
+    openWorldNavigationRefreshTimer = setTimeout(() => {
+      openWorldNavigationRefreshTimer = null
+      void refreshOpenWorldNavigationProjection(token)
+    }, delay)
+  }
+
+  function syncOpenWorldNavigationRefresh(): void {
+    if (!shouldRefreshOpenWorldNavigation()) {
+      invalidateOpenWorldNavigationRefresh()
+      return
+    }
+    scheduleOpenWorldNavigationRefresh()
+  }
+
+  async function refreshOpenWorldNavigationProjection(token: number): Promise<void> {
+    if (token !== openWorldNavigationRefreshGeneration) return
+    if (!shouldRefreshOpenWorldNavigation()) {
+      invalidateOpenWorldNavigationRefresh()
+      return
+    }
+    if (openWorldNavigationRefreshInFlight) {
+      scheduleOpenWorldNavigationRefresh(250)
+      return
+    }
+
+    const worldID = activeWorldID.value
+    const actorCode = selectedActorCode.value
+    const worldToken = worldGeneration
+    if (!worldID || !actorCode) {
+      invalidateOpenWorldNavigationRefresh()
+      return
+    }
+
+    openWorldNavigationRefreshInFlight = true
+    let shouldContinue = false
+    try {
+      const [world, state, navigation, portals] = await Promise.all([
+        citySpatialAPI.getWorld(worldID),
+        citySpatialAPI.getWorldActorState(worldID, actorCode),
+        requestWorldNavigationSnapshot(worldID, true),
+        requestWorldPortalStates(worldID, actorCode, true)
+      ])
+      if (
+        token !== openWorldNavigationRefreshGeneration ||
+        worldToken !== worldGeneration ||
+        activeWorldID.value !== worldID ||
+        selectedActorCode.value !== actorCode
+      ) return
+
+      replaceWorldSnapshot(world)
+      worldActorState.value = state
+      const location = state.location ?? state.actor.location
+      worldActors.value = worldActors.value.map(actor => (
+        actor.code === actorCode
+          ? { ...actor, ...state.actor, location: location ?? actor.location }
+          : actor
+      ))
+      worldNavigationIntents.value = navigation.intents
+      worldNavigationReservations.value = navigation.reservations
+      worldNavigationIntentAvailability.value = navigation.availability
+      worldPortalStates.value = portals.items
+      worldPortalAccessAvailability.value = portals.availability
+      shouldContinue = shouldRefreshOpenWorldNavigation()
+    } catch {
+      // Navigation projection is auxiliary to the server-authoritative
+      // scheduler. Keep a transient polling failure invisible and retry while
+      // the selected actor still has a live travel intent.
+      shouldContinue = token === openWorldNavigationRefreshGeneration &&
+        worldToken === worldGeneration &&
+        activeWorldID.value === worldID &&
+        selectedActorCode.value === actorCode &&
+        shouldRefreshOpenWorldNavigation()
+    } finally {
+      openWorldNavigationRefreshInFlight = false
+      if (token !== openWorldNavigationRefreshGeneration) return
+      if (shouldContinue) {
+        scheduleOpenWorldNavigationRefresh()
+      } else if (!shouldRefreshOpenWorldNavigation()) {
+        invalidateOpenWorldNavigationRefresh()
       }
     }
   }
@@ -1019,6 +1291,7 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
       worldRuleCases.value = cases.items
       worldPortalStates.value = portals.items
       worldPortalAccessAvailability.value = portals.availability
+      syncOpenWorldNavigationRefresh()
       return state
     } catch (error: unknown) {
       if (token === worldGeneration && activeWorldID.value === worldID) {
@@ -1033,6 +1306,7 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
 
   async function selectWorldActor(actorCode: string): Promise<void> {
     if (!worldActors.value.some(actor => actor.code === actorCode)) return
+    invalidateOpenWorldNavigationRefresh()
     clearNavigationPath()
     selectedActorCode.value = actorCode
     worldActorState.value = null
@@ -1144,6 +1418,7 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
         worldRuleCases.value = []
         worldPortalStates.value = portals.items
         worldPortalAccessAvailability.value = portals.availability
+        syncOpenWorldNavigationRefresh()
         return catalog
       }
       const [state, options, cases, portals] = await Promise.all([
@@ -1160,6 +1435,7 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
       worldRuleCases.value = cases.items
       worldPortalStates.value = portals.items
       worldPortalAccessAvailability.value = portals.availability
+      syncOpenWorldNavigationRefresh()
       return catalog
     } catch (error: unknown) {
       if (token !== worldGeneration || activeWorldID.value !== worldID) return null
@@ -1180,6 +1456,7 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
         worldNavigationIntentLoading.value = false
         worldNavigationIntentError.value = null
         worldRuntimeAvailability.value = 'unavailable'
+        invalidateOpenWorldNavigationRefresh()
         return null
       }
       loadError.value = readableError(error)
@@ -1315,7 +1592,11 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
     initialLoading.value = true
     try {
       if (isOpenWorld(targetWorld)) {
-        await Promise.all([loadWorldMembers(), loadWorldCommandReceipts()])
+        await Promise.all([
+          loadWorldRuntime(true),
+          loadWorldMembers(),
+          loadWorldCommandReceipts()
+        ])
         return
       }
       const [nextRuleBundle, nextOvermap, changes] = await Promise.all([
@@ -1394,7 +1675,14 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
       const nextWorlds = await citySpatialAPI.listWorlds()
       if (token !== worldGeneration || activeWorldID.value !== worldID) return
       worlds.value = nextWorlds
-      if (isOpenWorld(nextWorlds.find(world => world.id === worldID))) return
+      if (isOpenWorld(nextWorlds.find(world => world.id === worldID))) {
+        await Promise.all([
+          loadWorldRuntime(true),
+          loadWorldMembers(),
+          loadWorldCommandReceipts()
+        ])
+        return
+      }
       const [nextRuleBundle, nextOvermap, changes] = await Promise.all([
         citySpatialAPI.getWorldSpatialRuleSet(worldID),
         citySpatialAPI.getOvermap(worldID),
@@ -1593,43 +1881,143 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
   }
 
   async function runWorldRuntimeCommand(
-    commandType: WorldRuntimeCommandType,
+    commandType: CityRuntimeCommandType,
     payload: Record<string, unknown>,
     commandCode: string = commandType
   ): Promise<'applied' | 'queued'> {
     const world = activeWorld.value
-    if (!world || worldRuntimeAvailability.value !== 'available' || worldRuntimeCommandCode.value) {
+    if (
+      !world || worldRuntimeAvailability.value !== 'available' ||
+      worldRuntimeCommandCode.value || worldLifecycleCommandCode.value
+    ) {
       throw new Error('Open world runtime command is unavailable')
     }
     worldRuntimeCommandCode.value = commandCode
     clearNavigationPath()
     loadError.value = null
     try {
+      const submission = isOpenWorld(world) && !isNativeOpenWorldRuntimeCommand(commandType)
+        ? adaptOpenWorldRuntimeCommand(commandType, payload)
+        : { commandType, payload }
+      // An open-world clock can advance several times between a rendered
+      // snapshot and a player interaction. Runtime commands are still
+      // serialised and revalidated by the server at their processing tick, so
+      // a stale UI tick must not prevent movement, portal traversal, or an
+      // activity from ever entering that queue.
+      const expectedWorldTick = isOpenWorld(world) && world.status === 'running'
+        ? undefined
+        : world.current_tick
       const command = await citySpatialAPI.submitWorldRuntimeCommand(
         world.id,
-        commandType,
-        payload,
-        world.current_tick
+        submission.commandType,
+        submission.payload,
+        expectedWorldTick
       )
       upsertWorldCommandReceipt(command)
       if (world.member_role !== 'owner') {
         void pollWorldCommandReceipt(world.id, command.id, worldGeneration)
         return 'queued'
       }
-      const result = await citySpatialAPI.stepWorld(world.id, world.current_tick)
-      const processed = result.commands.find(item => item.id === command.id)
-      if (processed) upsertWorldCommandReceipt(processed)
-      if (!processed || processed.status !== 'applied') {
-        throw new Error(processed?.error_code ?? 'Open world runtime command was rejected')
+      try {
+        const result = await citySpatialAPI.stepWorld(world.id, world.current_tick)
+        const processed = result.commands.find(item => item.id === command.id)
+        if (processed) upsertWorldCommandReceipt(processed)
+        if (processed?.status === 'applied') {
+          updateWorldTick(result.tick.tick)
+          await loadWorldRuntime(true)
+          return 'applied'
+        }
+        if (processed?.status === 'rejected') {
+          throw new Error(processed.error_code ?? 'Open world runtime command was rejected')
+        }
+      } catch (error: unknown) {
+        // The server tick scheduler can seal the command between submission and
+        // an owner-triggered step.  That is a successful concurrent outcome,
+        // not a player-visible failure: reconcile the authoritative receipt
+        // instead of leaving a stale expected tick in the client.
+        if (!isExpectedWorldTickConflict(error)) throw error
       }
-      updateWorldTick(result.tick.tick)
-      await loadWorldRuntime(true)
-      return 'applied'
+
+      await pollWorldCommandReceipt(world.id, command.id, worldGeneration)
+      const settled = worldCommandReceipts.value.find(item => item.id === command.id)
+      if (settled?.status === 'applied') return 'applied'
+      if (settled?.status === 'rejected') {
+        throw new Error(settled.error_code ?? 'Open world runtime command was rejected')
+      }
+      return 'queued'
     } catch (error: unknown) {
       loadError.value = readableError(error)
       throw error
     } finally {
       worldRuntimeCommandCode.value = null
+    }
+  }
+
+  async function runWorldLifecycleCommand(
+    commandType: CityWorldControlCommandType,
+    payload: Record<string, unknown> = {},
+    commandCode: string = commandType
+  ): Promise<'applied' | 'queued'> {
+    const world = activeWorld.value
+    if (!world || worldLifecycleCommandCode.value || worldRuntimeCommandCode.value) {
+      throw new Error('World lifecycle command is unavailable')
+    }
+    worldLifecycleCommandCode.value = commandCode
+    loadError.value = null
+    try {
+      // Pausing or changing the speed of an already-running world follows
+      // the same scheduler cadence as player actions. Let the server queue
+      // the control command against its authoritative tick rather than
+      // rejecting a control rendered a few seconds earlier.
+      const expectedWorldTick = world.status === 'running' ? undefined : world.current_tick
+      const command = await citySpatialAPI.submitWorldControlCommand(
+        world.id,
+        commandType,
+        payload,
+        expectedWorldTick
+      )
+      upsertWorldCommandReceipt(command)
+      try {
+        const result = await citySpatialAPI.stepWorld(world.id, world.current_tick)
+        const processed = result.commands.find(item => item.id === command.id)
+        if (processed) upsertWorldCommandReceipt(processed)
+        if (processed?.status === 'applied') {
+          updateWorldTick(result.tick.tick)
+          applyWorldLifecycleResult(commandType, payload)
+          try {
+            const snapshot = await citySpatialAPI.getWorld(world.id)
+            if (activeWorldID.value === world.id) replaceWorldSnapshot(snapshot)
+          } catch {
+            // The terminal command result remains enough to keep the local
+            // lifecycle controls truthful until the next normal refresh.
+          }
+          await loadWorldRuntime(true)
+          return 'applied'
+        }
+        if (processed?.status === 'rejected') {
+          throw new Error(processed.error_code ?? 'World lifecycle command was rejected')
+        }
+      } catch (error: unknown) {
+        // A running scheduler may seal the same command first. Reconcile its
+        // terminal receipt instead of reporting a spurious tick conflict.
+        if (!isExpectedWorldTickConflict(error)) throw error
+      }
+
+      await pollWorldCommandReceipt(world.id, command.id, worldGeneration)
+      const settled = worldCommandReceipts.value.find(item => item.id === command.id)
+      if (settled?.status === 'applied') {
+        applyWorldLifecycleResult(commandType, payload)
+        return 'applied'
+      }
+      if (settled?.status === 'rejected') {
+        throw new Error(settled.error_code ?? 'World lifecycle command was rejected')
+      }
+      return 'queued'
+    } catch (error: unknown) {
+      loadError.value = readableError(error)
+      throw error
+    } finally {
+      worldLifecycleCommandCode.value = null
     }
   }
 
@@ -1831,6 +2219,7 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
     enterpriseLocationCommandCode,
     cityServiceCommandCode,
     worldRuntimeCommandCode,
+    worldLifecycleCommandCode,
     worldMemberMutationKey,
     canGenerateSelectedTile,
     loadError,
@@ -1862,6 +2251,7 @@ export const useCitySpatialStore = defineStore('citySpatial', () => {
     runEnterpriseLocationCommand,
     runCityServiceCommand,
     runWorldRuntimeCommand,
+    runWorldLifecycleCommand,
     addWorldMember,
     updateWorldMember,
     setViewportSize,

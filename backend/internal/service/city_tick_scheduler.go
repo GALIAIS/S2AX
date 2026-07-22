@@ -189,6 +189,9 @@ WITH due AS (
     FROM city_worlds world
     LEFT JOIN city_world_schedule_states schedule ON schedule.world_id = world.id
     WHERE world.status IN ('paused', 'running')
+      -- Realtime worlds have their own Temporal Frame scheduler and must
+      -- never be claimed by this legacy one-hour tick reducer.
+      AND world.simulation_version NOT IN ('city-openworld-realtime-v1', 'city-openworld-realtime-v2')
       AND (
           (world.status = 'running' AND (world.next_tick_at IS NULL OR world.next_tick_at <= clock_timestamp()))
           OR EXISTS (
