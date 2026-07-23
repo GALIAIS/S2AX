@@ -502,6 +502,19 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/city/agent-runtime',
+    name: 'AdminCityAgentRuntime',
+    component: () => import('@/views/admin/CityAgentRuntimeView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      requiresCitySimulation: true,
+      title: 'City Agent Runtime',
+      titleKey: 'admin.cityAgentRuntime.title',
+      descriptionKey: 'admin.cityAgentRuntime.description'
+    }
+  },
+  {
     path: '/admin/currencies',
     name: 'AdminCurrencies',
     component: () => import('@/views/admin/CurrenciesView.vue'),

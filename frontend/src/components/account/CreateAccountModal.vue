@@ -166,7 +166,7 @@
       <!-- Account Type Selection (Anthropic) -->
       <div v-if="form.platform === 'anthropic'">
         <label class="input-label">{{ t('admin.accounts.accountType') }}</label>
-        <div class="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4" data-tour="account-form-type">
+        <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4" data-tour="account-form-type">
           <button
             type="button"
             @click="accountCategory = 'oauth-based'"
@@ -296,7 +296,7 @@
       <!-- Account Type Selection (OpenAI) -->
       <div v-if="form.platform === 'openai'">
         <label class="input-label">{{ t('admin.accounts.accountType') }}</label>
-        <div class="mt-2 grid grid-cols-2 gap-3" data-tour="account-form-type">
+        <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2" data-tour="account-form-type">
           <button
             type="button"
             @click="accountCategory = 'oauth-based'"
@@ -426,7 +426,7 @@
             {{ t('admin.accounts.gemini.helpButton') }}
           </button>
         </div>
-        <div class="mt-2 grid grid-cols-3 gap-3" data-tour="account-form-type">
+        <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3" data-tour="account-form-type">
           <button
             type="button"
             @click="accountCategory = 'oauth-based'"
@@ -557,7 +557,7 @@
         <!-- OAuth Type Selection (only show when oauth-based is selected) -->
         <div v-if="accountCategory === 'oauth-based'" class="mt-4">
           <label class="input-label">{{ t('admin.accounts.oauth.gemini.oauthTypeLabel') }}</label>
-          <div class="mt-2 grid grid-cols-2 gap-3">
+          <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <!-- Google One OAuth -->
             <button
               type="button"
@@ -797,7 +797,7 @@
       <!-- Account Type Selection (Antigravity - OAuth or Upstream) -->
       <div v-if="form.platform === 'antigravity'">
         <label class="input-label">{{ t('admin.accounts.accountType') }}</label>
-        <div class="mt-2 grid grid-cols-2 gap-3">
+        <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <button
             type="button"
             @click="antigravityAccountType = 'oauth'"
@@ -2365,7 +2365,7 @@
             </button>
           </div>
 
-          <div v-if="windowCostEnabled" class="grid grid-cols-2 gap-4">
+          <div v-if="windowCostEnabled" class="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label class="input-label">{{ t('admin.accounts.quotaControl.windowCost.limit') }}</label>
               <div class="relative">
@@ -2425,7 +2425,7 @@
             </button>
           </div>
 
-          <div v-if="sessionLimitEnabled" class="grid grid-cols-2 gap-4">
+          <div v-if="sessionLimitEnabled" class="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label class="input-label">{{ t('admin.accounts.quotaControl.sessionLimit.maxSessions') }}</label>
               <input
@@ -2715,7 +2715,7 @@
         <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
       </div>
 
-      <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div>
           <label class="input-label">{{ t('admin.accounts.concurrency') }}</label>
           <input v-model.number="form.concurrency" type="number" min="1" class="input"
@@ -3184,15 +3184,15 @@
     </div>
 
     <template #footer>
-      <div v-if="step === 1" class="flex justify-end gap-3">
-        <button @click="handleClose" type="button" class="btn btn-secondary">
+      <div v-if="step === 1" class="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+        <button @click="handleClose" type="button" class="btn btn-secondary w-full sm:w-auto">
           {{ t('common.cancel') }}
         </button>
         <button
           type="submit"
           form="create-account-form"
           :disabled="submitting"
-          class="btn btn-primary"
+          class="btn btn-primary w-full sm:w-auto"
           data-tour="account-form-submit"
         >
           <svg
@@ -3224,15 +3224,15 @@
           }}
         </button>
       </div>
-      <div v-else class="flex justify-between gap-3">
-        <button type="button" class="btn btn-secondary" @click="goBackToBasicInfo">
+      <div v-else class="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
+        <button type="button" class="btn btn-secondary w-full sm:w-auto" @click="goBackToBasicInfo">
           {{ t('common.back') }}
         </button>
         <button
           v-if="isManualInputMethod"
           type="button"
           :disabled="!canExchangeCode"
-          class="btn btn-primary"
+          class="btn btn-primary w-full sm:w-auto"
           @click="handleExchangeCode"
         >
           <svg
@@ -3270,7 +3270,7 @@
     :show="showGeminiHelpDialog"
     :title="t('admin.accounts.gemini.helpDialog.title')"
     @close="showGeminiHelpDialog = false"
-    max-width="max-w-3xl"
+    width="wide"
   >
     <div class="space-y-6">
       <!-- Setup Guide Section -->

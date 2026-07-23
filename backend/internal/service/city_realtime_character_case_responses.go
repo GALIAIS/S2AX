@@ -329,7 +329,14 @@ WHERE response.world_id = $1`, worldID).Scan(
 	if policyID != cityRealtimeAgentCorePolicyID ||
 		(policyVersion != cityRealtimeAgentCorePolicyVersionCase &&
 			policyVersion != cityRealtimeAgentCorePolicyVersionSocial &&
-			policyVersion != cityRealtimeAgentCorePolicyVersionReview) ||
+			policyVersion != cityRealtimeAgentCorePolicyVersionReview &&
+			policyVersion != cityRealtimeAgentCorePolicyVersionReport &&
+			policyVersion != cityRealtimeAgentCorePolicyVersionIntake &&
+			policyVersion != cityRealtimeAgentCorePolicyVersionEvidence &&
+			policyVersion != cityRealtimeAgentCorePolicyVersionEvidenceAssignment &&
+			policyVersion != cityRealtimeAgentCorePolicyVersionProcedureDispatch &&
+			policyVersion != cityRealtimeAgentCorePolicyVersionTask &&
+			policyVersion != cityRealtimeAgentCorePolicyVersionNavigationPlan) ||
 		binding.AgentBindingHash != currentAgentBindingHash || !validateCityRealtimeCharacterCaseResponseBinding(binding) {
 		return nil, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "realtime_character_case_response_binding"})
 	}

@@ -185,6 +185,7 @@ export default {
     accountAllocations: 'Assigned Accounts',
     citySimulation: 'City Simulation',
     cityVisualPacks: 'City Visual Packs',
+    cityAgentRuntime: 'City Agent Runtime',
     virtualCurrencies: 'Virtual Currencies',
     virtualCurrencyIntegrations: 'Currency Integrations',
     accounts: 'Accounts',

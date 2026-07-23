@@ -1,5 +1,5 @@
 <template>
-  <div class="mb-4 flex min-h-12 flex-wrap items-center justify-between gap-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20">
+  <div class="mb-4 flex min-h-12 flex-wrap items-stretch justify-between gap-3 rounded-lg bg-primary-50 p-3 sm:items-center dark:bg-primary-900/20">
     <div class="flex min-w-0 flex-wrap items-center gap-2">
       <span class="text-sm font-medium text-primary-900 dark:text-primary-100">
         {{ selectedIds.length > 0
@@ -17,12 +17,12 @@
       </template>
     </div>
 
-    <div class="relative flex shrink-0 items-center gap-2" ref="menuRef">
+    <div class="relative flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap" ref="menuRef">
       <template v-if="selectedIds.length > 0">
-        <button type="button" class="btn btn-danger btn-sm" @click="emit('delete')">
+        <button type="button" class="btn btn-danger btn-sm flex-1 sm:flex-none" @click="emit('delete')">
           {{ t('admin.accounts.bulkActions.delete') }}
         </button>
-        <button type="button" class="btn btn-primary btn-sm" @click="emit('edit-selected')">
+        <button type="button" class="btn btn-primary btn-sm flex-1 sm:flex-none" @click="emit('edit-selected')">
           {{ t('admin.accounts.bulkActions.edit') }}
         </button>
         <button
@@ -35,7 +35,7 @@
         >
           <Icon name="more" size="sm" />
         </button>
-        <div v-if="moreOpen" class="absolute right-0 top-full z-50 mt-2 w-60 overflow-hidden rounded-xl bg-white py-1 shadow-lg ring-1 ring-black/5 dark:bg-dark-800 dark:ring-white/10" role="menu">
+        <div v-if="moreOpen" class="absolute right-0 top-full z-50 mt-2 w-[min(15rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl bg-white py-1 shadow-lg ring-1 ring-black/5 dark:bg-dark-800 dark:ring-white/10" role="menu">
           <button type="button" role="menuitem" class="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 focus:bg-gray-100 focus:outline-none dark:text-gray-200 dark:hover:bg-dark-700 dark:focus:bg-dark-700" @click="run('reset-status')">
             <Icon name="refresh" size="sm" />
             {{ t('admin.accounts.bulkActions.resetStatus') }}
@@ -59,7 +59,7 @@
           </button>
         </div>
       </template>
-      <button type="button" class="btn btn-primary btn-sm" @click="emit('edit-filtered')">
+      <button type="button" class="btn btn-primary btn-sm flex-1 sm:flex-none" @click="emit('edit-filtered')">
         {{ t('admin.accounts.bulkEdit.submit') }}
       </button>
     </div>

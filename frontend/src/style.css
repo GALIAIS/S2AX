@@ -68,11 +68,22 @@
     text-rendering: optimizeLegibility;
   }
 
+  #app {
+    min-width: 0;
+  }
+
+  img,
+  video,
+  canvas {
+    max-width: 100%;
+  }
+
   button,
   input,
   select,
   textarea {
     font: inherit;
+    max-width: 100%;
   }
 
   :focus-visible {
@@ -150,6 +161,8 @@
     @apply disabled:transform-none disabled:cursor-not-allowed disabled:opacity-45;
     border: 1px solid transparent;
     min-height: 2.5rem;
+    max-width: 100%;
+    white-space: normal;
   }
 
   .btn-primary {
@@ -315,6 +328,7 @@
     background: var(--ui-surface-solid);
     border: 1px solid var(--ui-separator);
     box-shadow: var(--ui-shadow);
+    min-width: 0;
   }
 
   /* ============ 卡片样式 ============ */
@@ -323,6 +337,7 @@
     background: var(--ui-surface-solid);
     border: 1px solid var(--ui-separator);
     box-shadow: var(--ui-shadow);
+    min-width: 0;
   }
 
   /* Keep local legacy menus above adjacent material cards while focused. */
@@ -345,6 +360,7 @@
     background: var(--ui-surface-solid);
     border: 1px solid var(--ui-separator);
     box-shadow: var(--ui-shadow);
+    min-width: 0;
   }
 
   .card-header {
@@ -414,6 +430,7 @@
     @apply overflow-x-auto;
     border: 1px solid var(--ui-separator);
     background: var(--ui-surface-solid);
+    max-width: 100%;
   }
 
   .table {
@@ -490,6 +507,7 @@
     background: var(--ui-surface-solid);
     border: 1px solid var(--ui-separator);
     box-shadow: var(--ui-shadow);
+    max-width: calc(100vw - 1rem);
   }
 
   .dropdown-item {
@@ -505,15 +523,22 @@
     @apply fixed inset-0 z-50;
     @apply flex items-center justify-center p-2 sm:p-4;
     background: var(--ui-overlay);
+    padding-top: max(0.5rem, env(safe-area-inset-top));
+    padding-right: max(0.5rem, env(safe-area-inset-right));
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+    padding-left: max(0.5rem, env(safe-area-inset-left));
   }
 
   .modal-content {
     @apply w-full;
-    @apply max-h-[95vh] sm:max-h-[90vh];
     @apply flex flex-col;
     background: var(--ui-surface-solid);
     border: 1px solid var(--ui-separator);
     box-shadow: var(--ui-shadow);
+    min-width: 0;
+    max-width: calc(100vw - 1rem);
+    max-height: calc(100dvh - 1rem);
+    min-height: 0;
   }
 
   .modal-header {
@@ -522,16 +547,21 @@
     @apply flex items-center justify-between;
     @apply flex-shrink-0;
     border-bottom: 1px solid var(--ui-separator);
+    min-width: 0;
   }
 
   .modal-title {
     @apply text-lg font-semibold text-gray-900 dark:text-white;
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   .modal-body {
     @apply px-4 py-3;
     @apply sm:px-6 sm:py-4;
     @apply flex-1 overflow-y-auto;
+    min-height: 0;
+    overscroll-behavior: contain;
   }
 
   .modal-footer {
@@ -541,6 +571,12 @@
     @apply flex-shrink-0;
     border-top: 1px solid var(--ui-separator);
     background: color-mix(in srgb, var(--ui-control) 42%, transparent);
+    min-width: 0;
+  }
+
+  .modal-footer-content {
+    min-width: 0;
+    max-width: 100%;
   }
 
   /* 防止body滚动的工具类 */
@@ -601,14 +637,21 @@
     @apply fixed inset-0 z-50;
     @apply flex items-center justify-center p-4;
     background: var(--ui-overlay);
+    padding-top: max(0.5rem, env(safe-area-inset-top));
+    padding-right: max(0.5rem, env(safe-area-inset-right));
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+    padding-left: max(0.5rem, env(safe-area-inset-left));
   }
 
   .dialog-container {
     @apply flex w-full flex-col;
-    @apply max-h-[90vh];
     background: var(--ui-surface-solid);
     border: 1px solid var(--ui-separator);
     box-shadow: var(--ui-shadow);
+    min-width: 0;
+    max-width: calc(100vw - 1rem);
+    max-height: calc(100dvh - 1rem);
+    min-height: 0;
   }
 
   .dialog-header {
@@ -618,6 +661,8 @@
 
   .dialog-body {
     @apply overflow-y-auto px-6 py-4;
+    min-height: 0;
+    overscroll-behavior: contain;
   }
 
   .dialog-footer {
@@ -629,7 +674,6 @@
   /* ============ Toast 通知 ============ */
   .toast {
     @apply fixed right-4 top-4 z-[100];
-    @apply min-w-[320px] max-w-md;
     @apply shadow-lg;
     @apply border-l-4;
     @apply p-4;
@@ -638,6 +682,9 @@
     border-top: 1px solid var(--ui-separator);
     border-right: 1px solid var(--ui-separator);
     border-bottom: 1px solid var(--ui-separator);
+    width: min(calc(100vw - 2rem), 28rem);
+    min-width: 0;
+    max-width: none;
   }
 
   .toast-success {
@@ -926,6 +973,77 @@
   [data-motion-page],
   [data-motion-item] {
     transform-origin: center top;
+  }
+
+  /* ============ 紧凑视口（手机） ============ */
+  @media (max-width: 639px) {
+    .btn:not(.btn-icon) {
+      min-height: 2.75rem;
+    }
+
+    .card-header,
+    .card-body,
+    .card-footer {
+      @apply px-4 py-3;
+    }
+
+    .page-header {
+      @apply mb-4;
+    }
+
+    .page-title {
+      @apply text-xl leading-tight;
+    }
+
+    .page-description {
+      @apply text-xs leading-5;
+    }
+
+    .modal-header,
+    .modal-body,
+    .modal-footer {
+      @apply px-3 py-3;
+    }
+
+    .modal-title {
+      @apply text-base leading-6;
+    }
+
+    /* Footers conventionally receive a single flex wrapper from the slot.
+     * Let actions wrap rather than forcing a horizontal overflow at 320px. */
+    .modal-footer-content {
+      width: 100%;
+    }
+
+    .modal-footer-content > * {
+      width: 100%;
+      flex-wrap: wrap;
+    }
+
+    .modal-footer-content > * > .btn:not(.btn-icon) {
+      flex: 1 1 8rem;
+    }
+
+    .dialog-header,
+    .dialog-body,
+    .dialog-footer {
+      @apply px-4 py-3;
+    }
+
+    .toast {
+      top: max(0.75rem, env(safe-area-inset-top));
+      right: 0.75rem;
+      left: 0.75rem;
+      width: auto;
+    }
+
+    .markdown-body {
+      @apply text-sm leading-6;
+    }
+
+    .markdown-body pre {
+      @apply p-3 text-xs;
+    }
   }
 }
 

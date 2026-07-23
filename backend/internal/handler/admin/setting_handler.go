@@ -242,6 +242,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		CityPixelRendererEnabled:                               settings.CityPixelRendererEnabled,
 		CityVisualPackPublishEnabled:                           settings.CityVisualPackPublishEnabled,
 		CityRealtimeSchedulerEnabled:                           settings.CityRealtimeSchedulerEnabled,
+		CityRealtimeAgentDecisionWorkerEnabled:                 settings.CityRealtimeAgentDecisionWorkerEnabled,
 		CyberSessionBlockEnabled:                               settings.CyberSessionBlockEnabled,
 		CyberSessionBlockTTLSeconds:                            settings.CyberSessionBlockTTLSeconds,
 		AffiliateRebateRate:                                    settings.AffiliateRebateRate,

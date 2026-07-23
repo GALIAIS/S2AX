@@ -8,6 +8,12 @@ const componentPath = resolve(dirname(fileURLToPath(import.meta.url)), '../Table
 const componentSource = readFileSync(componentPath, 'utf8')
 
 describe('TablePageLayout responsive table scrolling', () => {
+  it('uses the same compact viewport breakpoint as DataTable mobile cards', () => {
+    expect(componentSource).toContain("const compactViewportQuery = '(max-width: 767px)'")
+    expect(componentSource).toContain('window.matchMedia(compactViewportQuery)')
+    expect(componentSource).not.toContain('window.innerWidth < 1024')
+  })
+
   it('does not disable the table horizontal scroll container in mobile mode', () => {
     const tableWrapperBlocks = Array.from(
       componentSource.matchAll(/([^{}]*:deep\(\.table-wrapper\)[^{}]*)\{([^{}]*)\}/g)

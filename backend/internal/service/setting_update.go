@@ -367,6 +367,9 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyCityRealtimeSchedulerEnabled] = strconv.FormatBool(
 		settings.CitySimulationEnabled && settings.CityRealtimeSchedulerEnabled,
 	)
+	updates[SettingKeyCityRealtimeAgentDecisionWorkerEnabled] = strconv.FormatBool(
+		settings.CitySimulationEnabled && settings.CityRealtimeAgentDecisionWorkerEnabled,
+	)
 
 	// cyber 会话屏蔽开关 + TTL
 	updates[SettingKeyCyberSessionBlockEnabled] = strconv.FormatBool(settings.CyberSessionBlockEnabled)

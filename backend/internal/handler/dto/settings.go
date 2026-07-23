@@ -294,6 +294,8 @@ type SystemSettings struct {
 	CityVisualPackPublishEnabled bool `json:"city_visual_pack_publish_enabled"`
 	// realtime scheduler 仅影响服务端生产 worker，不向普通用户公开。
 	CityRealtimeSchedulerEnabled bool `json:"city_realtime_scheduler_enabled"`
+	// Agent 模型决策 worker 仅影响服务端已封存 outbox，不向普通用户公开。
+	CityRealtimeAgentDecisionWorkerEnabled bool `json:"city_realtime_agent_decision_worker_enabled"`
 
 	// cyber 会话屏蔽开关 + TTL
 	CyberSessionBlockEnabled    bool `json:"cyber_session_block_enabled"`

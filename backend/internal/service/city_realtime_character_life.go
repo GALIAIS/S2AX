@@ -1600,6 +1600,14 @@ func (s *CityEconomyService) PerformRealtimeCharacterActivity(
 			return nil, err
 		}
 	}
+	evidenceCaptured := false
+	if transition.Law != nil {
+		if evidenceCaptured, err = captureCityRealtimeCharacterCaseEvidenceFromLaw(
+			ctx, tx, input.WorldID, frameSequence, state.currentWorldTimeUS, *transition.Law,
+		); err != nil {
+			return nil, err
+		}
+	}
 	if transition.ProgressionEvent != nil {
 		if err = insertCityRealtimeCharacterProgressionEvent(ctx, tx, input.WorldID, record.identity.ActorCode, *transition.ProgressionEvent); err != nil {
 			return nil, err
@@ -1619,6 +1627,7 @@ func (s *CityEconomyService) PerformRealtimeCharacterActivity(
 		cityRealtimeCharacterActivityAction, map[string]any{
 			"character_created": 0, "character_moved": 0, "character_activity": 1,
 			"character_law_event":         boolToCityRealtimeCount(transition.Law != nil),
+			"character_case_evidence":     boolToCityRealtimeCount(evidenceCaptured),
 			"character_progression_event": boolToCityRealtimeCount(transition.ProgressionEvent != nil),
 		}); err != nil {
 		return nil, err

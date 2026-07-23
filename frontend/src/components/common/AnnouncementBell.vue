@@ -24,7 +24,7 @@
           style="background: var(--ui-overlay)"
           @click.self="closeModal"
         >
-          <section class="material-panel flex max-h-[82vh] w-full max-w-2xl flex-col" role="dialog" aria-modal="true" :aria-label="t('announcements.title')">
+          <section class="material-panel flex max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl flex-col sm:max-h-[82vh]" role="dialog" aria-modal="true" :aria-label="t('announcements.title')">
             <header class="material-toolbar flex flex-wrap items-start justify-between gap-4 px-5 py-4 sm:px-6">
               <div class="min-w-0">
                 <div class="flex items-center gap-3">
@@ -39,7 +39,7 @@
                   </div>
                 </div>
               </div>
-              <div class="flex items-center gap-2">
+              <div class="flex flex-wrap items-center gap-2">
                 <button v-if="unreadCount > 0" type="button" class="btn btn-secondary btn-sm" :disabled="loading" @click="markAllAsRead">
                   <Icon name="check" size="sm" />
                   {{ t('announcements.markAllRead') }}
@@ -50,7 +50,7 @@
               </div>
             </header>
 
-            <div class="flex items-center justify-between gap-4 border-b px-5 py-3 sm:px-6" style="border-color: var(--ui-separator)">
+            <div class="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3 sm:gap-4 sm:px-6" style="border-color: var(--ui-separator)">
               <div class="tabs p-0" role="tablist" :aria-label="t('announcements.filterLabel')">
                 <button type="button" class="tab px-3 py-1.5 text-xs" :class="listFilter === 'all' ? 'tab-active' : ''" @click="listFilter = 'all'">
                   {{ t('announcements.filterAll') }}
@@ -111,7 +111,7 @@
           style="background: var(--ui-overlay)"
           @click.self="closeDetail"
         >
-          <article class="material-panel flex max-h-[88vh] w-full max-w-3xl flex-col" role="dialog" aria-modal="true" :aria-labelledby="`announcement-title-${selectedAnnouncement.id}`">
+          <article class="material-panel flex max-h-[calc(100dvh-1.5rem)] w-full max-w-3xl flex-col sm:max-h-[88vh]" role="dialog" aria-modal="true" :aria-labelledby="`announcement-title-${selectedAnnouncement.id}`">
             <header class="material-toolbar flex items-start justify-between gap-5 px-5 py-5 sm:px-7">
               <div class="min-w-0">
                 <div class="mb-2 flex flex-wrap items-center gap-2">
@@ -134,13 +134,13 @@
               <div class="markdown-body" v-html="renderMarkdown(selectedAnnouncement.content)" />
             </div>
 
-            <footer class="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4 sm:px-7" style="border-color: var(--ui-separator)">
+            <footer class="flex flex-col items-stretch gap-3 border-t px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-7" style="border-color: var(--ui-separator)">
               <p class="text-xs text-gray-500 dark:text-dark-400">
                 {{ selectedAnnouncement.read_at ? t('announcements.readStatus') : t('announcements.markReadHint') }}
               </p>
-              <div class="flex items-center gap-2">
-                <button type="button" class="btn btn-secondary" @click="closeDetail">{{ t('common.close') }}</button>
-                <button v-if="!selectedAnnouncement.read_at" type="button" class="btn btn-primary" @click="markAsReadAndClose(selectedAnnouncement.id)">
+              <div class="flex flex-col gap-2 sm:flex-row">
+                <button type="button" class="btn btn-secondary w-full sm:w-auto" @click="closeDetail">{{ t('common.close') }}</button>
+                <button v-if="!selectedAnnouncement.read_at" type="button" class="btn btn-primary w-full sm:w-auto" @click="markAsReadAndClose(selectedAnnouncement.id)">
                   <Icon name="check" size="sm" />
                   {{ t('announcements.markRead') }}
                 </button>

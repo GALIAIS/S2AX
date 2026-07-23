@@ -116,6 +116,49 @@ func TestCityRealtimeCharacterSocialRelationCursorIsBounded(t *testing.T) {
 	}
 }
 
+func TestCityRealtimeCharacterSocialRelationExplanationIsSealedAndDirectional(t *testing.T) {
+	owner := "character.player.0123456789abcdef0123456789abcdef"
+	target := "npc.citizen.0123456789abcdef0123456789abcdef"
+	low, high, err := cityRealtimeCharacterSocialPair(owner, target)
+	require.NoError(t, err)
+	head, err := newCityRealtimeCharacterSocialGenesisHead(low, high)
+	require.NoError(t, err)
+
+	empty, err := projectCityRealtimeCharacterSocialRelationExplanation(head, owner, target, 0, 0, "")
+	require.NoError(t, err)
+	require.Equal(t, cityRealtimeCharacterSocialContactTierNone, empty.ContactTier)
+	require.Equal(t, cityRealtimeCharacterSocialInteractionPatternNone, empty.InteractionPattern)
+	require.Equal(t, []string{"no_greeting_recorded"}, empty.ReasonCodes)
+
+	head, _, err = cityRealtimeCharacterSocialGreet(
+		head, owner, target, "ait.social."+strings.Repeat("a", 64), 1,
+	)
+	require.NoError(t, err)
+	initial, err := projectCityRealtimeCharacterSocialRelationExplanation(head, owner, target, 1, 0, owner)
+	require.NoError(t, err)
+	require.Equal(t, cityRealtimeCharacterSocialRelationExplanationSchemaVersion, initial.SchemaVersion)
+	require.Equal(t, cityRealtimeCharacterSocialContactTierInitial, initial.ContactTier)
+	require.Equal(t, cityRealtimeCharacterSocialInteractionPatternOutbound, initial.InteractionPattern)
+	require.Equal(t, cityRealtimeCharacterSocialLastInteractionOutbound, initial.LastInteractionDirection)
+	require.Equal(t, []string{"greeting_recorded"}, initial.ReasonCodes)
+
+	head, _, err = cityRealtimeCharacterSocialGreet(
+		head, target, owner, "ait.social."+strings.Repeat("b", 64), 2,
+	)
+	require.NoError(t, err)
+	reciprocal, err := projectCityRealtimeCharacterSocialRelationExplanation(head, owner, target, 1, 1, target)
+	require.NoError(t, err)
+	require.Equal(t, cityRealtimeCharacterSocialContactTierRecurring, reciprocal.ContactTier)
+	require.Equal(t, cityRealtimeCharacterSocialInteractionPatternReciprocal, reciprocal.InteractionPattern)
+	require.Equal(t, cityRealtimeCharacterSocialLastInteractionInbound, reciprocal.LastInteractionDirection)
+	require.Equal(t, []string{"greeting_recorded", "repeated_greeting", "reciprocal_greeting"}, reciprocal.ReasonCodes)
+
+	_, err = projectCityRealtimeCharacterSocialRelationExplanation(head, owner, target, 2, 1, target)
+	require.ErrorIs(t, err, ErrCitySimulationInvariant)
+	_, err = projectCityRealtimeCharacterSocialRelationExplanation(head, owner, target, 1, 1, "system.root")
+	require.ErrorIs(t, err, ErrCitySimulationInvariant)
+}
+
 func minInt64(left, right int64) int64 {
 	if left < right {
 		return left

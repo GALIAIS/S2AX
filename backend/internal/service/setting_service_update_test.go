@@ -256,6 +256,53 @@ func TestSettingService_CityRealtimeSchedulerSetting(t *testing.T) {
 	})
 }
 
+func TestSettingService_CityRealtimeAgentDecisionWorkerSetting(t *testing.T) {
+	t.Run("missing value defaults to disabled", func(t *testing.T) {
+		svc := NewSettingService(&settingGetAllRepoStub{values: map[string]string{}}, &config.Config{})
+
+		settings, err := svc.GetAllSettings(context.Background())
+		require.NoError(t, err)
+		require.False(t, settings.CityRealtimeAgentDecisionWorkerEnabled)
+	})
+
+	t.Run("value requires the parent city feature", func(t *testing.T) {
+		disabled := NewSettingService(&settingGetAllRepoStub{values: map[string]string{
+			SettingKeyCitySimulationEnabled:                  "false",
+			SettingKeyCityRealtimeAgentDecisionWorkerEnabled: "true",
+		}}, &config.Config{})
+		settings, err := disabled.GetAllSettings(context.Background())
+		require.NoError(t, err)
+		require.False(t, settings.CityRealtimeAgentDecisionWorkerEnabled)
+
+		enabled := NewSettingService(&settingGetAllRepoStub{values: map[string]string{
+			SettingKeyCitySimulationEnabled:                  "true",
+			SettingKeyCityRealtimeAgentDecisionWorkerEnabled: "true",
+		}}, &config.Config{})
+		settings, err = enabled.GetAllSettings(context.Background())
+		require.NoError(t, err)
+		require.True(t, settings.CityRealtimeAgentDecisionWorkerEnabled)
+	})
+
+	t.Run("persistence closes the worker when city simulation closes", func(t *testing.T) {
+		repo := &settingUpdateRepoStub{}
+		svc := NewSettingService(repo, &config.Config{})
+
+		err := svc.UpdateSettings(context.Background(), &SystemSettings{
+			CitySimulationEnabled:                  true,
+			CityRealtimeAgentDecisionWorkerEnabled: true,
+		})
+		require.NoError(t, err)
+		require.Equal(t, "true", repo.updates[SettingKeyCityRealtimeAgentDecisionWorkerEnabled])
+
+		err = svc.UpdateSettings(context.Background(), &SystemSettings{
+			CitySimulationEnabled:                  false,
+			CityRealtimeAgentDecisionWorkerEnabled: true,
+		})
+		require.NoError(t, err)
+		require.Equal(t, "false", repo.updates[SettingKeyCityRealtimeAgentDecisionWorkerEnabled])
+	})
+}
+
 func TestSettingService_CityPixelRendererSettings(t *testing.T) {
 	t.Run("missing values default to disabled", func(t *testing.T) {
 		svc := NewSettingService(&settingGetAllRepoStub{values: map[string]string{}}, &config.Config{})

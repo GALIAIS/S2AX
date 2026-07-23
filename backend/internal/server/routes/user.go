@@ -267,6 +267,10 @@ func RegisterUserRoutes(
 			cityRealtimeCharacter.GET("/events", h.CityEconomy.ListRealtimeMyCharacterEvents)
 			cityRealtimeCharacter.GET("/relations", h.CityEconomy.ListRealtimeMyCharacterSocialRelations)
 			cityRealtimeCharacter.GET("/case-reviews", h.CityEconomy.ListRealtimeMyCharacterCaseReviews)
+			cityRealtimeCharacter.GET("/case-process", h.CityEconomy.ListRealtimeMyCharacterCaseProcess)
+			cityRealtimeCharacter.GET("/tasks", h.CityEconomy.ListRealtimeMyCharacterTasks)
+			cityRealtimeCharacter.GET("/navigation-plans", h.CityEconomy.ListRealtimeMyCharacterNavigationPlans)
+			cityRealtimeCharacter.GET("/traffic-reservations", h.CityEconomy.ListRealtimeMyCharacterTrafficReservations)
 			cityRealtimeCharacter.POST("", h.CityEconomy.CreateRealtimeCharacter)
 			cityRealtimeCharacter.POST("/agent", h.CityEconomy.ConfigureRealtimeCharacterAgent)
 			cityRealtimeCharacter.POST("/move", h.CityEconomy.MoveRealtimeCharacter)
@@ -288,6 +292,28 @@ func RegisterUserRoutes(
 				cityAdminControl.GET("/clock-health", h.CityEconomy.GetRealtimeOperationalHealth)
 				cityAdminControl.POST("/worlds/:world_id/pause", h.CityEconomy.PauseRealtimeWorld)
 				cityAdminControl.POST("/worlds/:world_id/resume", h.CityEconomy.ResumeRealtimeWorld)
+			}
+
+			// Agent Model Profiles are a narrow, administrator-only control plane.
+			// They intentionally bind to existing local groups instead of accepting
+			// direct upstream endpoints or credentials in browser requests.
+			cityAgentModelRead := cityAdmin.Group("")
+			{
+				cityAgentModelRead.GET("/agent-model-profiles", h.CityEconomy.ListRealtimeAgentModelProfiles)
+				cityAgentModelRead.GET("/agent-decision-queue", h.CityEconomy.ListRealtimeAgentDecisionQueue)
+				cityAgentModelRead.GET("/worlds/:world_id/agent-decision-queue/:request_code/dead-letter/events", h.CityEconomy.ListRealtimeAgentDecisionDeadLetterEvents)
+				cityAgentModelRead.GET("/worlds/:world_id/agent-model-bindings", h.CityEconomy.ListRealtimeAgentModelProfileWorldBindings)
+			}
+
+			cityAgentModelWrite := cityAdmin.Group("")
+			cityAgentModelWrite.Use(middleware.RequestBodyLimit(16 << 10))
+			{
+				cityAgentModelWrite.POST("/agent-model-profiles", h.CityEconomy.CreateRealtimeAgentModelProfile)
+				cityAgentModelWrite.PATCH("/agent-model-profiles/:profile_code/head", h.CityEconomy.UpdateRealtimeAgentModelProfileHead)
+				cityAgentModelWrite.POST("/worlds/:world_id/agent-model-bindings", h.CityEconomy.BindRealtimeAgentModelProfileToWorld)
+				cityAgentModelWrite.POST("/worlds/:world_id/agent-decision-queue/:request_code/retry", h.CityEconomy.RetryRealtimeAgentDecisionNow)
+				cityAgentModelWrite.POST("/worlds/:world_id/agent-decision-queue/:request_code/dead-letter", h.CityEconomy.QuarantineRealtimeAgentDecision)
+				cityAgentModelWrite.POST("/worlds/:world_id/agent-decision-queue/:request_code/dead-letter/release", h.CityEconomy.ReleaseRealtimeAgentDecisionDeadLetter)
 			}
 
 			cityVisualRead := cityAdmin.Group("")

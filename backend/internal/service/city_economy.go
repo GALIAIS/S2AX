@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -210,6 +211,14 @@ type cityScannable interface {
 // membership, internal monetary units, economic entities and their chart of accounts.
 type CityEconomyService struct {
 	db *sql.DB
+
+	// Agent model providers are process-local, trusted adapters registered at
+	// application bootstrap.  They are deliberately not database configuration:
+	// profiles select only a bounded provider code and immutable safe route
+	// reference, while credentials and transport clients stay outside the city
+	// world data model.
+	agentDecisionProviderMu sync.Mutex
+	agentDecisionProviders  *cityRealtimeAgentDecisionProviderRegistry
 }
 
 func NewCityEconomyService(db *sql.DB) *CityEconomyService {
@@ -380,6 +389,33 @@ VALUES ($1, $2, $3, $4, $5, $6, 0, 0, 'active', '{}'::jsonb)`,
 			return nil, err
 		}
 		if err = initializeCityRealtimeCharacterSocialFoundation(ctx, tx, worldID, normalized.simulationVersion); err != nil {
+			return nil, err
+		}
+		if err = initializeCityRealtimeCharacterCaseReportFoundation(ctx, tx, worldID, normalized.simulationVersion); err != nil {
+			return nil, err
+		}
+		if err = initializeCityRealtimeCharacterCaseIntakeFoundation(ctx, tx, worldID, normalized.simulationVersion); err != nil {
+			return nil, err
+		}
+		if err = initializeCityRealtimeCharacterCaseEvidenceFoundation(ctx, tx, worldID, normalized.simulationVersion); err != nil {
+			return nil, err
+		}
+		if err = initializeCityRealtimeCharacterCaseEvidenceAssignmentFoundation(ctx, tx, worldID, normalized.simulationVersion); err != nil {
+			return nil, err
+		}
+		if err = initializeCityRealtimeCharacterCaseProcedureDispatchFoundation(ctx, tx, worldID, normalized.simulationVersion); err != nil {
+			return nil, err
+		}
+		if err = initializeCityRealtimeCharacterTaskFoundation(ctx, tx, worldID, normalized.simulationVersion); err != nil {
+			return nil, err
+		}
+		if err = initializeCityRealtimeCharacterNavigationPlanFoundation(ctx, tx, worldID, normalized.simulationVersion); err != nil {
+			return nil, err
+		}
+		if err = initializeCityRealtimeCharacterTrafficReservationFoundation(ctx, tx, worldID, normalized.simulationVersion); err != nil {
+			return nil, err
+		}
+		if err = initializeCityRealtimeAgentModelProfileFoundation(ctx, tx, worldID, normalized.simulationVersion); err != nil {
 			return nil, err
 		}
 		if err = initializeCityRealtimeVisualBinding(ctx, tx, worldID); err != nil {

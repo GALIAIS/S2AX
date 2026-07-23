@@ -324,7 +324,14 @@ WHERE social.world_id = $1`, worldID).Scan(
 	}
 	if policyID != cityRealtimeAgentCorePolicyID ||
 		(policyVersion != cityRealtimeAgentCorePolicyVersionSocial &&
-			policyVersion != cityRealtimeAgentCorePolicyVersionReview) ||
+			policyVersion != cityRealtimeAgentCorePolicyVersionReview &&
+			policyVersion != cityRealtimeAgentCorePolicyVersionReport &&
+			policyVersion != cityRealtimeAgentCorePolicyVersionIntake &&
+			policyVersion != cityRealtimeAgentCorePolicyVersionEvidence &&
+			policyVersion != cityRealtimeAgentCorePolicyVersionEvidenceAssignment &&
+			policyVersion != cityRealtimeAgentCorePolicyVersionProcedureDispatch &&
+			policyVersion != cityRealtimeAgentCorePolicyVersionTask &&
+			policyVersion != cityRealtimeAgentCorePolicyVersionNavigationPlan) ||
 		binding.AgentBindingHash != agentBindingHash || !cityRealtimeCharacterSocialBindingValid(binding) {
 		return nil, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "realtime_character_social_binding"})
 	}

@@ -670,6 +670,18 @@ func (s *CityEconomyService) ConfigureRealtimeCharacterAgent(
 	if err != nil {
 		return nil, err
 	}
+	navigationPlansCancelled := 0
+	if targetMode != record.agent.ControlMode && targetMode != "autonomous" {
+		cancelled, cancelErr := cancelCityRealtimeCharacterActiveNavigationPlan(
+			ctx, tx, input.WorldID, frameSequence, state.currentWorldTimeUS, record.identity.ActorCode,
+		)
+		if cancelErr != nil {
+			return nil, cancelErr
+		}
+		if cancelled {
+			navigationPlansCancelled = 1
+		}
+	}
 	nextAgent := record.agent
 	if targetMode != record.agent.ControlMode {
 		var controlEvent cityRealtimeAgentLifecycleEvent
@@ -736,6 +748,7 @@ func (s *CityEconomyService) ConfigureRealtimeCharacterAgent(
 			"character_agent_personality_revised":    boolToCityRealtimeCount(requestedPersonality != nil),
 			"character_agent_queued_requests_closed": queuedRequests,
 			"character_agent_pending_intents_closed": pendingIntents,
+			"character_navigation_plans_cancelled":   navigationPlansCancelled,
 			"character_agent_wakeup_scheduled":       boolToCityRealtimeCount(wakeupScheduled),
 		},
 	); err != nil {

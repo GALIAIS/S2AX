@@ -146,23 +146,24 @@ type SystemSettings struct {
 	CustomMenuItems             string // JSON array of custom menu items
 	CustomEndpoints             string // JSON array of custom endpoints
 
-	DefaultConcurrency           int
-	DefaultBalance               float64
-	RiskControlEnabled           bool
-	CitySimulationEnabled        bool
-	CityPixelRendererEnabled     bool
-	CityVisualPackPublishEnabled bool
-	CityRealtimeSchedulerEnabled bool
-	CyberSessionBlockEnabled     bool
-	CyberSessionBlockTTLSeconds  int
-	AffiliateEnabled             bool
-	AffiliateRebateRate          float64
-	AffiliateRebateFreezeHours   int
-	AffiliateRebateDurationDays  int
-	AffiliateRebatePerInviteeCap float64
-	AdminRechargeRebateEnabled   bool
-	DefaultUserRPMLimit          int
-	DefaultSubscriptions         []DefaultSubscriptionSetting
+	DefaultConcurrency                     int
+	DefaultBalance                         float64
+	RiskControlEnabled                     bool
+	CitySimulationEnabled                  bool
+	CityPixelRendererEnabled               bool
+	CityVisualPackPublishEnabled           bool
+	CityRealtimeSchedulerEnabled           bool
+	CityRealtimeAgentDecisionWorkerEnabled bool
+	CyberSessionBlockEnabled               bool
+	CyberSessionBlockTTLSeconds            int
+	AffiliateEnabled                       bool
+	AffiliateRebateRate                    float64
+	AffiliateRebateFreezeHours             int
+	AffiliateRebateDurationDays            int
+	AffiliateRebatePerInviteeCap           float64
+	AdminRechargeRebateEnabled             bool
+	DefaultUserRPMLimit                    int
+	DefaultSubscriptions                   []DefaultSubscriptionSetting
 
 	// Model fallback configuration
 	EnableModelFallback      bool   `json:"enable_model_fallback"`

@@ -212,6 +212,8 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyCityVisualPackPublishEnabled: "false",
 		// realtime 调度器（默认关闭；需要经验证的 Clock Authority 才会真正执行）
 		SettingKeyCityRealtimeSchedulerEnabled: "false",
+		// Agent 模型决策 worker（默认关闭；仅执行已封存 outbox，独立于 Clock Authority）
+		SettingKeyCityRealtimeAgentDecisionWorkerEnabled: "false",
 
 		// cyber 会话屏蔽（默认关闭，TTL 默认 3600s）
 		SettingKeyCyberSessionBlockEnabled:    "false",
@@ -795,6 +797,10 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	// realtime 调度器是城市模拟的受控子功能，默认关闭并由 worker 二次校验。
 	result.CityRealtimeSchedulerEnabled = result.CitySimulationEnabled &&
 		settings[SettingKeyCityRealtimeSchedulerEnabled] == "true"
+	// Agent 模型执行是城市模拟的独立、显式 opt-in 子功能。它不继承
+	// scheduler 开关，避免为了推进可信时间而意外开启外部模型调用。
+	result.CityRealtimeAgentDecisionWorkerEnabled = result.CitySimulationEnabled &&
+		settings[SettingKeyCityRealtimeAgentDecisionWorkerEnabled] == "true"
 
 	// cyber 会话屏蔽（默认关闭，TTL 默认 3600s）
 	result.CyberSessionBlockEnabled = settings[SettingKeyCyberSessionBlockEnabled] == "true"

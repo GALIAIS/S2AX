@@ -105,6 +105,8 @@ func TestCityRealtimeAgentDecisionEnvelopeRejectsUnscopedArguments(t *testing.T)
 
 func TestCityRealtimeCharacterActionPoliciesPreserveHistoricalCatalogues(t *testing.T) {
 	binding := cityRealtimeAgentTestBinding()
+	binding.PolicyVersion = cityRealtimeAgentCorePolicyVersionReview
+	binding.BindingHash = cityRealtimeAgentBindingHash(binding)
 	actorCode := "character.player.0123456789abcdef0123456789abcdef"
 	agent := cityRealtimeAgentInstance{
 		AgentCode:       "agent.user.0123456789abcdef0123456789abcdef",
@@ -126,6 +128,100 @@ func TestCityRealtimeCharacterActionPoliciesPreserveHistoricalCatalogues(t *test
 		cityRealtimeAgentIntentActionRole,
 		cityRealtimeAgentIntentActionSocial,
 	}, actions)
+
+	reportAdapters := binding
+	reportAdapters.PolicyVersion = cityRealtimeAgentCorePolicyVersionReport
+	reportAdapters.BindingHash = cityRealtimeAgentBindingHash(reportAdapters)
+	actions, available = cityRealtimeAgentDecisionAllowedActions(reportAdapters, agent)
+	require.True(t, available)
+	require.Equal(t, []string{
+		cityRealtimeAgentIntentActionWait,
+		cityRealtimeAgentIntentActionActivity,
+		cityRealtimeAgentIntentActionCase,
+		cityRealtimeAgentIntentActionCaseReport,
+		cityRealtimeAgentIntentActionCaseReview,
+		cityRealtimeAgentIntentActionMove,
+		cityRealtimeAgentIntentActionPortal,
+		cityRealtimeAgentIntentActionRole,
+		cityRealtimeAgentIntentActionSocial,
+	}, actions, "1.7.0 adds only the bounded case-report action")
+
+	intakeAdapters := reportAdapters
+	intakeAdapters.PolicyVersion = cityRealtimeAgentCorePolicyVersionIntake
+	intakeAdapters.BindingHash = cityRealtimeAgentBindingHash(intakeAdapters)
+	actions, available = cityRealtimeAgentDecisionAllowedActions(intakeAdapters, agent)
+	require.True(t, available)
+	require.Equal(t, []string{
+		cityRealtimeAgentIntentActionWait,
+		cityRealtimeAgentIntentActionActivity,
+		cityRealtimeAgentIntentActionCase,
+		cityRealtimeAgentIntentActionCaseReport,
+		cityRealtimeAgentIntentActionCaseReview,
+		cityRealtimeAgentIntentActionMove,
+		cityRealtimeAgentIntentActionPortal,
+		cityRealtimeAgentIntentActionRole,
+		cityRealtimeAgentIntentActionSocial,
+	}, actions, "1.8.0 preserves the 1.7.0 action catalogue exactly")
+
+	evidenceAdapters := intakeAdapters
+	evidenceAdapters.PolicyVersion = cityRealtimeAgentCorePolicyVersionEvidence
+	evidenceAdapters.BindingHash = cityRealtimeAgentBindingHash(evidenceAdapters)
+	actions, available = cityRealtimeAgentDecisionAllowedActions(evidenceAdapters, agent)
+	require.True(t, available)
+	require.Equal(t, []string{
+		cityRealtimeAgentIntentActionWait,
+		cityRealtimeAgentIntentActionActivity,
+		cityRealtimeAgentIntentActionCase,
+		cityRealtimeAgentIntentActionCaseReport,
+		cityRealtimeAgentIntentActionCaseReview,
+		cityRealtimeAgentIntentActionMove,
+		cityRealtimeAgentIntentActionPortal,
+		cityRealtimeAgentIntentActionRole,
+		cityRealtimeAgentIntentActionSocial,
+	}, actions, "1.9.0 preserves the 1.8.0 action catalogue exactly")
+	require.True(t, cityRealtimeAgentCharacterCaseEvidenceRuntimeEnabled(evidenceAdapters))
+	require.False(t, cityRealtimeAgentCharacterCaseEvidenceRuntimeEnabled(intakeAdapters))
+
+	assignmentAdapters := evidenceAdapters
+	assignmentAdapters.PolicyVersion = cityRealtimeAgentCorePolicyVersionEvidenceAssignment
+	assignmentAdapters.BindingHash = cityRealtimeAgentBindingHash(assignmentAdapters)
+	actions, available = cityRealtimeAgentDecisionAllowedActions(assignmentAdapters, agent)
+	require.True(t, available)
+	require.Equal(t, []string{
+		cityRealtimeAgentIntentActionWait,
+		cityRealtimeAgentIntentActionActivity,
+		cityRealtimeAgentIntentActionCase,
+		cityRealtimeAgentIntentActionCaseReport,
+		cityRealtimeAgentIntentActionCaseReview,
+		cityRealtimeAgentIntentActionMove,
+		cityRealtimeAgentIntentActionPortal,
+		cityRealtimeAgentIntentActionRole,
+		cityRealtimeAgentIntentActionSocial,
+	}, actions, "1.10.0 preserves the 1.9.0 action catalogue exactly")
+	require.True(t, cityRealtimeAgentCharacterCaseEvidenceRuntimeEnabled(assignmentAdapters))
+	require.True(t, cityRealtimeAgentCharacterCaseEvidenceAssignmentRuntimeEnabled(assignmentAdapters))
+	require.False(t, cityRealtimeAgentCharacterCaseEvidenceAssignmentRuntimeEnabled(evidenceAdapters))
+
+	procedureDispatchAdapters := assignmentAdapters
+	procedureDispatchAdapters.PolicyVersion = cityRealtimeAgentCorePolicyVersionProcedureDispatch
+	procedureDispatchAdapters.BindingHash = cityRealtimeAgentBindingHash(procedureDispatchAdapters)
+	actions, available = cityRealtimeAgentDecisionAllowedActions(procedureDispatchAdapters, agent)
+	require.True(t, available)
+	require.Equal(t, []string{
+		cityRealtimeAgentIntentActionWait,
+		cityRealtimeAgentIntentActionActivity,
+		cityRealtimeAgentIntentActionCase,
+		cityRealtimeAgentIntentActionCaseReport,
+		cityRealtimeAgentIntentActionCaseReview,
+		cityRealtimeAgentIntentActionMove,
+		cityRealtimeAgentIntentActionPortal,
+		cityRealtimeAgentIntentActionRole,
+		cityRealtimeAgentIntentActionSocial,
+	}, actions, "1.11.0 preserves the 1.10.0 action catalogue exactly")
+	require.True(t, cityRealtimeAgentCharacterCaseEvidenceRuntimeEnabled(procedureDispatchAdapters))
+	require.True(t, cityRealtimeAgentCharacterCaseEvidenceAssignmentRuntimeEnabled(procedureDispatchAdapters))
+	require.True(t, cityRealtimeAgentCharacterCaseProcedureDispatchRuntimeEnabled(procedureDispatchAdapters))
+	require.False(t, cityRealtimeAgentCharacterCaseProcedureDispatchRuntimeEnabled(assignmentAdapters))
 
 	socialAdapters := binding
 	socialAdapters.PolicyVersion = cityRealtimeAgentCorePolicyVersionSocial
@@ -189,6 +285,12 @@ func TestCityRealtimeCharacterActionPoliciesPreserveHistoricalCatalogues(t *test
 	require.True(t, cityRealtimeAgentPolicyVersionSupported(cityRealtimeAgentCorePolicyVersionActions))
 	require.True(t, cityRealtimeAgentPolicyVersionSupported(cityRealtimeAgentCorePolicyVersionCase))
 	require.True(t, cityRealtimeAgentPolicyVersionSupported(cityRealtimeAgentCorePolicyVersionSocial))
+	require.True(t, cityRealtimeAgentPolicyVersionSupported(cityRealtimeAgentCorePolicyVersionReview))
+	require.True(t, cityRealtimeAgentPolicyVersionSupported(cityRealtimeAgentCorePolicyVersionReport))
+	require.True(t, cityRealtimeAgentPolicyVersionSupported(cityRealtimeAgentCorePolicyVersionIntake))
+	require.True(t, cityRealtimeAgentPolicyVersionSupported(cityRealtimeAgentCorePolicyVersionEvidence))
+	require.True(t, cityRealtimeAgentPolicyVersionSupported(cityRealtimeAgentCorePolicyVersionEvidenceAssignment))
+	require.True(t, cityRealtimeAgentPolicyVersionSupported(cityRealtimeAgentCorePolicyVersionProcedureDispatch))
 	require.True(t, cityRealtimeAgentPolicyVersionSupported(cityRealtimeAgentCorePolicyVersion))
 	require.False(t, cityRealtimeAgentPolicyVersionSupported("9.9.0"))
 }
@@ -515,6 +617,8 @@ func TestCityRealtimeCharacterSocialActionMustUsePublishedTarget(t *testing.T) {
 
 func TestCityRealtimeCharacterCaseReviewMustUsePublishedAcknowledgement(t *testing.T) {
 	binding := cityRealtimeAgentTestBinding()
+	binding.PolicyVersion = cityRealtimeAgentCorePolicyVersionReview
+	binding.BindingHash = cityRealtimeAgentBindingHash(binding)
 	actorCode := "character.player.0123456789abcdef0123456789abcdef"
 	agent := cityRealtimeAgentInstance{
 		AgentCode:       "agent.user.0123456789abcdef0123456789abcdef",

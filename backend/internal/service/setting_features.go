@@ -123,6 +123,18 @@ func (s *SettingService) IsCityRealtimeSchedulerEnabled(ctx context.Context) boo
 	return err == nil && value == "true"
 }
 
+// IsCityRealtimeAgentDecisionWorkerEnabled reports whether the background
+// Agent-model dispatcher may consume already-sealed decision requests. It is
+// deliberately independent from the Clock Authority scheduler: deployments
+// may keep time advancement online while retaining all model execution closed.
+func (s *SettingService) IsCityRealtimeAgentDecisionWorkerEnabled(ctx context.Context) bool {
+	if s == nil || s.settingRepo == nil || !s.IsCitySimulationEnabled(ctx) {
+		return false
+	}
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyCityRealtimeAgentDecisionWorkerEnabled)
+	return err == nil && value == "true"
+}
+
 // IsAffiliateAdminRechargeEnabled reports whether admin balance
 // deposits should participate in the affiliate rebate program.
 func (s *SettingService) IsAffiliateAdminRechargeEnabled(ctx context.Context) bool {

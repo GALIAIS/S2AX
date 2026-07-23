@@ -185,6 +185,7 @@ export default {
     accountAllocations: '账号分配',
     citySimulation: '城市模拟',
     cityVisualPacks: '城市视觉包',
+    cityAgentRuntime: '城市 Agent 运行时',
     virtualCurrencies: '虚拟货币',
     virtualCurrencyIntegrations: '货币接入',
     accounts: '账号管理',

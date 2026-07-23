@@ -505,6 +505,13 @@ func (s *CityEconomyService) processRealtimeDueEventsWithClock(
 	actorPatrolCount := 0
 	characterMetabolismCount := 0
 	caseReviewClosureCount := 0
+	caseIntakeExpiryCount := 0
+	caseEvidenceExpiryCount := 0
+	caseEvidenceAssignmentSourceCloseCount := 0
+	caseProcedureDispatchSourceCloseCount := 0
+	characterTaskExpiryCount := 0
+	characterTrafficReservationCount := 0
+	characterNavigationPlanStepCount := 0
 	agentIntentAppliedCount := 0
 	agentIntentRejectedCount := 0
 	agentWakeupAppliedCount := 0
@@ -517,6 +524,51 @@ func (s *CityEconomyService) processRealtimeDueEventsWithClock(
 			events[index].SourceKind == cityRealtimeDueEventSourceKindSystem {
 			status = cityRealtimeDueEventStatusApplied
 			appliedCount++
+		} else if cityEngineSupportsRealtimeStaticWorldgen(world.simulationVersion) &&
+			events[index].EventType == cityRealtimeDueEventTypeCharacterTrafficReservation {
+			trafficApplied, trafficErr := applyCityRealtimeCharacterTrafficReservationDueEvent(
+				ctx, tx, worldID, frameSequence, events[index],
+			)
+			if trafficErr != nil {
+				return nil, trafficErr
+			}
+			if trafficApplied {
+				status = cityRealtimeDueEventStatusApplied
+				appliedCount++
+				characterTrafficReservationCount++
+			} else {
+				rejectedCount++
+			}
+		} else if cityEngineSupportsRealtimeStaticWorldgen(world.simulationVersion) &&
+			events[index].EventType == cityRealtimeDueEventTypeCharacterNavigationStep {
+			navigationApplied, navigationErr := applyCityRealtimeCharacterNavigationPlanStepDueEvent(
+				ctx, tx, worldID, frameSequence, events[index],
+			)
+			if navigationErr != nil {
+				return nil, navigationErr
+			}
+			if navigationApplied {
+				status = cityRealtimeDueEventStatusApplied
+				appliedCount++
+				characterNavigationPlanStepCount++
+			} else {
+				rejectedCount++
+			}
+		} else if cityEngineSupportsRealtimeStaticWorldgen(world.simulationVersion) &&
+			events[index].EventType == cityRealtimeDueEventTypeCharacterTaskExpire {
+			taskApplied, taskErr := applyCityRealtimeCharacterTaskExpiryDueEvent(
+				ctx, tx, worldID, frameSequence, events[index],
+			)
+			if taskErr != nil {
+				return nil, taskErr
+			}
+			if taskApplied {
+				status = cityRealtimeDueEventStatusApplied
+				appliedCount++
+				characterTaskExpiryCount++
+			} else {
+				rejectedCount++
+			}
 		} else if cityEngineSupportsRealtimeStaticWorldgen(world.simulationVersion) {
 			handled, applied, applyErr := applyCityRealtimeAgentDecisionWakeupDueEvent(
 				ctx, tx, worldID, frameSequence, events[index],
@@ -561,7 +613,7 @@ func (s *CityEconomyService) processRealtimeDueEventsWithClock(
 						appliedCount++
 						caseReviewClosureCount++
 					} else {
-						applied, applyErr = applyCityRealtimeCharacterMetabolismDueEvent(
+						applied, applyErr = applyCityRealtimeCharacterCaseIntakeExpiryDueEvent(
 							ctx, tx, worldID, frameSequence, events[index],
 						)
 						if applyErr != nil {
@@ -570,9 +622,10 @@ func (s *CityEconomyService) processRealtimeDueEventsWithClock(
 						if applied {
 							status = cityRealtimeDueEventStatusApplied
 							appliedCount++
-							characterMetabolismCount++
+							caseIntakeExpiryCount++
 						} else {
-							applied, applyErr = applyCityRealtimeActorPatrolDueEvent(
+							var assignmentSourceCloseCount, procedureDispatchSourceCloseCount int
+							applied, assignmentSourceCloseCount, procedureDispatchSourceCloseCount, applyErr = applyCityRealtimeCharacterCaseEvidenceExpiryDueEvent(
 								ctx, tx, worldID, frameSequence, events[index],
 							)
 							if applyErr != nil {
@@ -581,9 +634,36 @@ func (s *CityEconomyService) processRealtimeDueEventsWithClock(
 							if applied {
 								status = cityRealtimeDueEventStatusApplied
 								appliedCount++
-								actorPatrolCount++
+								caseEvidenceExpiryCount++
+								caseEvidenceAssignmentSourceCloseCount += assignmentSourceCloseCount
+								caseProcedureDispatchSourceCloseCount += procedureDispatchSourceCloseCount
 							} else {
-								rejectedCount++
+								applied, applyErr = applyCityRealtimeCharacterMetabolismDueEvent(
+
+									ctx, tx, worldID, frameSequence, events[index],
+								)
+								if applyErr != nil {
+									return nil, applyErr
+								}
+								if applied {
+									status = cityRealtimeDueEventStatusApplied
+									appliedCount++
+									characterMetabolismCount++
+								} else {
+									applied, applyErr = applyCityRealtimeActorPatrolDueEvent(
+										ctx, tx, worldID, frameSequence, events[index],
+									)
+									if applyErr != nil {
+										return nil, applyErr
+									}
+									if applied {
+										status = cityRealtimeDueEventStatusApplied
+										appliedCount++
+										actorPatrolCount++
+									} else {
+										rejectedCount++
+									}
+								}
 							}
 						}
 					}
@@ -673,20 +753,27 @@ WHERE world_id = $1 AND id = $2 AND status = 'pending'`,
 		StateHash:             stateHash,
 		DueEventDigest:        dueEventDigest,
 		PhaseSummary: map[string]any{
-			"schema_version":              1,
-			"frame_kind":                  frameKind,
-			"command_count":               0,
-			"due_event_count":             len(events),
-			"applied_count":               appliedCount,
-			"rejected_count":              rejectedCount,
-			"actor_patrol_count":          actorPatrolCount,
-			"character_metabolism_count":  characterMetabolismCount,
-			"case_review_closure_count":   caseReviewClosureCount,
-			"agent_intent_applied_count":  agentIntentAppliedCount,
-			"agent_intent_rejected_count": agentIntentRejectedCount,
-			"agent_wakeup_applied_count":  agentWakeupAppliedCount,
-			"agent_wakeup_rejected_count": agentWakeupRejectedCount,
-			"reason":                      resolvedReason,
+			"schema_version":                              1,
+			"frame_kind":                                  frameKind,
+			"command_count":                               0,
+			"due_event_count":                             len(events),
+			"applied_count":                               appliedCount,
+			"rejected_count":                              rejectedCount,
+			"actor_patrol_count":                          actorPatrolCount,
+			"character_metabolism_count":                  characterMetabolismCount,
+			"case_review_closure_count":                   caseReviewClosureCount,
+			"case_intake_expiry_count":                    caseIntakeExpiryCount,
+			"case_evidence_expiry_count":                  caseEvidenceExpiryCount,
+			"case_evidence_assignment_source_close_count": caseEvidenceAssignmentSourceCloseCount,
+			"case_procedure_dispatch_source_close_count":  caseProcedureDispatchSourceCloseCount,
+			"character_task_expiry_count":                 characterTaskExpiryCount,
+			"character_traffic_reservation_count":         characterTrafficReservationCount,
+			"character_navigation_plan_step_count":        characterNavigationPlanStepCount,
+			"agent_intent_applied_count":                  agentIntentAppliedCount,
+			"agent_intent_rejected_count":                 agentIntentRejectedCount,
+			"agent_wakeup_applied_count":                  agentWakeupAppliedCount,
+			"agent_wakeup_rejected_count":                 agentWakeupRejectedCount,
+			"reason":                                      resolvedReason,
 		},
 	})
 	if err != nil {

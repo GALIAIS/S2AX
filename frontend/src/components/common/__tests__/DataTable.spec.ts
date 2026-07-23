@@ -83,6 +83,26 @@ describe('DataTable', () => {
     expect(nameHeader.findAll('svg')[1].classes()).toContain('text-primary-600')
   })
 
+  it('uses constrained cards instead of a horizontal table on a compact viewport', async () => {
+    stubMobileMatchMedia()
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [{ key: 'name', label: 'Name' }],
+        data: [{ id: 1, name: 'A deliberately long account label that must wrap on phones' }]
+      }
+    })
+
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('table').exists()).toBe(false)
+    const card = wrapper.find('.overflow-hidden')
+    expect(card.exists()).toBe(true)
+    expect(card.classes()).toContain('min-w-0')
+    const mobileValues = wrapper.findAll('.break-words')
+    expect(mobileValues).toHaveLength(2)
+    expect(mobileValues[1].text()).toContain('A deliberately long account label')
+  })
+
   it('keeps an empty result stable while a later refresh is in flight', async () => {
     const wrapper = mount(DataTable, {
       props: {

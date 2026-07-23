@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/cityspatial"
 )
 
 const (
@@ -48,21 +50,45 @@ const (
 	cityRealtimeAgentIntentActionWait       = "agent.wait"
 	cityRealtimeAgentIntentActionActivity   = "character.activity.perform"
 	cityRealtimeAgentIntentActionCase       = "character.case.acknowledge"
+	cityRealtimeAgentIntentActionCaseReport = "character.case.report.file"
 	cityRealtimeAgentIntentActionCaseReview = "character.case.review.file"
 	cityRealtimeAgentIntentActionMove       = "character.move"
 	cityRealtimeAgentIntentActionPortal     = "character.portal.traverse"
 	cityRealtimeAgentIntentActionRole       = "character.role.change"
 	cityRealtimeAgentIntentActionSocial     = "character.social.greet"
+	cityRealtimeAgentIntentActionTask       = "character.task.accept"
+	cityRealtimeAgentIntentActionNavigation = "character.navigation.plan"
 
 	cityRealtimeDueEventTypeAgentIntent         = "system.realtime.agent_intent"
 	cityRealtimeDueEventTypeAgentDecisionWakeup = "system.realtime.agent_wakeup"
 
-	cityRealtimeAgentDecisionLeaseDuration    = 30 * time.Second
-	cityRealtimeAgentDecisionObservationTTLUS = int64(15 * 60 * cityRealtimeTimeQuantumUS)
-	cityRealtimeAgentDecisionMaximumAttempts  = 3
+	cityRealtimeAgentDecisionLeaseDuration       = 30 * time.Second
+	cityRealtimeAgentDecisionLeaseFinalizerGrace = 15 * time.Second
+	cityRealtimeAgentDecisionObservationTTLUS    = int64(15 * 60 * cityRealtimeTimeQuantumUS)
+	cityRealtimeAgentDecisionMaximumAttempts     = 3
 )
 
-var errCityRealtimeAgentDecisionLeaseBudgetExhausted = errors.New("realtime agent decision lease budget exhausted")
+var (
+	errCityRealtimeAgentDecisionLeaseBudgetExhausted = errors.New("realtime agent decision lease budget exhausted")
+	errCityRealtimeAgentDecisionRetryNotBefore       = errors.New("realtime agent decision retry is not due")
+)
+
+// cityRealtimeAgentDecisionLeaseDurationForProfile keeps a provider worker
+// lease alive for the complete immutable profile timeout plus a bounded
+// finalizer window. Without this, a valid long-running provider call could be
+// leased by a second worker before the first worker has a chance to seal its
+// result. Legacy/fake requests intentionally retain the short base lease.
+func cityRealtimeAgentDecisionLeaseDurationForProfile(profile *CityRealtimeAgentModelProfile) time.Duration {
+	duration := cityRealtimeAgentDecisionLeaseDuration
+	if profile == nil || profile.TimeoutMS <= 0 {
+		return duration
+	}
+	candidate := time.Duration(profile.TimeoutMS)*time.Millisecond + cityRealtimeAgentDecisionLeaseFinalizerGrace
+	if candidate > duration {
+		return candidate
+	}
+	return duration
+}
 
 // cityRealtimeAgentDecisionHashState deliberately holds only unresolved work
 // that can still influence a future Temporal Frame. Provider leases, timing,
@@ -119,24 +145,35 @@ type cityRealtimeAgentDecisionRequestRecord struct {
 	ObservationCode        string
 	ObservationHash        string
 	PreconditionHash       string
+	ModelProfileCode       *string
+	ModelProfileVersion    *int
+	ModelProfileHash       *string
+	ModelBudgetHash        *string
 	ObservedFrameSequence  int64
 	ExpiresAtWorldTimeUS   int64
 	Status                 string
 	AttemptCount           int
 	LeaseOwner             *string
 	LeaseExpiresAt         *time.Time
+	RetryNotBefore         *time.Time
 	RequestedFrameSequence int64
 	TerminalFrameSequence  *int64
 }
 
 type cityRealtimeAgentDecisionAttemptRecord struct {
-	AttemptCode   string
-	RequestCode   string
-	AttemptNumber int
-	ProviderCode  string
-	Status        string
-	RequestHash   string
-	ResponseHash  *string
+	AttemptCode          string
+	RequestCode          string
+	AttemptNumber        int
+	ProviderCode         string
+	Status               string
+	RequestHash          string
+	ResponseHash         *string
+	ModelProfileCode     *string
+	ModelProfileVersion  *int
+	ModelProfileHash     *string
+	ModelBudgetHash      *string
+	ReservedInputTokens  *int
+	ReservedOutputTokens *int
 }
 
 type cityRealtimeAgentDecisionRecord struct {
@@ -192,9 +229,33 @@ type CityRealtimeAgentDecisionRequestResult struct {
 	Frame           *CityTemporalFrame `json:"frame,omitempty"`
 }
 
-// CityRealtimeAgentFakeDecisionRunInput drives the deterministic A2 provider.
-// It exists to exercise exactly the same request/attempt/decision/intent path
-// without provider credentials, a network call, or a model-dependent outcome.
+// CityRealtimeAgentDecisionRunInput is the worker-only request for one
+// provider-backed decision. The selected provider always comes from the
+// immutable request snapshot; callers cannot select a model, route, account or
+// action here. There is intentionally no HTTP route for this operation.
+type CityRealtimeAgentDecisionRunInput struct {
+	WorldID     int64
+	RequestCode string
+	WorkerID    string
+}
+
+// CityRealtimeAgentDecisionRunResult is a safe worker result. ErrorCode is a
+// closed, provider-boundary classification only; provider text and raw output
+// are never persisted or exposed. RetryNotBefore is advisory scheduling data
+// outside the canonical world state.
+type CityRealtimeAgentDecisionRunResult struct {
+	RequestCode    string             `json:"request_code"`
+	DecisionCode   string             `json:"decision_code,omitempty"`
+	IntentCode     string             `json:"intent_code,omitempty"`
+	Status         string             `json:"status"`
+	ErrorCode      string             `json:"error_code,omitempty"`
+	RetryNotBefore *time.Time         `json:"retry_not_before,omitempty"`
+	Frame          *CityTemporalFrame `json:"frame,omitempty"`
+}
+
+// CityRealtimeAgentFakeDecisionRunInput drives the deterministic built-in
+// provider. It exists for existing admin/test workflows and remains a narrow
+// wrapper around the generic provider worker below.
 type CityRealtimeAgentFakeDecisionRunInput struct {
 	WorldID     int64
 	RequestCode string
@@ -205,13 +266,9 @@ type CityRealtimeAgentFakeDecisionRunInput struct {
 	PreferredAction string
 }
 
-type CityRealtimeAgentFakeDecisionRunResult struct {
-	RequestCode  string             `json:"request_code"`
-	DecisionCode string             `json:"decision_code,omitempty"`
-	IntentCode   string             `json:"intent_code,omitempty"`
-	Status       string             `json:"status"`
-	Frame        *CityTemporalFrame `json:"frame,omitempty"`
-}
+// Kept as an alias so existing deterministic test/admin callers retain their
+// compile-time API while sharing the generic provider result contract.
+type CityRealtimeAgentFakeDecisionRunResult = CityRealtimeAgentDecisionRunResult
 
 type cityRealtimeAgentDecisionEnvelope struct {
 	SchemaVersion    string                          `json:"schema_version"`
@@ -253,7 +310,14 @@ func cityRealtimeAgentPolicyVersionSupported(version string) bool {
 		cityRealtimeAgentCorePolicyVersionActions,
 		cityRealtimeAgentCorePolicyVersionCase,
 		cityRealtimeAgentCorePolicyVersionSocial,
-		cityRealtimeAgentCorePolicyVersion:
+		cityRealtimeAgentCorePolicyVersionReview,
+		cityRealtimeAgentCorePolicyVersionReport,
+		cityRealtimeAgentCorePolicyVersionIntake,
+		cityRealtimeAgentCorePolicyVersionEvidence,
+		cityRealtimeAgentCorePolicyVersionEvidenceAssignment,
+		cityRealtimeAgentCorePolicyVersionProcedureDispatch,
+		cityRealtimeAgentCorePolicyVersionTask,
+		cityRealtimeAgentCorePolicyVersionNavigationPlan:
 		return true
 	default:
 		return false
@@ -267,7 +331,14 @@ func cityRealtimeAgentDecisionRuntimeEnabled(binding cityRealtimeAgentPolicyBind
 			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionActions ||
 			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionCase ||
 			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionSocial ||
-			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReview)
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReview ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReport ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionIntake ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionEvidence ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionEvidenceAssignment ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionProcedureDispatch ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionTask ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionNavigationPlan)
 }
 
 // cityRealtimeAgentCharacterControlRuntimeEnabled is intentionally pinned to
@@ -280,7 +351,14 @@ func cityRealtimeAgentCharacterControlRuntimeEnabled(binding cityRealtimeAgentPo
 			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionActions ||
 			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionCase ||
 			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionSocial ||
-			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReview)
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReview ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReport ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionIntake ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionEvidence ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionEvidenceAssignment ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionProcedureDispatch ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionTask ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionNavigationPlan)
 }
 
 // cityRealtimeAgentCharacterActionRuntimeEnabled is deliberately limited to
@@ -291,7 +369,14 @@ func cityRealtimeAgentCharacterActionRuntimeEnabled(binding cityRealtimeAgentPol
 		(binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionActions ||
 			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionCase ||
 			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionSocial ||
-			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReview)
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReview ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReport ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionIntake ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionEvidence ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionEvidenceAssignment ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionProcedureDispatch ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionTask ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionNavigationPlan)
 }
 
 // cityRealtimeAgentCharacterCaseRuntimeEnabled is available to the 1.4 Case
@@ -301,22 +386,112 @@ func cityRealtimeAgentCharacterCaseRuntimeEnabled(binding cityRealtimeAgentPolic
 	return binding.PolicyID == cityRealtimeAgentCorePolicyID &&
 		(binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionCase ||
 			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionSocial ||
-			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReview)
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReview ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReport ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionIntake ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionEvidence ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionEvidenceAssignment ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionProcedureDispatch ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionTask ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionNavigationPlan)
 }
 
 func cityRealtimeAgentCharacterSocialRuntimeEnabled(binding cityRealtimeAgentPolicyBinding) bool {
 	return binding.PolicyID == cityRealtimeAgentCorePolicyID &&
 		(binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionSocial ||
-			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReview)
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReview ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReport ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionIntake ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionEvidence ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionEvidenceAssignment ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionProcedureDispatch ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionTask ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionNavigationPlan)
 }
 
 // cityRealtimeAgentCharacterCaseReviewRuntimeEnabled is deliberately pinned
-// to 1.6.0. A review is an owner-scoped procedural receipt for an already
-// acknowledged Law Case; historical policies never gain that new action or
-// its state shape after an executable upgrade.
+// to policy versions that explicitly retain the 1.6.0 review contract. A
+// review is an owner-scoped procedural receipt for an already acknowledged
+// Law Case; historical policies never gain that action or state shape after an
+// executable upgrade.
 func cityRealtimeAgentCharacterCaseReviewRuntimeEnabled(binding cityRealtimeAgentPolicyBinding) bool {
 	return binding.PolicyID == cityRealtimeAgentCorePolicyID &&
-		binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReview
+		(binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReview ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReport ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionIntake ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionEvidence ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionEvidenceAssignment ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionProcedureDispatch ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionTask ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionNavigationPlan)
+}
+
+// cityRealtimeAgentCharacterCaseReportRuntimeEnabled is pinned to policies
+// that retain the 1.7 receipt contract. Policy 1.8 adds a separate server
+// work item after that receipt; it does not widen the model action surface.
+func cityRealtimeAgentCharacterCaseReportRuntimeEnabled(binding cityRealtimeAgentPolicyBinding) bool {
+	return binding.PolicyID == cityRealtimeAgentCorePolicyID &&
+		(binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReport ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionIntake ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionEvidence ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionEvidenceAssignment ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionProcedureDispatch ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionTask ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionNavigationPlan)
+}
+
+// cityRealtimeAgentCharacterCaseIntakeRuntimeEnabled is pinned to policies
+// that explicitly retain the 1.8 work-item contract. Historical 1.7 receipts
+// remain immutable facts with no workflow state.
+func cityRealtimeAgentCharacterCaseIntakeRuntimeEnabled(binding cityRealtimeAgentPolicyBinding) bool {
+	return binding.PolicyID == cityRealtimeAgentCorePolicyID &&
+		(binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionIntake ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionEvidence ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionEvidenceAssignment ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionProcedureDispatch ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionTask ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionNavigationPlan)
+}
+
+// cityRealtimeAgentCharacterCaseEvidenceRuntimeEnabled is limited to policies
+// that retain the sealed-law source. It does not add an Agent action or
+// reinterpret any report.
+func cityRealtimeAgentCharacterCaseEvidenceRuntimeEnabled(binding cityRealtimeAgentPolicyBinding) bool {
+	return binding.PolicyID == cityRealtimeAgentCorePolicyID &&
+		(binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionEvidence ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionEvidenceAssignment ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionProcedureDispatch ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionTask ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionNavigationPlan)
+}
+
+// cityRealtimeAgentCharacterCaseEvidenceAssignmentRuntimeEnabled is limited
+// to 1.10 and newer. A report, model, or browser cannot choose the source.
+func cityRealtimeAgentCharacterCaseEvidenceAssignmentRuntimeEnabled(binding cityRealtimeAgentPolicyBinding) bool {
+	return binding.PolicyID == cityRealtimeAgentCorePolicyID &&
+		(binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionEvidenceAssignment ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionProcedureDispatch ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionTask ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionNavigationPlan)
+}
+
+// cityRealtimeAgentCharacterCaseProcedureDispatchRuntimeEnabled retains the
+// 1.11 adapter in explicit later policies. It does not add an Agent action,
+// reviewer, adjudication, or asset path.
+func cityRealtimeAgentCharacterCaseProcedureDispatchRuntimeEnabled(binding cityRealtimeAgentPolicyBinding) bool {
+	return binding.PolicyID == cityRealtimeAgentCorePolicyID &&
+		(binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionProcedureDispatch ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionTask ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionNavigationPlan)
+}
+
+// cityRealtimeAgentCharacterTaskRuntimeEnabled preserves the 1.12 task
+// contract in later explicit policies. Earlier worlds never receive task
+// candidates or a task-completion state shape.
+func cityRealtimeAgentCharacterTaskRuntimeEnabled(binding cityRealtimeAgentPolicyBinding) bool {
+	return binding.PolicyID == cityRealtimeAgentCorePolicyID &&
+		(binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionTask ||
+			binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionNavigationPlan)
 }
 
 func validateCityRealtimeAgentDecisionHashState(
@@ -578,6 +753,88 @@ func cityRealtimeAgentDecisionAllowedActions(
 				cityRealtimeAgentIntentActionPortal,
 				cityRealtimeAgentIntentActionRole,
 				cityRealtimeAgentIntentActionSocial,
+			}, true
+		default:
+			return nil, false
+		}
+	}
+	if binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReport ||
+		binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionIntake ||
+		binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionEvidence ||
+		binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionEvidenceAssignment ||
+		binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionProcedureDispatch {
+		switch agent.AgentSubtype {
+		case "system.root", "system.npc_manager":
+			return []string{cityRealtimeAgentIntentActionWait}, agent.ControlMode == "system"
+		case "character.npc":
+			return []string{cityRealtimeAgentIntentActionWait}, agent.ControlMode == "autonomous"
+		case "character.user":
+			if agent.ControlMode != "autonomous" {
+				return nil, false
+			}
+			return []string{
+				cityRealtimeAgentIntentActionWait,
+				cityRealtimeAgentIntentActionActivity,
+				cityRealtimeAgentIntentActionCase,
+				cityRealtimeAgentIntentActionCaseReport,
+				cityRealtimeAgentIntentActionCaseReview,
+				cityRealtimeAgentIntentActionMove,
+				cityRealtimeAgentIntentActionPortal,
+				cityRealtimeAgentIntentActionRole,
+				cityRealtimeAgentIntentActionSocial,
+			}, true
+		default:
+			return nil, false
+		}
+	}
+	if binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionTask {
+		switch agent.AgentSubtype {
+		case "system.root", "system.npc_manager":
+			return []string{cityRealtimeAgentIntentActionWait}, agent.ControlMode == "system"
+		case "character.npc":
+			return []string{cityRealtimeAgentIntentActionWait}, agent.ControlMode == "autonomous"
+		case "character.user":
+			if agent.ControlMode != "autonomous" {
+				return nil, false
+			}
+			return []string{
+				cityRealtimeAgentIntentActionWait,
+				cityRealtimeAgentIntentActionActivity,
+				cityRealtimeAgentIntentActionCase,
+				cityRealtimeAgentIntentActionCaseReport,
+				cityRealtimeAgentIntentActionCaseReview,
+				cityRealtimeAgentIntentActionMove,
+				cityRealtimeAgentIntentActionPortal,
+				cityRealtimeAgentIntentActionRole,
+				cityRealtimeAgentIntentActionSocial,
+				cityRealtimeAgentIntentActionTask,
+			}, true
+		default:
+			return nil, false
+		}
+	}
+	if binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionNavigationPlan {
+		switch agent.AgentSubtype {
+		case "system.root", "system.npc_manager":
+			return []string{cityRealtimeAgentIntentActionWait}, agent.ControlMode == "system"
+		case "character.npc":
+			return []string{cityRealtimeAgentIntentActionWait}, agent.ControlMode == "autonomous"
+		case "character.user":
+			if agent.ControlMode != "autonomous" {
+				return nil, false
+			}
+			return []string{
+				cityRealtimeAgentIntentActionWait,
+				cityRealtimeAgentIntentActionActivity,
+				cityRealtimeAgentIntentActionCase,
+				cityRealtimeAgentIntentActionCaseReport,
+				cityRealtimeAgentIntentActionCaseReview,
+				cityRealtimeAgentIntentActionMove,
+				cityRealtimeAgentIntentActionNavigation,
+				cityRealtimeAgentIntentActionPortal,
+				cityRealtimeAgentIntentActionRole,
+				cityRealtimeAgentIntentActionSocial,
+				cityRealtimeAgentIntentActionTask,
 			}, true
 		default:
 			return nil, false
@@ -943,7 +1200,9 @@ func loadCityRealtimeAgentDecisionRequest(
 SELECT request_code, agent_code, observation_code, observation_hash,
        precondition_hash, observed_frame_sequence, expires_at_world_time_us,
        status, attempt_count, lease_owner, lease_expires_at,
-       requested_frame_sequence, terminal_frame_sequence
+       retry_not_before,
+       requested_frame_sequence, terminal_frame_sequence,
+       model_profile_code, model_profile_version, model_profile_hash, model_budget_hash
 FROM city_realtime_agent_decision_requests
 WHERE world_id = $1 AND request_code = $2`
 	if forUpdate {
@@ -951,13 +1210,16 @@ WHERE world_id = $1 AND request_code = $2`
 	}
 	item := cityRealtimeAgentDecisionRequestRecord{}
 	var leaseOwner sql.NullString
-	var leaseExpiresAt sql.NullTime
+	var leaseExpiresAt, retryNotBefore sql.NullTime
 	var terminalFrameSequence sql.NullInt64
+	var modelProfileCode, modelProfileHash, modelBudgetHash sql.NullString
+	var modelProfileVersion sql.NullInt64
 	err := queryer.QueryRowContext(ctx, query, worldID, requestCode).Scan(
 		&item.RequestCode, &item.AgentCode, &item.ObservationCode, &item.ObservationHash,
 		&item.PreconditionHash, &item.ObservedFrameSequence, &item.ExpiresAtWorldTimeUS,
-		&item.Status, &item.AttemptCount, &leaseOwner, &leaseExpiresAt,
+		&item.Status, &item.AttemptCount, &leaseOwner, &leaseExpiresAt, &retryNotBefore,
 		&item.RequestedFrameSequence, &terminalFrameSequence,
+		&modelProfileCode, &modelProfileVersion, &modelProfileHash, &modelBudgetHash,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return cityRealtimeAgentDecisionRequestRecord{}, false, nil
@@ -970,12 +1232,82 @@ WHERE world_id = $1 AND request_code = $2`
 		value := leaseExpiresAt.Time.UTC().Truncate(time.Microsecond)
 		item.LeaseExpiresAt = &value
 	}
+	item.RetryNotBefore = cityRealtimeAgentNullTimePointer(retryNotBefore)
 	item.TerminalFrameSequence = nullInt64Pointer(terminalFrameSequence)
+	item.ModelProfileCode = cityRealtimeAgentNullStringPointer(modelProfileCode)
+	item.ModelProfileVersion = cityRealtimeAgentNullIntPointer(modelProfileVersion)
+	item.ModelProfileHash = cityRealtimeAgentNullStringPointer(modelProfileHash)
+	item.ModelBudgetHash = cityRealtimeAgentNullStringPointer(modelBudgetHash)
 	if !cityRealtimeAgentDecisionRequestRecordValid(item) {
 		return cityRealtimeAgentDecisionRequestRecord{}, false,
 			ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "realtime_agent_decision_request"})
 	}
 	return item, true, nil
+}
+
+func cityRealtimeAgentNullIntPointer(value sql.NullInt64) *int {
+	if !value.Valid || value.Int64 < int64(-int(^uint(0)>>1)-1) || value.Int64 > int64(int(^uint(0)>>1)) {
+		return nil
+	}
+	result := int(value.Int64)
+	return &result
+}
+
+func cityRealtimeAgentDecisionModelSnapshotValid(
+	profileCode *string,
+	profileVersion *int,
+	profileHash *string,
+	budgetHash *string,
+) bool {
+	if profileCode == nil && profileVersion == nil && profileHash == nil && budgetHash == nil {
+		return true
+	}
+	return profileCode != nil && profileVersion != nil && profileHash != nil && budgetHash != nil &&
+		cityRealtimeAgentModelProfileCodeValid(*profileCode) && *profileVersion > 0 &&
+		cityRealtimeSHA256Hex(*profileHash) && cityRealtimeSHA256Hex(*budgetHash)
+}
+
+// cityRealtimeAgentDecisionExecutionProfile resolves the immutable tuple that
+// was captured when the request was queued. It intentionally does not inspect
+// the mutable profile head: disabling a profile blocks new requests at enqueue
+// time, while already queued work remains reproducible against its snapshot.
+func cityRealtimeAgentDecisionExecutionProfile(
+	ctx context.Context,
+	queryer citySQLQueryer,
+	request cityRealtimeAgentDecisionRequestRecord,
+) (*CityRealtimeAgentModelProfile, error) {
+	if !cityRealtimeAgentDecisionModelSnapshotValid(
+		request.ModelProfileCode, request.ModelProfileVersion, request.ModelProfileHash, request.ModelBudgetHash,
+	) {
+		return nil, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "realtime_agent_decision_model_snapshot"})
+	}
+	if request.ModelProfileCode == nil {
+		return nil, nil
+	}
+	profile, found, err := loadCityRealtimeAgentModelProfileVersion(
+		ctx, queryer, *request.ModelProfileCode, *request.ModelProfileVersion,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if !found || profile.ProfileHash != *request.ModelProfileHash || profile.BudgetHash != *request.ModelBudgetHash {
+		return nil, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "realtime_agent_decision_model_profile"})
+	}
+	return profile, nil
+}
+
+func cityRealtimeAgentDecisionProviderCode(profile *CityRealtimeAgentModelProfile) string {
+	if profile == nil {
+		return cityRealtimeAgentFakeProviderCode
+	}
+	return profile.ProviderCode
+}
+
+func cityRealtimeAgentDecisionMaximumAttemptsForProfile(profile *CityRealtimeAgentModelProfile) int {
+	if profile == nil {
+		return cityRealtimeAgentDecisionMaximumAttempts
+	}
+	return profile.RetryLimit + 1
 }
 
 func loadCityRealtimeAgentDecisionRequestForTrigger(
@@ -1022,17 +1354,21 @@ func cityRealtimeAgentDecisionRequestRecordValid(item cityRealtimeAgentDecisionR
 		!cityRealtimeSHA256Hex(item.ObservationHash) ||
 		!cityRealtimeSHA256Hex(item.PreconditionHash) ||
 		item.ObservedFrameSequence <= 0 || item.ExpiresAtWorldTimeUS < 0 ||
-		item.RequestedFrameSequence <= 0 || item.AttemptCount < 0 {
+		item.RequestedFrameSequence <= 0 || item.AttemptCount < 0 ||
+		!cityRealtimeAgentDecisionModelSnapshotValid(
+			item.ModelProfileCode, item.ModelProfileVersion, item.ModelProfileHash, item.ModelBudgetHash,
+		) {
 		return false
 	}
 	if cityRealtimeAgentDecisionRequestStatusActive(item.Status) {
 		if item.Status == cityRealtimeAgentDecisionRequestQueued {
-			return item.LeaseOwner == nil && item.LeaseExpiresAt == nil && item.TerminalFrameSequence == nil
+			return item.LeaseOwner == nil && item.LeaseExpiresAt == nil && item.TerminalFrameSequence == nil &&
+				(item.RetryNotBefore == nil || !item.RetryNotBefore.IsZero())
 		}
-		return item.LeaseOwner != nil && item.LeaseExpiresAt != nil && item.TerminalFrameSequence == nil
+		return item.LeaseOwner != nil && item.LeaseExpiresAt != nil && item.RetryNotBefore == nil && item.TerminalFrameSequence == nil
 	}
 	return cityRealtimeAgentDecisionRequestStatusTerminal(item.Status) && item.LeaseOwner == nil &&
-		item.LeaseExpiresAt == nil && item.TerminalFrameSequence != nil &&
+		item.LeaseExpiresAt == nil && item.RetryNotBefore == nil && item.TerminalFrameSequence != nil &&
 		*item.TerminalFrameSequence > item.RequestedFrameSequence
 }
 
@@ -1145,11 +1481,15 @@ func insertCityRealtimeAgentDecisionRequest(
 INSERT INTO city_realtime_agent_decision_requests
     (world_id, request_code, agent_code, observation_code, observation_hash,
      precondition_hash, observed_frame_sequence, expires_at_world_time_us,
-     status, attempt_count, requested_frame_sequence, metadata)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued', 0, $9, '{}'::jsonb)`,
+     status, attempt_count, requested_frame_sequence,
+     model_profile_code, model_profile_version, model_profile_hash, model_budget_hash,
+     metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued', 0, $9,
+        $10, $11, $12, $13, '{}'::jsonb)`,
 		worldID, request.RequestCode, request.AgentCode, request.ObservationCode,
 		request.ObservationHash, request.PreconditionHash, request.ObservedFrameSequence,
 		request.ExpiresAtWorldTimeUS, request.RequestedFrameSequence,
+		request.ModelProfileCode, request.ModelProfileVersion, request.ModelProfileHash, request.ModelBudgetHash,
 	); err != nil {
 		return fmt.Errorf("insert realtime agent decision request: %w", err)
 	}
@@ -1221,6 +1561,10 @@ func enqueueCityRealtimeAgentDecisionInFrame(
 	if err != nil {
 		return nil, false, err
 	}
+	executionProfile, err := cityRealtimeAgentModelProfileForAgent(ctx, tx, worldID, agent)
+	if err != nil {
+		return nil, false, err
+	}
 	requestCode, err := cityRealtimeAgentDecisionStableCode(
 		"adr", binding.BindingHash, agent.AgentCode, snapshot.ObservationCode, triggerKey,
 	)
@@ -1253,6 +1597,16 @@ func enqueueCityRealtimeAgentDecisionInFrame(
 		ObservedFrameSequence: frameSequence, ExpiresAtWorldTimeUS: snapshot.ExpiresAtWorldTimeUS,
 		Status: cityRealtimeAgentDecisionRequestQueued, AttemptCount: 0,
 		RequestedFrameSequence: frameSequence,
+	}
+	if executionProfile != nil {
+		profileCode := executionProfile.Code
+		profileVersion := executionProfile.Version
+		profileHash := executionProfile.ProfileHash
+		budgetHash := executionProfile.BudgetHash
+		request.ModelProfileCode = &profileCode
+		request.ModelProfileVersion = &profileVersion
+		request.ModelProfileHash = &profileHash
+		request.ModelBudgetHash = &budgetHash
 	}
 	if err = insertCityRealtimeAgentDecisionRequest(ctx, tx, worldID, request); err != nil {
 		return nil, false, err
@@ -1371,17 +1725,33 @@ func insertCityRealtimeAgentDecisionAttempt(
 ) error {
 	if tx == nil || worldID <= 0 || !cityRealtimeAgentIdentifierValid(attempt.AttemptCode, 96) ||
 		!cityRealtimeAgentIdentifierValid(attempt.RequestCode, 96) || attempt.AttemptNumber <= 0 ||
-		attempt.ProviderCode != cityRealtimeAgentFakeProviderCode ||
-		attempt.Status != cityRealtimeAgentDecisionAttemptStarted || !cityRealtimeSHA256Hex(attempt.RequestHash) {
+		!cityRealtimeAgentIdentifierValid(attempt.ProviderCode, 64) ||
+		attempt.Status != cityRealtimeAgentDecisionAttemptStarted || !cityRealtimeSHA256Hex(attempt.RequestHash) ||
+		!cityRealtimeAgentDecisionModelSnapshotValid(
+			attempt.ModelProfileCode, attempt.ModelProfileVersion, attempt.ModelProfileHash, attempt.ModelBudgetHash,
+		) {
+		return ErrCityInvalidInput
+	}
+	if attempt.ModelProfileCode == nil {
+		if attempt.ProviderCode != cityRealtimeAgentFakeProviderCode || attempt.ReservedInputTokens != nil || attempt.ReservedOutputTokens != nil {
+			return ErrCityInvalidInput
+		}
+	} else if attempt.ReservedInputTokens == nil || attempt.ReservedOutputTokens == nil ||
+		*attempt.ReservedInputTokens <= 0 || *attempt.ReservedOutputTokens <= 0 {
 		return ErrCityInvalidInput
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO city_realtime_agent_decision_attempts
     (world_id, attempt_code, request_code, attempt_number, provider_code,
-     status, request_hash, metadata)
-VALUES ($1, $2, $3, $4, $5, 'started', $6, '{}'::jsonb)`,
+     status, request_hash,
+     model_profile_code, model_profile_version, model_profile_hash, model_budget_hash,
+     reserved_input_tokens, reserved_output_tokens, metadata)
+VALUES ($1, $2, $3, $4, $5, 'started', $6,
+        $7, $8, $9, $10, $11, $12, '{}'::jsonb)`,
 		worldID, attempt.AttemptCode, attempt.RequestCode, attempt.AttemptNumber,
 		attempt.ProviderCode, attempt.RequestHash,
+		attempt.ModelProfileCode, attempt.ModelProfileVersion, attempt.ModelProfileHash, attempt.ModelBudgetHash,
+		attempt.ReservedInputTokens, attempt.ReservedOutputTokens,
 	); err != nil {
 		return fmt.Errorf("insert realtime agent decision attempt: %w", err)
 	}
@@ -1425,14 +1795,20 @@ func loadCityRealtimeAgentDecisionAttemptForUpdate(
 	}
 	item := cityRealtimeAgentDecisionAttemptRecord{}
 	var responseHash sql.NullString
+	var modelProfileCode, modelProfileHash, modelBudgetHash sql.NullString
+	var modelProfileVersion, reservedInputTokens, reservedOutputTokens sql.NullInt64
 	err := tx.QueryRowContext(ctx, `
 SELECT attempt_code, request_code, attempt_number, provider_code, status,
-       request_hash, response_hash
+       request_hash, response_hash,
+       model_profile_code, model_profile_version, model_profile_hash, model_budget_hash,
+       reserved_input_tokens, reserved_output_tokens
 FROM city_realtime_agent_decision_attempts
 WHERE world_id = $1 AND request_code = $2 AND attempt_number = $3
 FOR UPDATE`, worldID, requestCode, attemptNumber).Scan(
 		&item.AttemptCode, &item.RequestCode, &item.AttemptNumber, &item.ProviderCode,
 		&item.Status, &item.RequestHash, &responseHash,
+		&modelProfileCode, &modelProfileVersion, &modelProfileHash, &modelBudgetHash,
+		&reservedInputTokens, &reservedOutputTokens,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return cityRealtimeAgentDecisionAttemptRecord{}, false, nil
@@ -1441,13 +1817,35 @@ FOR UPDATE`, worldID, requestCode, attemptNumber).Scan(
 		return cityRealtimeAgentDecisionAttemptRecord{}, false, fmt.Errorf("load realtime agent decision attempt: %w", err)
 	}
 	item.ResponseHash = cityRealtimeAgentNullStringPointer(responseHash)
-	if !cityRealtimeAgentIdentifierValid(item.AttemptCode, 96) || item.RequestCode != requestCode ||
-		item.AttemptNumber != attemptNumber || item.ProviderCode != cityRealtimeAgentFakeProviderCode ||
-		(item.Status != cityRealtimeAgentDecisionAttemptStarted && item.Status != cityRealtimeAgentDecisionAttemptSucceeded && item.Status != cityRealtimeAgentDecisionAttemptFailed) ||
-		!cityRealtimeSHA256Hex(item.RequestHash) || (item.ResponseHash != nil && !cityRealtimeSHA256Hex(*item.ResponseHash)) {
+	item.ModelProfileCode = cityRealtimeAgentNullStringPointer(modelProfileCode)
+	item.ModelProfileVersion = cityRealtimeAgentNullIntPointer(modelProfileVersion)
+	item.ModelProfileHash = cityRealtimeAgentNullStringPointer(modelProfileHash)
+	item.ModelBudgetHash = cityRealtimeAgentNullStringPointer(modelBudgetHash)
+	item.ReservedInputTokens = cityRealtimeAgentNullIntPointer(reservedInputTokens)
+	item.ReservedOutputTokens = cityRealtimeAgentNullIntPointer(reservedOutputTokens)
+	if !cityRealtimeAgentDecisionAttemptRecordValid(item) || item.RequestCode != requestCode || item.AttemptNumber != attemptNumber {
 		return cityRealtimeAgentDecisionAttemptRecord{}, false, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "realtime_agent_decision_attempt"})
 	}
 	return item, true, nil
+}
+
+func cityRealtimeAgentDecisionAttemptRecordValid(item cityRealtimeAgentDecisionAttemptRecord) bool {
+	if !cityRealtimeAgentIdentifierValid(item.AttemptCode, 96) ||
+		!cityRealtimeAgentIdentifierValid(item.RequestCode, 96) || item.AttemptNumber <= 0 ||
+		!cityRealtimeAgentIdentifierValid(item.ProviderCode, 64) ||
+		(item.Status != cityRealtimeAgentDecisionAttemptStarted && item.Status != cityRealtimeAgentDecisionAttemptSucceeded && item.Status != cityRealtimeAgentDecisionAttemptFailed) ||
+		!cityRealtimeSHA256Hex(item.RequestHash) || (item.ResponseHash != nil && !cityRealtimeSHA256Hex(*item.ResponseHash)) ||
+		!cityRealtimeAgentDecisionModelSnapshotValid(
+			item.ModelProfileCode, item.ModelProfileVersion, item.ModelProfileHash, item.ModelBudgetHash,
+		) {
+		return false
+	}
+	if item.ModelProfileCode == nil {
+		return item.ProviderCode == cityRealtimeAgentFakeProviderCode &&
+			item.ReservedInputTokens == nil && item.ReservedOutputTokens == nil
+	}
+	return item.ReservedInputTokens != nil && item.ReservedOutputTokens != nil &&
+		*item.ReservedInputTokens > 0 && *item.ReservedOutputTokens > 0
 }
 
 func updateCityRealtimeAgentDecisionAttemptFailed(
@@ -1482,8 +1880,17 @@ func updateCityRealtimeAgentDecisionRequestLease(
 	worldID int64,
 	requestCode string,
 	workerID string,
+	expectedProviderCode string,
 	now time.Time,
 ) (cityRealtimeAgentDecisionRequestRecord, cityRealtimeAgentObservationRecord, cityRealtimeAgentDecisionAttemptRecord, error) {
+	if tx == nil || worldID <= 0 || !cityRealtimeAgentIdentifierValid(requestCode, 96) ||
+		!cityRealtimeAgentIdentifierValid(workerID, 64) || !cityRealtimeAgentIdentifierValid(expectedProviderCode, 64) {
+		return cityRealtimeAgentDecisionRequestRecord{}, cityRealtimeAgentObservationRecord{}, cityRealtimeAgentDecisionAttemptRecord{}, ErrCityInvalidInput
+	}
+	now = now.UTC().Truncate(time.Microsecond)
+	if now.IsZero() {
+		return cityRealtimeAgentDecisionRequestRecord{}, cityRealtimeAgentObservationRecord{}, cityRealtimeAgentDecisionAttemptRecord{}, ErrCityInvalidInput
+	}
 	request, found, err := loadCityRealtimeAgentDecisionRequest(ctx, tx, worldID, requestCode, true)
 	if err != nil {
 		return cityRealtimeAgentDecisionRequestRecord{}, cityRealtimeAgentObservationRecord{}, cityRealtimeAgentDecisionAttemptRecord{}, err
@@ -1491,19 +1898,58 @@ func updateCityRealtimeAgentDecisionRequestLease(
 	if !found {
 		return cityRealtimeAgentDecisionRequestRecord{}, cityRealtimeAgentObservationRecord{}, cityRealtimeAgentDecisionAttemptRecord{}, ErrCityRealtimeAgentDecisionNotFound
 	}
+	if cityRealtimeAgentDecisionRequestStatusTerminal(request.Status) {
+		return request, cityRealtimeAgentObservationRecord{}, cityRealtimeAgentDecisionAttemptRecord{}, nil
+	}
+	quarantined, err := cityRealtimeAgentDecisionQuarantined(ctx, tx, worldID, requestCode, true)
+	if err != nil {
+		return cityRealtimeAgentDecisionRequestRecord{}, cityRealtimeAgentObservationRecord{}, cityRealtimeAgentDecisionAttemptRecord{}, err
+	}
+	if quarantined {
+		return cityRealtimeAgentDecisionRequestRecord{}, cityRealtimeAgentObservationRecord{}, cityRealtimeAgentDecisionAttemptRecord{},
+			ErrCityRealtimeAgentDecisionQuarantined
+	}
+	if request.Status == cityRealtimeAgentDecisionRequestQueued && request.RetryNotBefore != nil && request.RetryNotBefore.After(now) {
+		return request, cityRealtimeAgentObservationRecord{}, cityRealtimeAgentDecisionAttemptRecord{}, errCityRealtimeAgentDecisionRetryNotBefore
+	}
+	executionProfile, err := cityRealtimeAgentDecisionExecutionProfile(ctx, tx, request)
+	if err != nil {
+		return cityRealtimeAgentDecisionRequestRecord{}, cityRealtimeAgentObservationRecord{}, cityRealtimeAgentDecisionAttemptRecord{}, err
+	}
+	providerCode := cityRealtimeAgentDecisionProviderCode(executionProfile)
+	if providerCode != expectedProviderCode {
+		return cityRealtimeAgentDecisionRequestRecord{}, cityRealtimeAgentObservationRecord{}, cityRealtimeAgentDecisionAttemptRecord{},
+			ErrCityRealtimeAgentProviderUnavailable.WithMetadata(map[string]string{"provider_code": providerCode})
+	}
+	maximumAttempts := cityRealtimeAgentDecisionMaximumAttemptsForProfile(executionProfile)
 	if request.Status == cityRealtimeAgentDecisionRequestLeased && request.LeaseExpiresAt != nil && !request.LeaseExpiresAt.After(now) {
 		if err = enableCityRealtimeAgentDecisionWorkerGate(ctx, tx, worldID, requestCode); err != nil {
 			return cityRealtimeAgentDecisionRequestRecord{}, cityRealtimeAgentObservationRecord{}, cityRealtimeAgentDecisionAttemptRecord{}, err
 		}
+		expiredAttempt, attemptFound, attemptErr := loadCityRealtimeAgentDecisionAttemptForUpdate(
+			ctx, tx, worldID, requestCode, request.AttemptCount,
+		)
+		if attemptErr != nil {
+			return cityRealtimeAgentDecisionRequestRecord{}, cityRealtimeAgentObservationRecord{}, cityRealtimeAgentDecisionAttemptRecord{}, attemptErr
+		}
+		if !attemptFound || expiredAttempt.Status != cityRealtimeAgentDecisionAttemptStarted {
+			return cityRealtimeAgentDecisionRequestRecord{}, cityRealtimeAgentObservationRecord{}, cityRealtimeAgentDecisionAttemptRecord{},
+				ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "realtime_agent_expired_attempt"})
+		}
+		if err = updateCityRealtimeAgentDecisionAttemptFailed(ctx, tx, worldID, expiredAttempt.AttemptCode, "lease_expired"); err != nil {
+			return cityRealtimeAgentDecisionRequestRecord{}, cityRealtimeAgentObservationRecord{}, cityRealtimeAgentDecisionAttemptRecord{}, err
+		}
 		if _, err = tx.ExecContext(ctx, `
 UPDATE city_realtime_agent_decision_requests
-SET status = 'queued', lease_owner = NULL, lease_expires_at = NULL, updated_at = NOW()
+SET status = 'queued', lease_owner = NULL, lease_expires_at = NULL,
+    retry_not_before = NULL, updated_at = NOW()
 WHERE world_id = $1 AND request_code = $2 AND status = 'leased'`, worldID, requestCode); err != nil {
 			return cityRealtimeAgentDecisionRequestRecord{}, cityRealtimeAgentObservationRecord{}, cityRealtimeAgentDecisionAttemptRecord{}, fmt.Errorf("requeue expired realtime agent decision lease: %w", err)
 		}
 		request.Status = cityRealtimeAgentDecisionRequestQueued
 		request.LeaseOwner = nil
 		request.LeaseExpiresAt = nil
+		request.RetryNotBefore = nil
 		outboxResult, outboxErr := tx.ExecContext(ctx, `
 UPDATE city_realtime_agent_outbox
 SET status = 'queued', lease_owner = NULL, lease_expires_at = NULL, updated_at = NOW()
@@ -1519,13 +1965,10 @@ WHERE world_id = $1 AND request_code = $2 AND status = 'leased'
 		}
 	}
 	if request.Status != cityRealtimeAgentDecisionRequestQueued {
-		if cityRealtimeAgentDecisionRequestStatusTerminal(request.Status) {
-			return request, cityRealtimeAgentObservationRecord{}, cityRealtimeAgentDecisionAttemptRecord{}, nil
-		}
 		return cityRealtimeAgentDecisionRequestRecord{}, cityRealtimeAgentObservationRecord{}, cityRealtimeAgentDecisionAttemptRecord{},
 			ErrCityRealtimeAgentDecisionConflict.WithMetadata(map[string]string{"field": "request_lease"})
 	}
-	if request.AttemptCount >= cityRealtimeAgentDecisionMaximumAttempts {
+	if request.AttemptCount >= maximumAttempts {
 		return cityRealtimeAgentDecisionRequestRecord{}, cityRealtimeAgentObservationRecord{}, cityRealtimeAgentDecisionAttemptRecord{},
 			errCityRealtimeAgentDecisionLeaseBudgetExhausted
 	}
@@ -1538,15 +1981,20 @@ WHERE world_id = $1 AND request_code = $2 AND status = 'leased'
 		return cityRealtimeAgentDecisionRequestRecord{}, cityRealtimeAgentObservationRecord{}, cityRealtimeAgentDecisionAttemptRecord{},
 			ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "realtime_agent_request_observation"})
 	}
-	if err = enableCityRealtimeAgentDecisionWorkerGate(ctx, tx, worldID, requestCode); err != nil {
+	if err = enableCityRealtimeAgentModelBudgetWorkerGate(ctx, tx, worldID, requestCode); err != nil {
 		return cityRealtimeAgentDecisionRequestRecord{}, cityRealtimeAgentObservationRecord{}, cityRealtimeAgentDecisionAttemptRecord{}, err
 	}
+	if executionProfile != nil {
+		if err = acquireCityRealtimeAgentModelCircuitBreaker(ctx, tx, executionProfile, requestCode, now); err != nil {
+			return cityRealtimeAgentDecisionRequestRecord{}, cityRealtimeAgentObservationRecord{}, cityRealtimeAgentDecisionAttemptRecord{}, err
+		}
+	}
 	nextAttempt := request.AttemptCount + 1
-	leaseExpiry := now.Add(cityRealtimeAgentDecisionLeaseDuration).UTC().Truncate(time.Microsecond)
+	leaseExpiry := now.Add(cityRealtimeAgentDecisionLeaseDurationForProfile(executionProfile)).UTC().Truncate(time.Microsecond)
 	result, err := tx.ExecContext(ctx, `
 UPDATE city_realtime_agent_decision_requests
 SET status = 'leased', attempt_count = $4, lease_owner = $5,
-    lease_expires_at = $6, updated_at = NOW()
+    lease_expires_at = $6, retry_not_before = NULL, updated_at = NOW()
 WHERE world_id = $1 AND request_code = $2 AND status = 'queued' AND attempt_count = $3`,
 		worldID, requestCode, request.AttemptCount, nextAttempt, workerID, leaseExpiry,
 	)
@@ -1564,8 +2012,14 @@ WHERE world_id = $1 AND request_code = $2 AND status = 'queued' AND attempt_coun
 		"request_code":      requestCode,
 		"observation_hash":  observation.PayloadHash,
 		"precondition_hash": observation.PreconditionHash,
-		"provider_code":     cityRealtimeAgentFakeProviderCode,
+		"provider_code":     providerCode,
 		"attempt_number":    nextAttempt,
+	}
+	if executionProfile != nil {
+		requestHashPayload["model_profile_code"] = executionProfile.Code
+		requestHashPayload["model_profile_version"] = executionProfile.Version
+		requestHashPayload["model_profile_hash"] = executionProfile.ProfileHash
+		requestHashPayload["model_budget_hash"] = executionProfile.BudgetHash
 	}
 	_, requestHash, err := cityRealtimeCanonicalJSONObject(requestHashPayload)
 	if err != nil {
@@ -1577,11 +2031,32 @@ WHERE world_id = $1 AND request_code = $2 AND status = 'queued' AND attempt_coun
 	}
 	attempt := cityRealtimeAgentDecisionAttemptRecord{
 		AttemptCode: attemptCode, RequestCode: requestCode, AttemptNumber: nextAttempt,
-		ProviderCode: cityRealtimeAgentFakeProviderCode, Status: cityRealtimeAgentDecisionAttemptStarted,
+		ProviderCode: providerCode, Status: cityRealtimeAgentDecisionAttemptStarted,
 		RequestHash: requestHash,
+	}
+	if executionProfile != nil {
+		profileCode := executionProfile.Code
+		profileVersion := executionProfile.Version
+		profileHash := executionProfile.ProfileHash
+		budgetHash := executionProfile.BudgetHash
+		reservedInputTokens := executionProfile.MaxInputTokens
+		reservedOutputTokens := executionProfile.MaxOutputTokens
+		attempt.ModelProfileCode = &profileCode
+		attempt.ModelProfileVersion = &profileVersion
+		attempt.ModelProfileHash = &profileHash
+		attempt.ModelBudgetHash = &budgetHash
+		attempt.ReservedInputTokens = &reservedInputTokens
+		attempt.ReservedOutputTokens = &reservedOutputTokens
 	}
 	if err = insertCityRealtimeAgentDecisionAttempt(ctx, tx, worldID, attempt); err != nil {
 		return cityRealtimeAgentDecisionRequestRecord{}, cityRealtimeAgentObservationRecord{}, cityRealtimeAgentDecisionAttemptRecord{}, err
+	}
+	if executionProfile != nil {
+		if err = reserveCityRealtimeAgentModelAttemptBudget(
+			ctx, tx, worldID, request, attempt, executionProfile, now,
+		); err != nil {
+			return cityRealtimeAgentDecisionRequestRecord{}, cityRealtimeAgentObservationRecord{}, cityRealtimeAgentDecisionAttemptRecord{}, err
+		}
 	}
 	outboxResult, outboxErr := tx.ExecContext(ctx, `
 UPDATE city_realtime_agent_outbox
@@ -1601,6 +2076,7 @@ WHERE world_id = $1 AND request_code = $2 AND status = 'queued'`,
 	request.Status = cityRealtimeAgentDecisionRequestLeased
 	request.LeaseOwner = &workerID
 	request.LeaseExpiresAt = &leaseExpiry
+	request.RetryNotBefore = nil
 	return request, observation, attempt, nil
 }
 
@@ -1662,6 +2138,18 @@ func cityRealtimeAgentFakeDecisionEnvelope(
 				sort.Strings(codes)
 				return map[string]any{"activity_code": codes[0]}, "fake_provider_activity", true
 			}
+		case cityRealtimeAgentIntentActionTask:
+			if snapshot.Character.ActionContext != nil {
+				for _, candidate := range []string{"task.civic.shift", "task.civic.cleanup"} {
+					if cityRealtimeAgentActionContextContains(snapshot.Character.ActionContext.AvailableTaskCodes, candidate) {
+						return map[string]any{"task_code": candidate}, "fake_provider_task", true
+					}
+				}
+			}
+		case cityRealtimeAgentIntentActionNavigation:
+			if snapshot.Character.ActionContext != nil && len(snapshot.Character.ActionContext.AvailableNavigationDestinationPortalCodes) > 0 {
+				return map[string]any{"destination_portal_code": snapshot.Character.ActionContext.AvailableNavigationDestinationPortalCodes[0]}, "fake_provider_navigation", true
+			}
 		case cityRealtimeAgentIntentActionCase:
 			if snapshot.Character.ActionContext != nil && len(snapshot.Character.ActionContext.AvailableCaseCodes) > 0 {
 				return map[string]any{"case_code": snapshot.Character.ActionContext.AvailableCaseCodes[0]}, "fake_provider_case", true
@@ -1669,6 +2157,10 @@ func cityRealtimeAgentFakeDecisionEnvelope(
 		case cityRealtimeAgentIntentActionCaseReview:
 			if snapshot.Character.ActionContext != nil && len(snapshot.Character.ActionContext.AvailableCaseReviewCodes) > 0 {
 				return map[string]any{"case_code": snapshot.Character.ActionContext.AvailableCaseReviewCodes[0]}, "fake_provider_case_review", true
+			}
+		case cityRealtimeAgentIntentActionCaseReport:
+			if snapshot.Character.ActionContext != nil && len(snapshot.Character.ActionContext.AvailableSocialTargets) > 0 {
+				return map[string]any{"target_actor_code": snapshot.Character.ActionContext.AvailableSocialTargets[0]}, "fake_provider_case_report", true
 			}
 		case cityRealtimeAgentIntentActionSocial:
 			if snapshot.Character.ActionContext != nil && len(snapshot.Character.ActionContext.AvailableSocialTargets) > 0 {
@@ -1707,6 +2199,7 @@ func cityRealtimeAgentFakeDecisionEnvelope(
 		cityRealtimeAgentIntentActionSocial,
 		cityRealtimeAgentIntentActionActivity,
 		cityRealtimeAgentIntentActionPortal,
+		cityRealtimeAgentIntentActionNavigation,
 		cityRealtimeAgentIntentActionRole,
 		cityRealtimeAgentIntentActionMove,
 		cityRealtimeAgentIntentActionWait,
@@ -1747,8 +2240,11 @@ func cityRealtimeAgentFakePreferredActionValid(actionCode string) bool {
 		cityRealtimeAgentIntentActionWait,
 		cityRealtimeAgentIntentActionActivity,
 		cityRealtimeAgentIntentActionCase,
+		cityRealtimeAgentIntentActionCaseReport,
 		cityRealtimeAgentIntentActionCaseReview,
 		cityRealtimeAgentIntentActionSocial,
+		cityRealtimeAgentIntentActionTask,
+		cityRealtimeAgentIntentActionNavigation,
 		cityRealtimeAgentIntentActionMove,
 		cityRealtimeAgentIntentActionPortal,
 		cityRealtimeAgentIntentActionRole:
@@ -1807,6 +2303,20 @@ func validateCityRealtimeAgentDecisionEnvelope(
 		if _, err := cityRealtimeAgentDecisionActivityCodeFromArguments(envelope.Intent.Arguments); err != nil {
 			return nil, "", err
 		}
+	case cityRealtimeAgentIntentActionTask:
+		if !cityRealtimeAgentCharacterTaskRuntimeEnabled(binding) || agent.AgentSubtype != "character.user" || agent.ActorCode == nil {
+			return nil, "", ErrCityRealtimeAgentDecisionUnavailable.WithMetadata(map[string]string{"field": "action_arguments"})
+		}
+		if _, err := cityRealtimeAgentDecisionTaskCodeFromArguments(envelope.Intent.Arguments); err != nil {
+			return nil, "", err
+		}
+	case cityRealtimeAgentIntentActionNavigation:
+		if !cityRealtimeCharacterNavigationPlanRuntimeEnabled(binding) || agent.AgentSubtype != "character.user" || agent.ActorCode == nil {
+			return nil, "", ErrCityRealtimeAgentDecisionUnavailable.WithMetadata(map[string]string{"field": "action_arguments"})
+		}
+		if _, err := cityRealtimeAgentDecisionNavigationPortalCodeFromArguments(envelope.Intent.Arguments); err != nil {
+			return nil, "", err
+		}
 	case cityRealtimeAgentIntentActionCase:
 		if !cityRealtimeAgentCharacterCaseRuntimeEnabled(binding) || agent.AgentSubtype != "character.user" || agent.ActorCode == nil {
 			return nil, "", ErrCityRealtimeAgentDecisionUnavailable.WithMetadata(map[string]string{"field": "action_arguments"})
@@ -1819,6 +2329,13 @@ func validateCityRealtimeAgentDecisionEnvelope(
 			return nil, "", ErrCityRealtimeAgentDecisionUnavailable.WithMetadata(map[string]string{"field": "action_arguments"})
 		}
 		if _, err := cityRealtimeAgentDecisionCaseReviewCodeFromArguments(envelope.Intent.Arguments); err != nil {
+			return nil, "", err
+		}
+	case cityRealtimeAgentIntentActionCaseReport:
+		if !cityRealtimeAgentCharacterCaseReportRuntimeEnabled(binding) || agent.AgentSubtype != "character.user" || agent.ActorCode == nil {
+			return nil, "", ErrCityRealtimeAgentDecisionUnavailable.WithMetadata(map[string]string{"field": "action_arguments"})
+		}
+		if _, err := cityRealtimeAgentDecisionCaseReportTargetCodeFromArguments(envelope.Intent.Arguments); err != nil {
 			return nil, "", err
 		}
 	case cityRealtimeAgentIntentActionSocial:
@@ -1989,7 +2506,7 @@ func updateCityRealtimeAgentDecisionRequestTerminal(
 	result, err := tx.ExecContext(ctx, `
 UPDATE city_realtime_agent_decision_requests
 SET status = $3, lease_owner = NULL, lease_expires_at = NULL,
-    terminal_frame_sequence = $4, updated_at = NOW()
+    retry_not_before = NULL, terminal_frame_sequence = $4, updated_at = NOW()
 WHERE world_id = $1 AND request_code = $2 AND status = 'leased'`,
 		worldID, requestCode, status, frameSequence,
 	)
@@ -2027,6 +2544,68 @@ WHERE world_id = $1 AND request_code = $2 AND status = 'leased'`, worldID, reque
 		return fmt.Errorf("check realtime agent decision outbox completion: %w", rowsErr)
 	} else if rows != 1 {
 		return ErrCityRealtimeAgentDecisionConflict.WithMetadata(map[string]string{"field": "outbox_terminal"})
+	}
+	return nil
+}
+
+// requeueCityRealtimeAgentDecisionAfterProviderFailure releases a completed
+// failed attempt back to the durable queue with a bounded retry deadline. It
+// does not seal a world frame: the request remains unresolved canonical work,
+// while retry scheduling is external-I/O operational state. The database guard
+// verifies that the current leased attempt is already failed before allowing
+// this immediate release.
+func requeueCityRealtimeAgentDecisionAfterProviderFailure(
+	ctx context.Context,
+	tx *sql.Tx,
+	worldID int64,
+	requestCode string,
+	retryNotBefore time.Time,
+) error {
+	if tx == nil || worldID <= 0 || !cityRealtimeAgentIdentifierValid(requestCode, 96) || retryNotBefore.IsZero() {
+		return ErrCityInvalidInput
+	}
+	retryNotBefore = retryNotBefore.UTC().Truncate(time.Microsecond)
+	if !retryNotBefore.After(time.Now().UTC()) {
+		return ErrCityInvalidInput
+	}
+	result, err := tx.ExecContext(ctx, `
+UPDATE city_realtime_agent_decision_requests
+SET status = 'queued', lease_owner = NULL, lease_expires_at = NULL,
+    retry_not_before = $3, updated_at = NOW()
+WHERE world_id = $1 AND request_code = $2 AND status = 'leased'`,
+		worldID, requestCode, retryNotBefore,
+	)
+	if err != nil {
+		return fmt.Errorf("requeue realtime agent decision after provider failure: %w", err)
+	}
+	if rows, rowsErr := result.RowsAffected(); rowsErr != nil {
+		return fmt.Errorf("check realtime agent decision provider retry requeue: %w", rowsErr)
+	} else if rows != 1 {
+		return ErrCityRealtimeAgentDecisionConflict.WithMetadata(map[string]string{"field": "request_provider_retry"})
+	}
+	return nil
+}
+
+func requeueCityRealtimeAgentDecisionOutboxAfterProviderFailure(
+	ctx context.Context,
+	tx *sql.Tx,
+	worldID int64,
+	requestCode string,
+) error {
+	if tx == nil || worldID <= 0 || !cityRealtimeAgentIdentifierValid(requestCode, 96) {
+		return ErrCityInvalidInput
+	}
+	result, err := tx.ExecContext(ctx, `
+UPDATE city_realtime_agent_outbox
+SET status = 'queued', lease_owner = NULL, lease_expires_at = NULL, updated_at = NOW()
+WHERE world_id = $1 AND request_code = $2 AND status = 'leased'`, worldID, requestCode)
+	if err != nil {
+		return fmt.Errorf("requeue realtime agent decision outbox after provider failure: %w", err)
+	}
+	if rows, rowsErr := result.RowsAffected(); rowsErr != nil {
+		return fmt.Errorf("check realtime agent decision outbox provider retry requeue: %w", rowsErr)
+	} else if rows != 1 {
+		return ErrCityRealtimeAgentDecisionConflict.WithMetadata(map[string]string{"field": "outbox_provider_retry"})
 	}
 	return nil
 }
@@ -2153,14 +2732,14 @@ func cityRealtimeAgentDecisionTerminalStatusForPrecondition(
 	return cityRealtimeAgentDecisionRequestAccepted, reasonCode, nil
 }
 
-func (s *CityEconomyService) finalizeRealtimeAgentFakeDecision(
+func (s *CityEconomyService) finalizeRealtimeAgentDecision(
 	ctx context.Context,
 	worldID int64,
 	workerID string,
 	requestCode string,
 	attempt cityRealtimeAgentDecisionAttemptRecord,
 	envelope cityRealtimeAgentDecisionEnvelope,
-) (*CityRealtimeAgentFakeDecisionRunResult, error) {
+) (*CityRealtimeAgentDecisionRunResult, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin realtime agent decision finalize transaction: %w", err)
@@ -2195,6 +2774,10 @@ func (s *CityEconomyService) finalizeRealtimeAgentFakeDecision(
 	}
 	if request.LeaseExpiresAt == nil || !request.LeaseExpiresAt.After(time.Now().UTC()) {
 		return nil, ErrCityRealtimeAgentDecisionConflict.WithMetadata(map[string]string{"field": "request_lease_expired"})
+	}
+	executionProfile, err := cityRealtimeAgentDecisionExecutionProfile(ctx, tx, request)
+	if err != nil {
+		return nil, err
 	}
 	agentState, err := loadCityRealtimeAgentHashState(ctx, tx, worldID)
 	if err != nil {
@@ -2238,7 +2821,7 @@ func (s *CityEconomyService) finalizeRealtimeAgentFakeDecision(
 	if err = enableCityRealtimeCharacterMutationGates(ctx, tx, worldID, frameSequence, true); err != nil {
 		return nil, err
 	}
-	if err = enableCityRealtimeAgentDecisionWorkerGate(ctx, tx, worldID, requestCode); err != nil {
+	if err = enableCityRealtimeAgentModelBudgetWorkerGate(ctx, tx, worldID, requestCode); err != nil {
 		return nil, err
 	}
 	responseRaw, responseHash, err := cityRealtimeCanonicalJSONObject(map[string]any{
@@ -2258,6 +2841,11 @@ func (s *CityEconomyService) finalizeRealtimeAgentFakeDecision(
 	_ = responseRaw // The hash is retained; the raw fake response is intentionally not persisted.
 	if err = updateCityRealtimeAgentDecisionAttemptSucceeded(ctx, tx, worldID, attempt.AttemptCode, responseHash); err != nil {
 		return nil, err
+	}
+	if executionProfile != nil {
+		if err = closeCityRealtimeAgentModelCircuitBreaker(ctx, tx, executionProfile, time.Now().UTC()); err != nil {
+			return nil, err
+		}
 	}
 	requestStatus, reasonCode, err := cityRealtimeAgentDecisionTerminalStatusForPrecondition(
 		ctx, tx, worldID, state, *agentState.Binding, agent, request,
@@ -2339,7 +2927,7 @@ func (s *CityEconomyService) finalizeRealtimeAgentFakeDecision(
 	if err = updateCityRealtimeAgentDecisionOutboxTerminal(ctx, tx, worldID, requestCode, cityRealtimeAgentOutboxSucceeded); err != nil {
 		return nil, err
 	}
-	result := &CityRealtimeAgentFakeDecisionRunResult{
+	result := &CityRealtimeAgentDecisionRunResult{
 		RequestCode: requestCode, DecisionCode: decisionCode, Status: requestStatus,
 	}
 	if intent != nil {
@@ -2372,7 +2960,7 @@ func (s *CityEconomyService) finalizeRealtimeAgentDecisionLeaseBudget(
 	ctx context.Context,
 	worldID int64,
 	requestCode string,
-) (*CityRealtimeAgentFakeDecisionRunResult, error) {
+) (*CityRealtimeAgentDecisionRunResult, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin realtime agent decision lease-budget transaction: %w", err)
@@ -2402,9 +2990,14 @@ func (s *CityEconomyService) finalizeRealtimeAgentDecisionLeaseBudget(
 	if !found {
 		return nil, ErrCityRealtimeAgentDecisionNotFound
 	}
+	executionProfile, err := cityRealtimeAgentDecisionExecutionProfile(ctx, tx, request)
+	if err != nil {
+		return nil, err
+	}
+	maximumAttempts := cityRealtimeAgentDecisionMaximumAttemptsForProfile(executionProfile)
 	now := time.Now().UTC()
 	if request.Status != cityRealtimeAgentDecisionRequestLeased || request.LeaseExpiresAt == nil ||
-		request.LeaseExpiresAt.After(now) || request.AttemptCount < cityRealtimeAgentDecisionMaximumAttempts {
+		request.LeaseExpiresAt.After(now) || request.AttemptCount < maximumAttempts {
 		return nil, ErrCityRealtimeAgentDecisionConflict.WithMetadata(map[string]string{"field": "request_lease_budget"})
 	}
 	attempt, found, err := loadCityRealtimeAgentDecisionAttemptForUpdate(
@@ -2439,7 +3032,7 @@ func (s *CityEconomyService) finalizeRealtimeAgentDecisionLeaseBudget(
 	); err != nil {
 		return nil, err
 	}
-	result := &CityRealtimeAgentFakeDecisionRunResult{
+	result := &CityRealtimeAgentDecisionRunResult{
 		RequestCode: requestCode,
 		Status:      cityRealtimeAgentDecisionRequestFailed,
 	}
@@ -2459,59 +3052,386 @@ func (s *CityEconomyService) finalizeRealtimeAgentDecisionLeaseBudget(
 	return result, nil
 }
 
-// RunRealtimeAgentFakeDecision consumes exactly one request through the same
-// durable worker boundary future model routes will use. It deliberately has no
-// implicit loop or HTTP route: administrators/tests invoke it explicitly while
-// A2 validates causality, idempotency, and failure isolation.
-func (s *CityEconomyService) RunRealtimeAgentFakeDecision(
-	ctx context.Context,
-	input CityRealtimeAgentFakeDecisionRunInput,
-) (*CityRealtimeAgentFakeDecisionRunResult, error) {
-	requestCode := strings.TrimSpace(input.RequestCode)
-	workerID := strings.TrimSpace(input.WorkerID)
-	preferredAction := strings.TrimSpace(input.PreferredAction)
-	if !IsCitySystemAdministrator(ctx) {
-		return nil, ErrCityManagementRequired
+const (
+	cityRealtimeAgentDecisionProviderInitialRetryDelay = 5 * time.Second
+	cityRealtimeAgentDecisionProviderMaximumRetryDelay = 2 * time.Minute
+	cityRealtimeAgentDecisionProviderFinalizerTimeout  = 15 * time.Second
+)
+
+type cityRealtimeAgentDecisionProviderResolution struct {
+	request  cityRealtimeAgentDecisionRequestRecord
+	profile  *CityRealtimeAgentModelProfile
+	provider CityRealtimeAgentDecisionProvider
+}
+
+type cityRealtimeAgentDecisionRunOptions struct {
+	expectedProviderCode string
+	fakePreferredAction  string
+}
+
+func cityRealtimeAgentDecisionProviderRetryDelay(attemptNumber int) time.Duration {
+	if attemptNumber <= 1 {
+		return cityRealtimeAgentDecisionProviderInitialRetryDelay
 	}
-	if input.WorldID <= 0 || !cityRealtimeAgentIdentifierValid(requestCode, 96) ||
-		!cityRealtimeAgentIdentifierValid(workerID, 64) || !cityRealtimeAgentFakePreferredActionValid(preferredAction) {
+	delay := cityRealtimeAgentDecisionProviderInitialRetryDelay
+	for index := 1; index < attemptNumber && delay < cityRealtimeAgentDecisionProviderMaximumRetryDelay; index++ {
+		if delay > cityRealtimeAgentDecisionProviderMaximumRetryDelay/2 {
+			return cityRealtimeAgentDecisionProviderMaximumRetryDelay
+		}
+		delay *= 2
+	}
+	if delay > cityRealtimeAgentDecisionProviderMaximumRetryDelay {
+		return cityRealtimeAgentDecisionProviderMaximumRetryDelay
+	}
+	return delay
+}
+
+func cityRealtimeAgentDecisionProviderTimeout(profile *CityRealtimeAgentModelProfile) time.Duration {
+	if profile == nil || profile.TimeoutMS <= 0 {
+		return cityRealtimeAgentDecisionLeaseDuration
+	}
+	return time.Duration(profile.TimeoutMS) * time.Millisecond
+}
+
+func cityRealtimeAgentDecisionFinalizerContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	// A provider timeout/cancellation must not strand an already-started attempt.
+	// Keep request values (including the trusted worker identity) while detaching
+	// the provider call's cancellation signal and bounding the cleanup itself.
+	return context.WithTimeout(context.WithoutCancel(ctx), cityRealtimeAgentDecisionProviderFinalizerTimeout)
+}
+
+func cityRealtimeAgentDecisionRetryNotBeforeCopy(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	result := value.UTC().Truncate(time.Microsecond)
+	return &result
+}
+
+func (s *CityEconomyService) resolveRealtimeAgentDecisionProvider(
+	ctx context.Context,
+	worldID int64,
+	requestCode string,
+	expectedProviderCode string,
+) (cityRealtimeAgentDecisionProviderResolution, error) {
+	if s == nil || s.db == nil || worldID <= 0 || !cityRealtimeAgentIdentifierValid(requestCode, 96) {
+		return cityRealtimeAgentDecisionProviderResolution{}, ErrCityInvalidInput
+	}
+	request, found, err := loadCityRealtimeAgentDecisionRequest(ctx, s.db, worldID, requestCode, false)
+	if err != nil {
+		return cityRealtimeAgentDecisionProviderResolution{}, err
+	}
+	if !found {
+		return cityRealtimeAgentDecisionProviderResolution{}, ErrCityRealtimeAgentDecisionNotFound
+	}
+	resolution := cityRealtimeAgentDecisionProviderResolution{request: request}
+	if cityRealtimeAgentDecisionRequestStatusTerminal(request.Status) ||
+		(request.Status == cityRealtimeAgentDecisionRequestQueued && request.RetryNotBefore != nil && request.RetryNotBefore.After(time.Now().UTC())) {
+		return resolution, nil
+	}
+	profile, err := cityRealtimeAgentDecisionExecutionProfile(ctx, s.db, request)
+	if err != nil {
+		return cityRealtimeAgentDecisionProviderResolution{}, err
+	}
+	resolution.profile = profile
+	providerCode := cityRealtimeAgentDecisionProviderCode(profile)
+	if expectedProviderCode != "" && providerCode != expectedProviderCode {
+		return cityRealtimeAgentDecisionProviderResolution{},
+			ErrCityRealtimeAgentProviderUnavailable.WithMetadata(map[string]string{"provider_code": providerCode})
+	}
+	provider, providerFound := s.cityRealtimeAgentDecisionProvider(providerCode)
+	if !providerFound || provider == nil || strings.ToLower(strings.TrimSpace(provider.ProviderCode())) != providerCode {
+		return cityRealtimeAgentDecisionProviderResolution{},
+			ErrCityRealtimeAgentProviderUnavailable.WithMetadata(map[string]string{"provider_code": providerCode})
+	}
+	resolution.provider = provider
+	return resolution, nil
+}
+
+func (s *CityEconomyService) finalizeRealtimeAgentDecisionProviderFailure(
+	ctx context.Context,
+	worldID int64,
+	workerID string,
+	requestCode string,
+	attempt cityRealtimeAgentDecisionAttemptRecord,
+	errorCode string,
+) (*CityRealtimeAgentDecisionRunResult, error) {
+	if s == nil || s.db == nil || worldID <= 0 || !cityRealtimeAgentIdentifierValid(workerID, 64) ||
+		!cityRealtimeAgentIdentifierValid(requestCode, 96) || !cityRealtimeAgentIdentifierValid(attempt.AttemptCode, 96) ||
+		!cityRealtimeAgentProviderErrorCodeValid(errorCode) {
 		return nil, ErrCityInvalidInput
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("begin realtime agent fake decision lease transaction: %w", err)
+		return nil, fmt.Errorf("begin realtime agent provider failure finalize transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, cityWorldLockKey(worldID)); err != nil {
+		return nil, fmt.Errorf("lock realtime agent provider failure world: %w", err)
+	}
+	request, found, err := loadCityRealtimeAgentDecisionRequest(ctx, tx, worldID, requestCode, true)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, ErrCityRealtimeAgentDecisionNotFound
+	}
+	if request.Status != cityRealtimeAgentDecisionRequestLeased || request.LeaseOwner == nil || *request.LeaseOwner != workerID ||
+		request.LeaseExpiresAt == nil || !request.LeaseExpiresAt.After(time.Now().UTC()) {
+		return nil, ErrCityRealtimeAgentDecisionConflict.WithMetadata(map[string]string{"field": "request_lease"})
+	}
+	currentAttempt, attemptFound, err := loadCityRealtimeAgentDecisionAttemptForUpdate(
+		ctx, tx, worldID, requestCode, request.AttemptCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if !attemptFound || currentAttempt.Status != cityRealtimeAgentDecisionAttemptStarted ||
+		currentAttempt.AttemptCode != attempt.AttemptCode || currentAttempt.ProviderCode != attempt.ProviderCode {
+		return nil, ErrCityRealtimeAgentDecisionConflict.WithMetadata(map[string]string{"field": "attempt"})
+	}
+	profile, err := cityRealtimeAgentDecisionExecutionProfile(ctx, tx, request)
+	if err != nil {
+		return nil, err
+	}
+	if currentAttempt.ProviderCode != cityRealtimeAgentDecisionProviderCode(profile) {
+		return nil, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "realtime_agent_provider_attempt"})
+	}
+	if err = enableCityRealtimeAgentModelBudgetWorkerGate(ctx, tx, worldID, requestCode); err != nil {
+		return nil, err
+	}
+	if err = updateCityRealtimeAgentDecisionAttemptFailed(ctx, tx, worldID, currentAttempt.AttemptCode, errorCode); err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	if profile != nil && cityRealtimeAgentModelProviderFailureAttributable(errorCode) {
+		if err = recordCityRealtimeAgentModelProviderFailure(ctx, tx, profile, errorCode, now); err != nil {
+			return nil, err
+		}
+	}
+	if cityRealtimeAgentProviderFailureRetryable(errorCode) &&
+		request.AttemptCount < cityRealtimeAgentDecisionMaximumAttemptsForProfile(profile) {
+		retryNotBefore := now.Add(cityRealtimeAgentDecisionProviderRetryDelay(request.AttemptCount)).UTC().Truncate(time.Microsecond)
+		if err = requeueCityRealtimeAgentDecisionAfterProviderFailure(ctx, tx, worldID, requestCode, retryNotBefore); err != nil {
+			return nil, err
+		}
+		if err = requeueCityRealtimeAgentDecisionOutboxAfterProviderFailure(ctx, tx, worldID, requestCode); err != nil {
+			return nil, err
+		}
+		if err = tx.Commit(); err != nil {
+			return nil, fmt.Errorf("commit realtime agent provider retry: %w", err)
+		}
+		return &CityRealtimeAgentDecisionRunResult{
+			RequestCode:    requestCode,
+			Status:         cityRealtimeAgentDecisionRequestQueued,
+			ErrorCode:      errorCode,
+			RetryNotBefore: &retryNotBefore,
+		}, nil
+	}
+
+	world, err := lockCityWorld(ctx, tx, 0, worldID)
+	if err != nil {
+		return nil, err
+	}
+	state, err := lockCityRealtimeState(ctx, tx, worldID)
+	if err != nil {
+		return nil, err
+	}
+	if err = validateCityRealtimeCharacterCommandWindow(world, state); err != nil {
+		return nil, err
+	}
+	if err = cityRealtimeRejectPendingDueAtCurrentTime(ctx, tx, worldID, state.currentWorldTimeUS); err != nil {
+		return nil, err
+	}
+	frameSequence, cursor, err := cityRealtimeCharacterNextFrame(state)
+	if err != nil {
+		return nil, err
+	}
+	if err = enableCityRealtimeCharacterMutationGates(ctx, tx, worldID, frameSequence, true); err != nil {
+		return nil, err
+	}
+	if err = updateCityRealtimeAgentDecisionRequestTerminal(
+		ctx, tx, worldID, requestCode, cityRealtimeAgentDecisionRequestFailed, frameSequence,
+	); err != nil {
+		return nil, err
+	}
+	if err = updateCityRealtimeAgentDecisionOutboxTerminal(
+		ctx, tx, worldID, requestCode, cityRealtimeAgentOutboxFailed,
+	); err != nil {
+		return nil, err
+	}
+	result := &CityRealtimeAgentDecisionRunResult{
+		RequestCode: requestCode,
+		Status:      cityRealtimeAgentDecisionRequestFailed,
+		ErrorCode:   errorCode,
+	}
+	if result.Frame, err = sealCityRealtimeCharacterFrame(
+		ctx, tx, worldID, world, state, frameSequence, cursor, "agent.decision.failed",
+		map[string]any{
+			"agent_decision_failed":           1,
+			"agent_decision_attempt_failed":   1,
+			"agent_decision_provider_failure": boolToCityRealtimeCount(cityRealtimeAgentModelProviderFailureAttributable(errorCode)),
+			"agent_intent_scheduled":          0,
+		},
+	); err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit realtime agent provider terminal failure: %w", err)
+	}
+	return result, nil
+}
+
+// RunRealtimeAgentDecision processes one already-queued request through the
+// profile-selected trusted provider. It is worker-only and does not expose a
+// browser endpoint. The provider executes outside every SQL transaction; the
+// result is parsed strictly and finalized through the same sealed Decision /
+// Intent reducer path used by the deterministic adapter.
+func (s *CityEconomyService) RunRealtimeAgentDecision(
+	ctx context.Context,
+	input CityRealtimeAgentDecisionRunInput,
+) (*CityRealtimeAgentDecisionRunResult, error) {
+	return s.runRealtimeAgentDecision(ctx, input, cityRealtimeAgentDecisionRunOptions{})
+}
+
+func (s *CityEconomyService) runRealtimeAgentDecision(
+	ctx context.Context,
+	input CityRealtimeAgentDecisionRunInput,
+	options cityRealtimeAgentDecisionRunOptions,
+) (*CityRealtimeAgentDecisionRunResult, error) {
+	requestCode := strings.TrimSpace(input.RequestCode)
+	workerID := strings.TrimSpace(input.WorkerID)
+	if !IsCitySystemAdministrator(ctx) {
+		return nil, ErrCityManagementRequired
+	}
+	if s == nil || s.db == nil || input.WorldID <= 0 || !cityRealtimeAgentIdentifierValid(requestCode, 96) ||
+		!cityRealtimeAgentIdentifierValid(workerID, 64) ||
+		(options.expectedProviderCode != "" && !cityRealtimeAgentIdentifierValid(options.expectedProviderCode, 64)) ||
+		!cityRealtimeAgentFakePreferredActionValid(options.fakePreferredAction) {
+		return nil, ErrCityInvalidInput
+	}
+	quarantined, err := cityRealtimeAgentDecisionQuarantined(ctx, s.db, input.WorldID, requestCode, false)
+	if err != nil {
+		return nil, err
+	}
+	if quarantined {
+		return nil, ErrCityRealtimeAgentDecisionQuarantined
+	}
+	resolution, err := s.resolveRealtimeAgentDecisionProvider(
+		ctx, input.WorldID, requestCode, options.expectedProviderCode,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if cityRealtimeAgentDecisionRequestStatusTerminal(resolution.request.Status) {
+		return &CityRealtimeAgentDecisionRunResult{RequestCode: requestCode, Status: resolution.request.Status}, nil
+	}
+	if resolution.request.Status == cityRealtimeAgentDecisionRequestQueued && resolution.request.RetryNotBefore != nil &&
+		resolution.request.RetryNotBefore.After(time.Now().UTC()) {
+		return &CityRealtimeAgentDecisionRunResult{
+			RequestCode:    requestCode,
+			Status:         cityRealtimeAgentDecisionRequestQueued,
+			RetryNotBefore: cityRealtimeAgentDecisionRetryNotBeforeCopy(resolution.request.RetryNotBefore),
+		}, nil
+	}
+	if resolution.provider == nil {
+		return nil, ErrCityRealtimeAgentProviderUnavailable.WithMetadata(map[string]string{
+			"provider_code": cityRealtimeAgentDecisionProviderCode(resolution.profile),
+		})
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin realtime agent decision lease transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, cityWorldLockKey(input.WorldID)); err != nil {
-		return nil, fmt.Errorf("lock realtime agent fake decision world: %w", err)
+		return nil, fmt.Errorf("lock realtime agent decision world: %w", err)
 	}
 	request, observation, attempt, err := updateCityRealtimeAgentDecisionRequestLease(
-		ctx, tx, input.WorldID, requestCode, workerID, time.Now().UTC().Truncate(time.Microsecond),
+		ctx, tx, input.WorldID, requestCode, workerID, cityRealtimeAgentDecisionProviderCode(resolution.profile),
+		time.Now().UTC().Truncate(time.Microsecond),
 	)
 	if err != nil {
 		if errors.Is(err, errCityRealtimeAgentDecisionLeaseBudgetExhausted) {
 			_ = tx.Rollback()
 			return s.finalizeRealtimeAgentDecisionLeaseBudget(ctx, input.WorldID, requestCode)
 		}
+		if errors.Is(err, errCityRealtimeAgentDecisionRetryNotBefore) {
+			return &CityRealtimeAgentDecisionRunResult{
+				RequestCode:    requestCode,
+				Status:         cityRealtimeAgentDecisionRequestQueued,
+				RetryNotBefore: cityRealtimeAgentDecisionRetryNotBeforeCopy(request.RetryNotBefore),
+			}, nil
+		}
 		return nil, err
 	}
 	if cityRealtimeAgentDecisionRequestStatusTerminal(request.Status) {
 		if err = tx.Commit(); err != nil {
-			return nil, fmt.Errorf("commit realtime agent fake decision replay: %w", err)
+			return nil, fmt.Errorf("commit realtime agent decision replay: %w", err)
 		}
-		return &CityRealtimeAgentFakeDecisionRunResult{RequestCode: requestCode, Status: request.Status}, nil
+		return &CityRealtimeAgentDecisionRunResult{RequestCode: requestCode, Status: request.Status}, nil
 	}
 	if err = tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit realtime agent fake decision lease: %w", err)
+		return nil, fmt.Errorf("commit realtime agent decision lease: %w", err)
 	}
-	// There is intentionally no transaction open while the provider would run.
-	// The deterministic adapter can select only a schema-valid server-published
-	// finite candidate or wait command; the finalizer still rechecks every invariant.
-	envelope, envelopeErr := cityRealtimeAgentFakeDecisionEnvelope(request, observation, preferredAction)
-	if envelopeErr != nil {
-		return nil, envelopeErr
+
+	providerRequest := cityRealtimeAgentDecisionProviderRequest(
+		input.WorldID, request, observation, attempt, resolution.profile, options.fakePreferredAction,
+	)
+	providerCtx, cancelProvider := context.WithTimeout(ctx, cityRealtimeAgentDecisionProviderTimeout(resolution.profile))
+	providerResponse, providerErr := cityRealtimeAgentExecuteDecisionProvider(providerCtx, resolution.provider, providerRequest)
+	if providerErr == nil && providerCtx.Err() != nil {
+		providerErr = providerCtx.Err()
 	}
-	return s.finalizeRealtimeAgentFakeDecision(ctx, input.WorldID, workerID, requestCode, attempt, envelope)
+	cancelProvider()
+	finalizerCtx, cancelFinalizer := cityRealtimeAgentDecisionFinalizerContext(ctx)
+	defer cancelFinalizer()
+	if providerErr != nil {
+		return s.finalizeRealtimeAgentDecisionProviderFailure(
+			finalizerCtx, input.WorldID, workerID, requestCode, attempt,
+			cityRealtimeAgentProviderErrorCodeFrom(providerErr),
+		)
+	}
+	envelope, decodeErr := decodeCityRealtimeAgentProviderDecisionEnvelope(providerResponse.DecisionEnvelope)
+	if decodeErr != nil {
+		return s.finalizeRealtimeAgentDecisionProviderFailure(
+			finalizerCtx, input.WorldID, workerID, requestCode, attempt,
+			cityRealtimeAgentProviderErrorCodeFrom(decodeErr),
+		)
+	}
+	result, finalizeErr := s.finalizeRealtimeAgentDecision(
+		finalizerCtx, input.WorldID, workerID, requestCode, attempt, envelope,
+	)
+	if errors.Is(finalizeErr, ErrCityRealtimeAgentDecisionUnavailable) || errors.Is(finalizeErr, ErrCityInvalidInput) {
+		return s.finalizeRealtimeAgentDecisionProviderFailure(
+			finalizerCtx, input.WorldID, workerID, requestCode, attempt,
+			cityRealtimeAgentProviderErrorInvalidResponse,
+		)
+	}
+	return result, finalizeErr
+}
+
+// RunRealtimeAgentFakeDecision is the deterministic compatibility wrapper.
+// It keeps the existing narrow preferred-action test hook, but now crosses the
+// exact same provider registry, timeout, parser, retry and finalizer boundary
+// as every future external model adapter.
+func (s *CityEconomyService) RunRealtimeAgentFakeDecision(
+	ctx context.Context,
+	input CityRealtimeAgentFakeDecisionRunInput,
+) (*CityRealtimeAgentFakeDecisionRunResult, error) {
+	preferredAction := strings.TrimSpace(input.PreferredAction)
+	if !cityRealtimeAgentFakePreferredActionValid(preferredAction) {
+		return nil, ErrCityInvalidInput
+	}
+	return s.runRealtimeAgentDecision(ctx, CityRealtimeAgentDecisionRunInput{
+		WorldID:     input.WorldID,
+		RequestCode: input.RequestCode,
+		WorkerID:    input.WorkerID,
+	}, cityRealtimeAgentDecisionRunOptions{
+		expectedProviderCode: cityRealtimeAgentFakeProviderCode,
+		fakePreferredAction:  preferredAction,
+	})
 }
 
 type cityRealtimeAgentIntentDuePayload struct {
@@ -2816,6 +3736,165 @@ func applyCityRealtimeAgentIntentDueEvent(
 			}
 		}
 		return true, true, nil
+	case cityRealtimeAgentIntentActionNavigation:
+		if !cityRealtimeCharacterNavigationPlanRuntimeEnabled(*agentState.Binding) ||
+			agent.AgentSubtype != "character.user" || agent.ActorCode == nil || intent.ActorCode == nil ||
+			*intent.ActorCode != *agent.ActorCode {
+			return markStale()
+		}
+		portalCode, portalCodeErr := cityRealtimeAgentDecisionNavigationPortalCodeFromRawArguments(intent.Arguments)
+		if portalCodeErr != nil {
+			return markStale()
+		}
+		record, recordFound, recordErr := loadCityRealtimeCharacterNavigationRecordForUpdate(ctx, tx, worldID, *agent.ActorCode)
+		if recordErr != nil {
+			return true, false, recordErr
+		}
+		if !recordFound || record.identity.LifecycleStatus != "active" || record.state.Z != cityspatial.SurfaceZ {
+			return markStale()
+		}
+		runtime, runtimeErr := loadCityRealtimeCharacterNavigationPlanRuntime(ctx, tx, worldID)
+		if runtimeErr != nil {
+			return true, false, runtimeErr
+		}
+		if runtime == nil || runtime.Binding.AgentBindingHash != agentState.Binding.BindingHash {
+			return markStale()
+		}
+		if _, activeFound, activeErr := loadCityRealtimeCharacterActiveNavigationPlan(ctx, tx, worldID, *agent.ActorCode, true); activeErr != nil {
+			return true, false, activeErr
+		} else if activeFound {
+			return markStale()
+		}
+		destinations, availabilityErr := cityRealtimeCharacterAvailableNavigationDestinations(
+			ctx, tx, worldID, *agent.ActorCode, record.state, *agentState.Binding,
+		)
+		if availabilityErr != nil {
+			return true, false, availabilityErr
+		}
+		destination, destinationFound := cityRealtimeCharacterNavigationDestinationByPortalCode(destinations, portalCode)
+		if !destinationFound {
+			return markStale()
+		}
+		head, planEvent, planErr := cityRealtimeCharacterNavigationPlanNew(
+			record.state, destination, intent.IntentCode, frameSequence, event.DueWorldTimeUS,
+		)
+		if planErr != nil {
+			return markStale()
+		}
+		if gateErr := enableCityRealtimeCharacterMutationGates(ctx, tx, worldID, frameSequence, true); gateErr != nil {
+			return true, false, gateErr
+		}
+		if gateErr := enableCityRealtimeCharacterNavigationPlanMutationGate(ctx, tx, worldID, frameSequence, event.DueWorldTimeUS); gateErr != nil {
+			return true, false, gateErr
+		}
+		// Create the future movement fact before the active head.  The SQL
+		// guard enforces that an accepted plan can never become visible without
+		// its next authoritative movement boundary.
+		if scheduleErr := scheduleCityRealtimeCharacterNavigationPlanStepDueEvent(ctx, tx, worldID, frameSequence, head); scheduleErr != nil {
+			return true, false, scheduleErr
+		}
+		if insertErr := insertCityRealtimeCharacterNavigationPlanHead(ctx, tx, worldID, head); insertErr != nil {
+			return true, false, insertErr
+		}
+		if insertErr := insertCityRealtimeCharacterNavigationPlanEvent(ctx, tx, worldID, planEvent); insertErr != nil {
+			return true, false, insertErr
+		}
+		if updateErr := updateCityRealtimeAgentIntentTerminal(ctx, tx, worldID, intent.IntentCode, cityRealtimeAgentIntentApplied, frameSequence); updateErr != nil {
+			return true, false, updateErr
+		}
+		// Navigation owns the continuation schedule. Its terminal reducer is
+		// the sole place that returns the Agent to the decision loop.
+		return true, true, nil
+	case cityRealtimeAgentIntentActionTask:
+		if !cityRealtimeAgentCharacterTaskRuntimeEnabled(*agentState.Binding) ||
+			agent.AgentSubtype != "character.user" || agent.ActorCode == nil || intent.ActorCode == nil ||
+			*intent.ActorCode != *agent.ActorCode {
+			return markStale()
+		}
+		taskCode, taskCodeErr := cityRealtimeAgentDecisionTaskCodeFromRawArguments(intent.Arguments)
+		if taskCodeErr != nil {
+			return markStale()
+		}
+		actorState, actorStateErr := loadCityRealtimeAgentDecisionActorState(ctx, tx, worldID, agent)
+		if actorStateErr != nil {
+			return true, false, actorStateErr
+		}
+		lifeRuntime, lifeRuntimeErr := loadCityRealtimeCharacterLifeRuntime(ctx, tx, worldID)
+		if lifeRuntimeErr != nil {
+			return true, false, lifeRuntimeErr
+		}
+		if lifeRuntime == nil {
+			return markStale()
+		}
+		profile, profileFound, profileErr := loadCityRealtimeCharacterProfile(ctx, tx, worldID, *agent.ActorCode, true)
+		if profileErr != nil {
+			return true, false, profileErr
+		}
+		if !profileFound || !cityRealtimeCharacterProfileMatchesRuntime(profile, lifeRuntime) {
+			return markStale()
+		}
+		taskRuntime, taskRuntimeErr := loadCityRealtimeCharacterTaskRuntime(ctx, tx, worldID)
+		if taskRuntimeErr != nil {
+			return true, false, taskRuntimeErr
+		}
+		if taskRuntime == nil || taskRuntime.Binding.AgentBindingHash != agentState.Binding.BindingHash ||
+			taskRuntime.Binding.ActivityBindingHash != lifeRuntime.Binding.BindingHash {
+			return markStale()
+		}
+		definition, definitionFound := taskRuntime.Definitions[taskCode]
+		if !definitionFound {
+			return markStale()
+		}
+		availableTaskCodes, availabilityErr := cityRealtimeCharacterAvailableTaskCodes(
+			ctx, tx, worldID, event.DueWorldTimeUS, actorState, profile, lifeRuntime, *agent.ActorCode, *agentState.Binding,
+		)
+		if availabilityErr != nil {
+			return true, false, availabilityErr
+		}
+		if !cityRealtimeAgentActionContextContains(availableTaskCodes, taskCode) {
+			return markStale()
+		}
+		if _, activeFound, activeErr := loadCityRealtimeCharacterActiveTask(ctx, tx, worldID, *agent.ActorCode, true); activeErr != nil {
+			return true, false, activeErr
+		} else if activeFound {
+			return markStale()
+		}
+		expirationDueWorldTimeUS, expirationErr := cityRealtimeCharacterTaskExpirationDueWorldTime(event.DueWorldTimeUS, definition)
+		if expirationErr != nil {
+			return true, false, expirationErr
+		}
+		taskHead, taskEvent, taskBuildErr := cityRealtimeCharacterAcceptTask(
+			definition, *agent.ActorCode, intent.IntentCode, frameSequence, expirationDueWorldTimeUS,
+		)
+		if taskBuildErr != nil {
+			return markStale()
+		}
+		if gateErr := enableCityRealtimeCharacterMutationGates(ctx, tx, worldID, frameSequence, true); gateErr != nil {
+			return true, false, gateErr
+		}
+		if taskGateErr := enableCityRealtimeCharacterTaskMutationGate(ctx, tx, worldID, frameSequence, event.DueWorldTimeUS); taskGateErr != nil {
+			return true, false, taskGateErr
+		}
+		// The expiry fact is written first so the accepted head can be proven to
+		// have exactly one server-owned deadline before it becomes visible.
+		if scheduleErr := scheduleCityRealtimeCharacterTaskExpiryDueEvent(ctx, tx, worldID, frameSequence, taskHead); scheduleErr != nil {
+			return true, false, scheduleErr
+		}
+		if insertErr := insertCityRealtimeCharacterTaskHead(ctx, tx, worldID, taskHead); insertErr != nil {
+			return true, false, insertErr
+		}
+		if insertErr := insertCityRealtimeCharacterTaskEvent(ctx, tx, worldID, taskEvent); insertErr != nil {
+			return true, false, insertErr
+		}
+		if updateErr := updateCityRealtimeAgentIntentTerminal(ctx, tx, worldID, intent.IntentCode, cityRealtimeAgentIntentApplied, frameSequence); updateErr != nil {
+			return true, false, updateErr
+		}
+		if wakeupErr := cityRealtimeAgentScheduleAutonomousActionWakeup(
+			ctx, tx, worldID, frameSequence, event.DueWorldTimeUS, cityRealtimeTimeQuantumUS, *agentState.Binding, agent,
+		); wakeupErr != nil {
+			return true, false, wakeupErr
+		}
+		return true, true, nil
 	case cityRealtimeAgentIntentActionActivity:
 		if !cityRealtimeAgentCharacterControlRuntimeEnabled(*agentState.Binding) ||
 			agent.AgentSubtype != "character.user" || agent.ActorCode == nil || intent.ActorCode == nil ||
@@ -2883,9 +3962,55 @@ func applyCityRealtimeAgentIntentDueEvent(
 		if insertErr := insertCityRealtimeCharacterActivityEvent(ctx, tx, worldID, *agent.ActorCode, transition.Activity); insertErr != nil {
 			return true, false, insertErr
 		}
+		// A structured task can only complete here, after the normal Agent
+		// activity event has been sealed. Manual activity commands never enter
+		// this reducer, and an activity at the exact expiry timestamp remains a
+		// normal activity while the task's later rule-effect event expires it.
+		if cityRealtimeAgentCharacterTaskRuntimeEnabled(*agentState.Binding) {
+			taskRuntime, taskRuntimeErr := loadCityRealtimeCharacterTaskRuntime(ctx, tx, worldID)
+			if taskRuntimeErr != nil {
+				return true, false, taskRuntimeErr
+			}
+			if taskRuntime == nil || taskRuntime.Binding.AgentBindingHash != agentState.Binding.BindingHash ||
+				taskRuntime.Binding.ActivityBindingHash != lifeRuntime.Binding.BindingHash {
+				return true, false, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "realtime_character_task_runtime"})
+			}
+			activeTask, activeTaskFound, activeTaskErr := loadCityRealtimeCharacterActiveTask(
+				ctx, tx, worldID, *agent.ActorCode, true,
+			)
+			if activeTaskErr != nil {
+				return true, false, activeTaskErr
+			}
+			if activeTaskFound && activeTask.ActivityCode == transition.Activity.ActivityCode &&
+				event.DueWorldTimeUS < activeTask.ExpirationDueWorldTimeUS {
+				if historyErr := validateCityRealtimeCharacterTaskHeadHistory(ctx, tx, worldID, activeTask); historyErr != nil {
+					return true, false, historyErr
+				}
+				nextTask, taskEvent, taskTransitionErr := cityRealtimeCharacterCompleteTask(
+					activeTask, transition.Activity, frameSequence, event.DueWorldTimeUS,
+				)
+				if taskTransitionErr != nil {
+					return true, false, taskTransitionErr
+				}
+				if taskGateErr := enableCityRealtimeCharacterTaskMutationGate(ctx, tx, worldID, frameSequence, event.DueWorldTimeUS); taskGateErr != nil {
+					return true, false, taskGateErr
+				}
+				if taskInsertErr := insertCityRealtimeCharacterTaskEvent(ctx, tx, worldID, taskEvent); taskInsertErr != nil {
+					return true, false, taskInsertErr
+				}
+				if taskUpdateErr := updateCityRealtimeCharacterTaskHead(ctx, tx, worldID, activeTask, nextTask); taskUpdateErr != nil {
+					return true, false, taskUpdateErr
+				}
+			}
+		}
 		if transition.Law != nil {
 			if insertErr := insertCityRealtimeCharacterLawEvent(ctx, tx, worldID, *agent.ActorCode, *transition.Law); insertErr != nil {
 				return true, false, insertErr
+			}
+			if _, evidenceErr := captureCityRealtimeCharacterCaseEvidenceFromLaw(
+				ctx, tx, worldID, frameSequence, event.DueWorldTimeUS, *transition.Law,
+			); evidenceErr != nil {
+				return true, false, evidenceErr
 			}
 		}
 		if transition.ProgressionEvent != nil {
@@ -3067,6 +4192,211 @@ func applyCityRealtimeAgentIntentDueEvent(
 		}
 		if updateErr := updateCityRealtimeCharacterCaseReviewHead(ctx, tx, worldID, head, nextHead); updateErr != nil {
 			return true, false, updateErr
+		}
+		if updateErr := updateCityRealtimeAgentIntentTerminal(ctx, tx, worldID, intent.IntentCode, cityRealtimeAgentIntentApplied, frameSequence); updateErr != nil {
+			return true, false, updateErr
+		}
+		if wakeupErr := cityRealtimeAgentScheduleAutonomousActionWakeup(
+			ctx, tx, worldID, frameSequence, event.DueWorldTimeUS, cityRealtimeTimeQuantumUS, *agentState.Binding, agent,
+		); wakeupErr != nil {
+			return true, false, wakeupErr
+		}
+		return true, true, nil
+	case cityRealtimeAgentIntentActionCaseReport:
+		if !cityRealtimeAgentCharacterCaseReportRuntimeEnabled(*agentState.Binding) ||
+			agent.AgentSubtype != "character.user" || agent.ActorCode == nil || intent.ActorCode == nil ||
+			*intent.ActorCode != *agent.ActorCode {
+			return markStale()
+		}
+		targetCode, targetCodeErr := cityRealtimeAgentDecisionCaseReportTargetCodeFromRawArguments(intent.Arguments)
+		if targetCodeErr != nil {
+			return markStale()
+		}
+		actorState, actorStateErr := loadCityRealtimeAgentDecisionActorState(ctx, tx, worldID, agent)
+		if actorStateErr != nil {
+			return true, false, actorStateErr
+		}
+		target, targetFound, targetErr := loadCityRealtimeCharacterSocialTarget(ctx, tx, worldID, targetCode, true)
+		if targetErr != nil {
+			return true, false, targetErr
+		}
+		if !targetFound || target.ActorCode == actorState.ActorCode ||
+			!cityRealtimeCharacterSocialTargetAllowed(actorState, target) {
+			return markStale()
+		}
+		reportBinding, bindingErr := loadCityRealtimeCharacterCaseReportBinding(ctx, tx, worldID)
+		if bindingErr != nil {
+			return true, false, bindingErr
+		}
+		if reportBinding == nil || reportBinding.AgentBindingHash != agentState.Binding.BindingHash {
+			return markStale()
+		}
+		if _, reportFound, reportErr := loadCityRealtimeCharacterCaseReportHead(
+			ctx, tx, worldID, actorState.ActorCode, target.ActorCode, true,
+		); reportErr != nil {
+			return true, false, reportErr
+		} else if reportFound {
+			return markStale()
+		}
+		head, reportEvent, reportErr := cityRealtimeCharacterFileCaseReport(
+			actorState.ActorCode, target.ActorCode, intent.IntentCode, frameSequence,
+		)
+		if reportErr != nil {
+			return markStale()
+		}
+		var intakeHead cityRealtimeCharacterCaseIntakeHead
+		var intakeEvent cityRealtimeCharacterCaseIntakeEvent
+		intakeEnabled := cityRealtimeAgentCharacterCaseIntakeRuntimeEnabled(*agentState.Binding)
+		if intakeEnabled {
+			intakeBinding, intakeBindingErr := loadCityRealtimeCharacterCaseIntakeBinding(ctx, tx, worldID)
+			if intakeBindingErr != nil {
+				return true, false, intakeBindingErr
+			}
+			if intakeBinding == nil || intakeBinding.AgentBindingHash != agentState.Binding.BindingHash {
+				return markStale()
+			}
+			if _, intakeFound, intakeHeadErr := loadCityRealtimeCharacterCaseIntakeHead(
+				ctx, tx, worldID, actorState.ActorCode, target.ActorCode, true,
+			); intakeHeadErr != nil {
+				return true, false, intakeHeadErr
+			} else if intakeFound {
+				return markStale()
+			}
+			expirationDueWorldTimeUS, dueErr := cityRealtimeCharacterCaseIntakeExpirationDueWorldTime(event.DueWorldTimeUS)
+			if dueErr != nil {
+				return true, false, dueErr
+			}
+			var intakeBuildErr error
+			intakeHead, intakeEvent, intakeBuildErr = cityRealtimeCharacterOpenCaseIntake(
+				head, reportEvent, frameSequence, expirationDueWorldTimeUS,
+			)
+			if intakeBuildErr != nil {
+				return markStale()
+			}
+		}
+		var assignmentHead cityRealtimeCharacterCaseEvidenceAssignmentHead
+		var assignmentEvent cityRealtimeCharacterCaseEvidenceAssignmentEvent
+		assignmentCreated := false
+		if cityRealtimeAgentCharacterCaseEvidenceAssignmentRuntimeEnabled(*agentState.Binding) {
+			if !intakeEnabled {
+				return markStale()
+			}
+			assignmentBinding, assignmentBindingErr := loadCityRealtimeCharacterCaseEvidenceAssignmentBinding(ctx, tx, worldID)
+			if assignmentBindingErr != nil {
+				return true, false, assignmentBindingErr
+			}
+			if assignmentBinding == nil || assignmentBinding.AgentBindingHash != agentState.Binding.BindingHash {
+				return markStale()
+			}
+			candidate, candidateFound, candidateErr := findCityRealtimeCharacterCaseEvidenceAssignmentCandidate(
+				ctx, tx, worldID, target.ActorCode, frameSequence, event.DueWorldTimeUS,
+			)
+			if candidateErr != nil {
+				return true, false, candidateErr
+			}
+			if candidateFound {
+				if _, assignmentFound, assignmentHeadErr := loadCityRealtimeCharacterCaseEvidenceAssignmentHead(
+					ctx, tx, worldID, actorState.ActorCode, target.ActorCode, true,
+				); assignmentHeadErr != nil {
+					return true, false, assignmentHeadErr
+				} else if assignmentFound {
+					return markStale()
+				}
+				if _, sourceAssigned, sourceAssignmentErr := loadCityRealtimeCharacterCaseEvidenceAssignmentByEvidenceCode(
+					ctx, tx, worldID, candidate.EvidenceCode, true,
+				); sourceAssignmentErr != nil {
+					return true, false, sourceAssignmentErr
+				} else if sourceAssigned {
+					return markStale()
+				}
+				var assignmentBuildErr error
+				assignmentHead, assignmentEvent, assignmentBuildErr = cityRealtimeCharacterLinkCaseEvidenceAssignment(
+					head, reportEvent, intakeHead, candidate, frameSequence, event.DueWorldTimeUS,
+				)
+				if assignmentBuildErr != nil {
+					return markStale()
+				}
+				assignmentCreated = true
+			}
+		}
+		var procedureDispatchHead cityRealtimeCharacterCaseProcedureDispatchHead
+		var procedureDispatchEvent cityRealtimeCharacterCaseProcedureDispatchEvent
+		procedureDispatchCreated := false
+		if cityRealtimeAgentCharacterCaseProcedureDispatchRuntimeEnabled(*agentState.Binding) && assignmentCreated {
+			procedureDispatchBinding, procedureDispatchBindingErr := loadCityRealtimeCharacterCaseProcedureDispatchBinding(ctx, tx, worldID)
+			if procedureDispatchBindingErr != nil {
+				return true, false, procedureDispatchBindingErr
+			}
+			if procedureDispatchBinding == nil || procedureDispatchBinding.AgentBindingHash != agentState.Binding.BindingHash {
+				return markStale()
+			}
+			var procedureDispatchBuildErr error
+			procedureDispatchHead, procedureDispatchEvent, procedureDispatchBuildErr = cityRealtimeCharacterQueueCaseProcedureDispatch(
+				assignmentHead, frameSequence,
+			)
+			if procedureDispatchBuildErr != nil {
+				return markStale()
+			}
+			procedureDispatchCreated = true
+		}
+		if gateErr := enableCityRealtimeCharacterMutationGates(ctx, tx, worldID, frameSequence, true); gateErr != nil {
+			return true, false, gateErr
+		}
+		if gateErr := enableCityRealtimeCharacterCaseReportMutationGate(ctx, tx, worldID, frameSequence); gateErr != nil {
+			return true, false, gateErr
+		}
+		if intakeEnabled {
+			if gateErr := enableCityRealtimeCharacterCaseIntakeMutationGate(ctx, tx, worldID, frameSequence); gateErr != nil {
+				return true, false, gateErr
+			}
+			// The expiry is persisted before the intake fact. The database guard
+			// can therefore prove that evidence_required is not an unbounded
+			// workflow state and has exactly one server-owned next step.
+			if scheduleErr := scheduleCityRealtimeCharacterCaseIntakeExpiryDueEvent(
+				ctx, tx, worldID, intakeHead.ExpirationDueWorldTimeUS, frameSequence, intakeHead,
+			); scheduleErr != nil {
+				return true, false, scheduleErr
+			}
+		}
+		if assignmentCreated {
+			if gateErr := enableCityRealtimeCharacterCaseEvidenceAssignmentMutationGate(ctx, tx, worldID, frameSequence); gateErr != nil {
+				return true, false, gateErr
+			}
+		}
+		if procedureDispatchCreated {
+			if gateErr := enableCityRealtimeCharacterCaseProcedureDispatchMutationGate(ctx, tx, worldID, frameSequence); gateErr != nil {
+				return true, false, gateErr
+			}
+		}
+		if insertErr := insertCityRealtimeCharacterCaseReportHead(ctx, tx, worldID, head); insertErr != nil {
+			return true, false, insertErr
+		}
+		if insertErr := insertCityRealtimeCharacterCaseReportEvent(ctx, tx, worldID, reportEvent); insertErr != nil {
+			return true, false, insertErr
+		}
+		if intakeEnabled {
+			if insertErr := insertCityRealtimeCharacterCaseIntakeHead(ctx, tx, worldID, intakeHead); insertErr != nil {
+				return true, false, insertErr
+			}
+			if insertErr := insertCityRealtimeCharacterCaseIntakeEvent(ctx, tx, worldID, intakeEvent); insertErr != nil {
+				return true, false, insertErr
+			}
+		}
+		if assignmentCreated {
+			if insertErr := insertCityRealtimeCharacterCaseEvidenceAssignmentHead(ctx, tx, worldID, assignmentHead); insertErr != nil {
+				return true, false, insertErr
+			}
+			if insertErr := insertCityRealtimeCharacterCaseEvidenceAssignmentEvent(ctx, tx, worldID, assignmentEvent); insertErr != nil {
+				return true, false, insertErr
+			}
+		}
+		if procedureDispatchCreated {
+			if insertErr := insertCityRealtimeCharacterCaseProcedureDispatchHead(ctx, tx, worldID, procedureDispatchHead); insertErr != nil {
+				return true, false, insertErr
+			}
+			if insertErr := insertCityRealtimeCharacterCaseProcedureDispatchEvent(ctx, tx, worldID, procedureDispatchEvent); insertErr != nil {
+				return true, false, insertErr
+			}
 		}
 		if updateErr := updateCityRealtimeAgentIntentTerminal(ctx, tx, worldID, intent.IntentCode, cityRealtimeAgentIntentApplied, frameSequence); updateErr != nil {
 			return true, false, updateErr

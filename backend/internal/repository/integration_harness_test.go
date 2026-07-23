@@ -261,6 +261,53 @@ WHERE EXISTS (
 )
 ON CONFLICT (semantic_projection_version, spatial_profile_id) DO NOTHING`)
 	require.NoError(t, err, "restore integration realtime visual release policy")
+
+	// The tenant reset truncates users with CASCADE.  Profile versions have an
+	// optional administrator FK, so PostgreSQL also truncates the immutable A4
+	// profile catalog even though the built-in deterministic row has no actor.
+	// Restore that migration-owned catalog inside one gated transaction; this
+	// keeps every realtime-V2 world creation test on the same production genesis
+	// contract rather than silently taking a legacy/no-profile branch.
+	tx, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err, "begin integration realtime model profile reset")
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.ExecContext(ctx, `SELECT set_config('sub2api.city_realtime_agent_model_profile_config', 'on', TRUE)`)
+	require.NoError(t, err, "enable integration realtime model profile configuration")
+	_, err = tx.ExecContext(ctx, `
+INSERT INTO city_realtime_agent_model_profile_versions (
+    profile_code, profile_version, display_name, provider_code, provider_class,
+    route_ref, platform_group_id, model_identifier, allowed_agent_definition_codes,
+    request_schema_version, response_schema_version, temperature,
+    max_input_tokens, max_output_tokens, timeout_ms, max_concurrency, retry_limit,
+    max_profile_hourly_requests, max_profile_hourly_tokens,
+    max_world_hourly_requests, max_world_hourly_tokens,
+    max_agent_hourly_requests, max_agent_hourly_tokens,
+    max_owner_hourly_requests, max_owner_hourly_tokens,
+    circuit_breaker_failure_threshold, circuit_breaker_cooldown_seconds,
+    privacy_class, retention_policy, fallback_policy, profile_hash, budget_hash, metadata
+)
+VALUES (
+    'system.fake.deterministic', 1, 'Deterministic test adapter', 'fake.deterministic', 'deterministic',
+    'system.fake.deterministic', NULL, 'deterministic-v1',
+    '["system.root","system.npc_manager","character.npc","character.user"]'::jsonb,
+    'city-realtime-agent-observation-v1', 'agent-decision-v1', 0.000,
+    4096, 256, 5000, 1, 2,
+    120, 522240,
+    60, 261120,
+    24, 104448,
+    24, 104448,
+    3, 60,
+    'hash_only', 'hash_only', 'no_op', repeat('0', 64), repeat('0', 64), '{}'::jsonb
+)
+ON CONFLICT (profile_code, profile_version) DO NOTHING`)
+	require.NoError(t, err, "restore integration realtime model profile version")
+	_, err = tx.ExecContext(ctx, `
+INSERT INTO city_realtime_agent_model_profile_heads
+    (profile_code, active_version, status, metadata)
+VALUES ('system.fake.deterministic', 1, 'active', '{}'::jsonb)
+ON CONFLICT (profile_code) DO NOTHING`)
+	require.NoError(t, err, "restore integration realtime model profile head")
+	require.NoError(t, tx.Commit(), "commit integration realtime model profile reset")
 }
 
 // testEntTx 返回一个 ent 事务，用于需要事务隔离的测试。

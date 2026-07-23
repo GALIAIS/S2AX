@@ -1539,6 +1539,46 @@ func marshalCanonicalCityState(state cityHashState) ([]byte, error) {
 				return nil, fmt.Errorf("city realtime v2 canonical character case-review state is invalid: %w", err)
 			}
 		}
+		if state.RealtimeCharacterCaseReports != nil {
+			if err := validateCityRealtimeCharacterCaseReportHashState(state.RealtimeCharacterCaseReports); err != nil {
+				return nil, fmt.Errorf("city realtime v2 canonical character case-report state is invalid: %w", err)
+			}
+		}
+		if state.RealtimeCharacterCaseIntakes != nil {
+			if err := validateCityRealtimeCharacterCaseIntakeHashState(state.RealtimeCharacterCaseIntakes); err != nil {
+				return nil, fmt.Errorf("city realtime v2 canonical character case-intake state is invalid: %w", err)
+			}
+		}
+		if state.RealtimeCharacterCaseEvidence != nil {
+			if err := validateCityRealtimeCharacterCaseEvidenceHashState(state.RealtimeCharacterCaseEvidence); err != nil {
+				return nil, fmt.Errorf("city realtime v2 canonical character case-evidence state is invalid: %w", err)
+			}
+		}
+		if state.RealtimeCharacterCaseEvidenceAssignments != nil {
+			if err := validateCityRealtimeCharacterCaseEvidenceAssignmentHashState(state.RealtimeCharacterCaseEvidenceAssignments); err != nil {
+				return nil, fmt.Errorf("city realtime v2 canonical character case-evidence assignment state is invalid: %w", err)
+			}
+		}
+		if state.RealtimeCharacterCaseProcedureDispatches != nil {
+			if err := validateCityRealtimeCharacterCaseProcedureDispatchHashState(state.RealtimeCharacterCaseProcedureDispatches); err != nil {
+				return nil, fmt.Errorf("city realtime v2 canonical character case-procedure dispatch state is invalid: %w", err)
+			}
+		}
+		if state.RealtimeCharacterTasks != nil {
+			if err := validateCityRealtimeCharacterTaskHashState(state.RealtimeCharacterTasks); err != nil {
+				return nil, fmt.Errorf("city realtime v2 canonical character task state is invalid: %w", err)
+			}
+		}
+		if state.RealtimeCharacterNavigationPlans != nil {
+			if err := validateCityRealtimeCharacterNavigationPlanHashState(state.RealtimeCharacterNavigationPlans); err != nil {
+				return nil, fmt.Errorf("city realtime v2 canonical character navigation plan state is invalid: %w", err)
+			}
+		}
+		if state.RealtimeCharacterTrafficReservations != nil {
+			if err := validateCityRealtimeCharacterTrafficReservationHashState(state.RealtimeCharacterTrafficReservations); err != nil {
+				return nil, fmt.Errorf("city realtime v2 canonical character traffic reservation state is invalid: %w", err)
+			}
+		}
 		if state.RealtimeCharacterSocial != nil {
 			if err := validateCityRealtimeCharacterSocialHashState(state.RealtimeCharacterSocial); err != nil {
 				return nil, fmt.Errorf("city realtime v2 canonical character social state is invalid: %w", err)

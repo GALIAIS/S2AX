@@ -26,16 +26,23 @@ type cityRealtimeAgentMoveTarget struct {
 // owner identity, or authority to synthesize a new target. Schema v1 is frozen
 // for 1.3 worlds; schema v2 adds only owner-scoped Rule/Case candidates and
 // schema v3 adds only server-derived public social target candidates, and
-// schema v4 adds only acknowledged, owner-scoped Case-review candidates.
+// schema v4 adds only acknowledged, owner-scoped Case-review candidates, and
+// schema v5 adds only immutable structured-task codes, and schema v6 adds a
+// bounded server-derived list of static entrance endpoints for finite
+// navigation plans. The
+// 1.7 case-report action reuses the existing finite public-adjacency catalogue
+// rather than widening this immutable observation wire contract.
 type cityRealtimeAgentDecisionActionContext struct {
-	SchemaVersion            int                           `json:"schema_version"`
-	AvailableActivityCodes   []string                      `json:"available_activity_codes"`
-	AvailableMoveTargets     []cityRealtimeAgentMoveTarget `json:"available_move_targets"`
-	AvailablePortalCodes     []string                      `json:"available_portal_codes"`
-	AvailableRoleCodes       []string                      `json:"available_role_codes"`
-	AvailableCaseCodes       []string                      `json:"available_case_codes,omitempty"`
-	AvailableSocialTargets   []string                      `json:"available_social_target_codes,omitempty"`
-	AvailableCaseReviewCodes []string                      `json:"available_case_review_codes,omitempty"`
+	SchemaVersion                             int                           `json:"schema_version"`
+	AvailableActivityCodes                    []string                      `json:"available_activity_codes"`
+	AvailableMoveTargets                      []cityRealtimeAgentMoveTarget `json:"available_move_targets"`
+	AvailablePortalCodes                      []string                      `json:"available_portal_codes"`
+	AvailableRoleCodes                        []string                      `json:"available_role_codes"`
+	AvailableCaseCodes                        []string                      `json:"available_case_codes,omitempty"`
+	AvailableSocialTargets                    []string                      `json:"available_social_target_codes,omitempty"`
+	AvailableCaseReviewCodes                  []string                      `json:"available_case_review_codes,omitempty"`
+	AvailableTaskCodes                        []string                      `json:"available_task_codes,omitempty"`
+	AvailableNavigationDestinationPortalCodes []string                      `json:"available_navigation_destination_portal_codes,omitempty"`
 }
 
 // MarshalJSON keeps the 1.3 observation wire shape frozen while making the
@@ -112,6 +119,52 @@ func (contextPayload cityRealtimeAgentDecisionActionContext) MarshalJSON() ([]by
 			AvailableSocialTargets:   contextPayload.AvailableSocialTargets,
 			AvailableCaseReviewCodes: contextPayload.AvailableCaseReviewCodes,
 		})
+	case 5:
+		return json.Marshal(struct {
+			SchemaVersion            int                           `json:"schema_version"`
+			AvailableActivityCodes   []string                      `json:"available_activity_codes"`
+			AvailableMoveTargets     []cityRealtimeAgentMoveTarget `json:"available_move_targets"`
+			AvailablePortalCodes     []string                      `json:"available_portal_codes"`
+			AvailableRoleCodes       []string                      `json:"available_role_codes"`
+			AvailableCaseCodes       []string                      `json:"available_case_codes"`
+			AvailableSocialTargets   []string                      `json:"available_social_target_codes"`
+			AvailableCaseReviewCodes []string                      `json:"available_case_review_codes"`
+			AvailableTaskCodes       []string                      `json:"available_task_codes"`
+		}{
+			SchemaVersion:            contextPayload.SchemaVersion,
+			AvailableActivityCodes:   contextPayload.AvailableActivityCodes,
+			AvailableMoveTargets:     contextPayload.AvailableMoveTargets,
+			AvailablePortalCodes:     contextPayload.AvailablePortalCodes,
+			AvailableRoleCodes:       contextPayload.AvailableRoleCodes,
+			AvailableCaseCodes:       contextPayload.AvailableCaseCodes,
+			AvailableSocialTargets:   contextPayload.AvailableSocialTargets,
+			AvailableCaseReviewCodes: contextPayload.AvailableCaseReviewCodes,
+			AvailableTaskCodes:       contextPayload.AvailableTaskCodes,
+		})
+	case 6:
+		return json.Marshal(struct {
+			SchemaVersion                             int                           `json:"schema_version"`
+			AvailableActivityCodes                    []string                      `json:"available_activity_codes"`
+			AvailableMoveTargets                      []cityRealtimeAgentMoveTarget `json:"available_move_targets"`
+			AvailablePortalCodes                      []string                      `json:"available_portal_codes"`
+			AvailableRoleCodes                        []string                      `json:"available_role_codes"`
+			AvailableCaseCodes                        []string                      `json:"available_case_codes"`
+			AvailableSocialTargets                    []string                      `json:"available_social_target_codes"`
+			AvailableCaseReviewCodes                  []string                      `json:"available_case_review_codes"`
+			AvailableTaskCodes                        []string                      `json:"available_task_codes"`
+			AvailableNavigationDestinationPortalCodes []string                      `json:"available_navigation_destination_portal_codes"`
+		}{
+			SchemaVersion:                             contextPayload.SchemaVersion,
+			AvailableActivityCodes:                    contextPayload.AvailableActivityCodes,
+			AvailableMoveTargets:                      contextPayload.AvailableMoveTargets,
+			AvailablePortalCodes:                      contextPayload.AvailablePortalCodes,
+			AvailableRoleCodes:                        contextPayload.AvailableRoleCodes,
+			AvailableCaseCodes:                        contextPayload.AvailableCaseCodes,
+			AvailableSocialTargets:                    contextPayload.AvailableSocialTargets,
+			AvailableCaseReviewCodes:                  contextPayload.AvailableCaseReviewCodes,
+			AvailableTaskCodes:                        contextPayload.AvailableTaskCodes,
+			AvailableNavigationDestinationPortalCodes: contextPayload.AvailableNavigationDestinationPortalCodes,
+		})
 	default:
 		return nil, fmt.Errorf("unsupported realtime agent action context schema %d", contextPayload.SchemaVersion)
 	}
@@ -127,7 +180,7 @@ func cityRealtimeAgentActionContextSortedUnique(values []string, valid func(stri
 }
 
 func cityRealtimeAgentDecisionActionContextValid(contextPayload cityRealtimeAgentDecisionActionContext) bool {
-	if contextPayload.SchemaVersion < 1 || contextPayload.SchemaVersion > 4 ||
+	if contextPayload.SchemaVersion < 1 || contextPayload.SchemaVersion > 6 ||
 		contextPayload.AvailableActivityCodes == nil ||
 		contextPayload.AvailableMoveTargets == nil ||
 		contextPayload.AvailablePortalCodes == nil ||
@@ -149,7 +202,8 @@ func cityRealtimeAgentDecisionActionContextValid(contextPayload cityRealtimeAgen
 		// shape. Reject a supplied empty array as well, so a malformed v1
 		// Observation cannot masquerade as the v2 contract.
 		if contextPayload.AvailableCaseCodes != nil || contextPayload.AvailableSocialTargets != nil ||
-			contextPayload.AvailableCaseReviewCodes != nil {
+			contextPayload.AvailableCaseReviewCodes != nil || contextPayload.AvailableTaskCodes != nil ||
+			contextPayload.AvailableNavigationDestinationPortalCodes != nil {
 			return false
 		}
 	} else {
@@ -177,6 +231,24 @@ func cityRealtimeAgentDecisionActionContextValid(contextPayload cityRealtimeAgen
 				return false
 			}
 		}
+	}
+	if contextPayload.SchemaVersion < 5 {
+		if contextPayload.AvailableTaskCodes != nil {
+			return false
+		}
+	} else if contextPayload.AvailableTaskCodes == nil ||
+		!cityRealtimeAgentActionContextSortedUnique(contextPayload.AvailableTaskCodes, cityRealtimeCharacterTaskCodeValid) {
+		return false
+	}
+	if contextPayload.SchemaVersion < 6 {
+		if contextPayload.AvailableNavigationDestinationPortalCodes != nil {
+			return false
+		}
+	} else if contextPayload.AvailableNavigationDestinationPortalCodes == nil ||
+		!cityRealtimeAgentActionContextSortedUnique(contextPayload.AvailableNavigationDestinationPortalCodes, func(code string) bool {
+			return cityRealtimeDueEventIdentifierValid(code, 128)
+		}) {
+		return false
 	}
 	for index, target := range contextPayload.AvailableMoveTargets {
 		if err := cityspatial.ValidateZ(target.Z, cityspatial.MinimumZ, cityspatial.MaximumZ); err != nil {
@@ -254,6 +326,12 @@ func cityRealtimeAgentDecisionActionContextFromObservation(
 }
 
 func cityRealtimeAgentDecisionActionContextSchemaVersion(binding cityRealtimeAgentPolicyBinding) int {
+	if cityRealtimeCharacterNavigationPlanRuntimeEnabled(binding) {
+		return 6
+	}
+	if cityRealtimeAgentCharacterTaskRuntimeEnabled(binding) {
+		return 5
+	}
 	if cityRealtimeAgentCharacterCaseReviewRuntimeEnabled(binding) {
 		return 4
 	}
@@ -321,10 +399,28 @@ func cityRealtimeAgentDecisionValidatePublishedAction(
 			return ErrCityRealtimeAgentDecisionUnavailable.WithMetadata(map[string]string{"field": "published_case_review"})
 		}
 		return nil
+	case cityRealtimeAgentIntentActionCaseReport:
+		code, parseErr := cityRealtimeAgentDecisionCaseReportTargetCodeFromArguments(arguments)
+		if parseErr != nil || !cityRealtimeAgentActionContextContains(contextPayload.AvailableSocialTargets, code) {
+			return ErrCityRealtimeAgentDecisionUnavailable.WithMetadata(map[string]string{"field": "published_case_report_target"})
+		}
+		return nil
 	case cityRealtimeAgentIntentActionSocial:
 		code, parseErr := cityRealtimeAgentDecisionSocialTargetCodeFromArguments(arguments)
 		if parseErr != nil || !cityRealtimeAgentActionContextContains(contextPayload.AvailableSocialTargets, code) {
 			return ErrCityRealtimeAgentDecisionUnavailable.WithMetadata(map[string]string{"field": "published_social_target"})
+		}
+		return nil
+	case cityRealtimeAgentIntentActionTask:
+		code, parseErr := cityRealtimeAgentDecisionTaskCodeFromArguments(arguments)
+		if parseErr != nil || !cityRealtimeAgentActionContextContains(contextPayload.AvailableTaskCodes, code) {
+			return ErrCityRealtimeAgentDecisionUnavailable.WithMetadata(map[string]string{"field": "published_task"})
+		}
+		return nil
+	case cityRealtimeAgentIntentActionNavigation:
+		code, parseErr := cityRealtimeAgentDecisionNavigationPortalCodeFromArguments(arguments)
+		if parseErr != nil || !cityRealtimeAgentActionContextContains(contextPayload.AvailableNavigationDestinationPortalCodes, code) {
+			return ErrCityRealtimeAgentDecisionUnavailable.WithMetadata(map[string]string{"field": "published_navigation_destination"})
 		}
 		return nil
 	case cityRealtimeAgentIntentActionMove:
@@ -527,6 +623,12 @@ func cityRealtimeAgentDecisionCharacterActionContext(
 	if cityRealtimeAgentCharacterCaseReviewRuntimeEnabled(binding) {
 		contextPayload.AvailableCaseReviewCodes = make([]string, 0)
 	}
+	if cityRealtimeAgentCharacterTaskRuntimeEnabled(binding) {
+		contextPayload.AvailableTaskCodes = make([]string, 0)
+	}
+	if cityRealtimeCharacterNavigationPlanRuntimeEnabled(binding) {
+		contextPayload.AvailableNavigationDestinationPortalCodes = make([]string, 0)
+	}
 	if cityRealtimeAgentDecisionActionAllowed(binding, agent, cityRealtimeAgentIntentActionActivity) {
 		availability, err := cityRealtimeCharacterActivityAvailability(
 			ctx, queryer, worldID, worldTimeUS, actorState, profile, runtime,
@@ -593,6 +695,16 @@ func cityRealtimeAgentDecisionCharacterActionContext(
 		}
 		contextPayload.AvailableSocialTargets = codes
 	}
+	if cityRealtimeAgentDecisionActionAllowed(binding, agent, cityRealtimeAgentIntentActionCaseReport) {
+		reportBinding, err := loadCityRealtimeCharacterCaseReportBinding(ctx, queryer, worldID)
+		if err != nil {
+			return cityRealtimeAgentDecisionActionContext{}, err
+		}
+		if reportBinding == nil || reportBinding.AgentBindingHash != binding.BindingHash {
+			return cityRealtimeAgentDecisionActionContext{},
+				ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "realtime_character_case_report_scope"})
+		}
+	}
 	if cityRealtimeAgentDecisionActionAllowed(binding, agent, cityRealtimeAgentIntentActionCaseReview) {
 		codes, err := cityRealtimeAgentDecisionAvailableCaseReviewCodes(
 			ctx, queryer, worldID, worldTimeUS, *agent.ActorCode, binding,
@@ -601,6 +713,24 @@ func cityRealtimeAgentDecisionCharacterActionContext(
 			return cityRealtimeAgentDecisionActionContext{}, err
 		}
 		contextPayload.AvailableCaseReviewCodes = codes
+	}
+	if cityRealtimeAgentDecisionActionAllowed(binding, agent, cityRealtimeAgentIntentActionTask) {
+		codes, err := cityRealtimeCharacterAvailableTaskCodes(
+			ctx, queryer, worldID, worldTimeUS, actorState, profile, runtime, *agent.ActorCode, binding,
+		)
+		if err != nil {
+			return cityRealtimeAgentDecisionActionContext{}, err
+		}
+		contextPayload.AvailableTaskCodes = codes
+	}
+	if cityRealtimeAgentDecisionActionAllowed(binding, agent, cityRealtimeAgentIntentActionNavigation) {
+		codes, err := cityRealtimeCharacterAvailableNavigationDestinationPortalCodes(
+			ctx, queryer, worldID, *agent.ActorCode, actorState, binding,
+		)
+		if err != nil {
+			return cityRealtimeAgentDecisionActionContext{}, err
+		}
+		contextPayload.AvailableNavigationDestinationPortalCodes = codes
 	}
 	if !cityRealtimeAgentDecisionActionContextValid(contextPayload) {
 		return cityRealtimeAgentDecisionActionContext{}, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "realtime_agent_action_context"})

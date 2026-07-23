@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/migrations"
+	"github.com/lib/pq"
 )
 
 // schemaMigrationsTableDDL 定义迁移记录表的 DDL。
@@ -249,7 +250,7 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 		// 执行迁移 SQL
 		if _, err := tx.ExecContext(ctx, content); err != nil {
 			_ = tx.Rollback()
-			return fmt.Errorf("apply migration %s: %w", name, err)
+			return fmt.Errorf("apply migration %s: %s: %w", name, describeMigrationExecutionError(err), err)
 		}
 
 		// 记录迁移已完成，保存文件名和校验和
@@ -266,6 +267,28 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 	}
 
 	return nil
+}
+
+// describeMigrationExecutionError preserves PostgreSQL's statement offset in
+// startup logs. A migration file often contains many immutable function and
+// trigger definitions, so the driver message alone is not enough to repair a
+// syntax failure safely.
+func describeMigrationExecutionError(err error) string {
+	var pgErr *pq.Error
+	if !errors.As(err, &pgErr) {
+		return err.Error()
+	}
+	parts := []string{pgErr.Message}
+	if pgErr.Code != "" {
+		parts = append(parts, "sqlstate="+string(pgErr.Code))
+	}
+	if pgErr.Position != "" {
+		parts = append(parts, "position="+pgErr.Position)
+	}
+	if pgErr.Where != "" {
+		parts = append(parts, "where="+pgErr.Where)
+	}
+	return strings.Join(parts, ", ")
 }
 
 type migrationConnection interface {

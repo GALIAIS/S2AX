@@ -8,19 +8,53 @@ import (
 	"strings"
 )
 
+const (
+	cityRealtimeCharacterSocialRelationExplanationSchemaVersion = 1
+
+	cityRealtimeCharacterSocialContactTierNone        = "no_contact"
+	cityRealtimeCharacterSocialContactTierInitial     = "initial_contact"
+	cityRealtimeCharacterSocialContactTierRecurring   = "recurring_contact"
+	cityRealtimeCharacterSocialContactTierEstablished = "established_contact"
+	cityRealtimeCharacterSocialContactTierCapped      = "capped_contact"
+
+	cityRealtimeCharacterSocialInteractionPatternNone       = "none"
+	cityRealtimeCharacterSocialInteractionPatternOutbound   = "outbound_only"
+	cityRealtimeCharacterSocialInteractionPatternInbound    = "inbound_only"
+	cityRealtimeCharacterSocialInteractionPatternReciprocal = "reciprocal"
+
+	cityRealtimeCharacterSocialLastInteractionNone     = "none"
+	cityRealtimeCharacterSocialLastInteractionOutbound = "outbound"
+	cityRealtimeCharacterSocialLastInteractionInbound  = "inbound"
+)
+
+// CityRealtimeCharacterSocialRelationExplanation is a versioned, read-only
+// explanation of a relation head. It is recomputed entirely from the sealed
+// social event chain and deliberately contains no message text, private
+// personality, model output, Agent identity, owner identity, or provider
+// data. Its closed vocabulary lets clients explain a visible relationship
+// without treating a greeting as a promise, a legal fact, or a reward.
+type CityRealtimeCharacterSocialRelationExplanation struct {
+	SchemaVersion            int      `json:"schema_version"`
+	ContactTier              string   `json:"contact_tier"`
+	InteractionPattern       string   `json:"interaction_pattern"`
+	LastInteractionDirection string   `json:"last_interaction_direction"`
+	ReasonCodes              []string `json:"reason_codes"`
+}
+
 // CityRealtimeCharacterSocialRelation is the member-safe view of one
 // relation involving the caller's own character. It deliberately exposes no
 // owner id, agent code, private personality, message, model output, or
 // provider data.
 type CityRealtimeCharacterSocialRelation struct {
-	ActorCode         string `json:"actor_code"`
-	ActorKind         string `json:"actor_kind"`
-	PublicLabel       string `json:"public_label"`
-	LifecycleStatus   string `json:"lifecycle_status"`
-	RelationRevision  int64  `json:"relation_revision"`
-	LastFrameSequence int64  `json:"last_frame_sequence"`
-	AffinityMilli     int64  `json:"affinity_milli"`
-	InteractionCount  int64  `json:"interaction_count"`
+	ActorCode         string                                         `json:"actor_code"`
+	ActorKind         string                                         `json:"actor_kind"`
+	PublicLabel       string                                         `json:"public_label"`
+	LifecycleStatus   string                                         `json:"lifecycle_status"`
+	RelationRevision  int64                                          `json:"relation_revision"`
+	LastFrameSequence int64                                          `json:"last_frame_sequence"`
+	AffinityMilli     int64                                          `json:"affinity_milli"`
+	InteractionCount  int64                                          `json:"interaction_count"`
+	Explanation       CityRealtimeCharacterSocialRelationExplanation `json:"explanation"`
 }
 
 type CityRealtimeCharacterSocialRelationPage struct {
@@ -89,6 +123,106 @@ func validateCityRealtimeCharacterSocialRelationTarget(
 	}
 }
 
+// projectCityRealtimeCharacterSocialRelationExplanation derives a strictly
+// bounded explanation from one verified relation head and the aggregate/last
+// event facts read from its own append-only chain. It is intentionally a
+// projection, not a new social state: it has no mutation API, does not enter
+// the canonical hash, and can be recreated exactly from the sealed head and
+// events at any point.
+func projectCityRealtimeCharacterSocialRelationExplanation(
+	head cityRealtimeCharacterSocialHead,
+	ownerActorCode, targetActorCode string,
+	outboundInteractions, inboundInteractions int64,
+	lastInitiatorCode string,
+) (CityRealtimeCharacterSocialRelationExplanation, error) {
+	if !cityRealtimeCharacterSocialHeadValid(head) ||
+		!cityRealtimeAgentIdentifierValid(ownerActorCode, 96) ||
+		!cityRealtimeAgentIdentifierValid(targetActorCode, 96) ||
+		ownerActorCode == targetActorCode || outboundInteractions < 0 || inboundInteractions < 0 {
+		return CityRealtimeCharacterSocialRelationExplanation{}, ErrCitySimulationInvariant.WithMetadata(map[string]string{
+			"field": "realtime_character_social_relation_explanation",
+		})
+	}
+	low, high, err := cityRealtimeCharacterSocialPair(ownerActorCode, targetActorCode)
+	if err != nil || low != head.ActorCodeLow || high != head.ActorCodeHigh ||
+		outboundInteractions+inboundInteractions != head.InteractionCount ||
+		head.RelationRevision != head.InteractionCount {
+		return CityRealtimeCharacterSocialRelationExplanation{}, ErrCitySimulationInvariant.WithMetadata(map[string]string{
+			"field": "realtime_character_social_relation_explanation",
+		})
+	}
+	expectedAffinity := cityRealtimeCharacterSocialAffinityMaximum
+	if head.InteractionCount <= cityRealtimeCharacterSocialAffinityMaximum/cityRealtimeCharacterSocialAffinityStep {
+		expectedAffinity = head.InteractionCount * cityRealtimeCharacterSocialAffinityStep
+	}
+	if head.AffinityMilli != expectedAffinity {
+		return CityRealtimeCharacterSocialRelationExplanation{}, ErrCitySimulationInvariant.WithMetadata(map[string]string{
+			"field": "realtime_character_social_relation_explanation",
+		})
+	}
+
+	explanation := CityRealtimeCharacterSocialRelationExplanation{
+		SchemaVersion: cityRealtimeCharacterSocialRelationExplanationSchemaVersion,
+		ReasonCodes:   make([]string, 0, 4),
+	}
+	if head.InteractionCount == 0 {
+		if lastInitiatorCode != "" {
+			return CityRealtimeCharacterSocialRelationExplanation{}, ErrCitySimulationInvariant.WithMetadata(map[string]string{
+				"field": "realtime_character_social_relation_last_event",
+			})
+		}
+		explanation.ContactTier = cityRealtimeCharacterSocialContactTierNone
+		explanation.InteractionPattern = cityRealtimeCharacterSocialInteractionPatternNone
+		explanation.LastInteractionDirection = cityRealtimeCharacterSocialLastInteractionNone
+		explanation.ReasonCodes = append(explanation.ReasonCodes, "no_greeting_recorded")
+		return explanation, nil
+	}
+	if lastInitiatorCode != ownerActorCode && lastInitiatorCode != targetActorCode {
+		return CityRealtimeCharacterSocialRelationExplanation{}, ErrCitySimulationInvariant.WithMetadata(map[string]string{
+			"field": "realtime_character_social_relation_last_event",
+		})
+	}
+
+	switch {
+	case head.AffinityMilli == cityRealtimeCharacterSocialAffinityMaximum:
+		explanation.ContactTier = cityRealtimeCharacterSocialContactTierCapped
+	case head.InteractionCount == 1:
+		explanation.ContactTier = cityRealtimeCharacterSocialContactTierInitial
+	case head.InteractionCount <= 4:
+		explanation.ContactTier = cityRealtimeCharacterSocialContactTierRecurring
+	default:
+		explanation.ContactTier = cityRealtimeCharacterSocialContactTierEstablished
+	}
+	switch {
+	case outboundInteractions > 0 && inboundInteractions > 0:
+		explanation.InteractionPattern = cityRealtimeCharacterSocialInteractionPatternReciprocal
+	case outboundInteractions > 0:
+		explanation.InteractionPattern = cityRealtimeCharacterSocialInteractionPatternOutbound
+	case inboundInteractions > 0:
+		explanation.InteractionPattern = cityRealtimeCharacterSocialInteractionPatternInbound
+	default:
+		return CityRealtimeCharacterSocialRelationExplanation{}, ErrCitySimulationInvariant.WithMetadata(map[string]string{
+			"field": "realtime_character_social_relation_interaction_pattern",
+		})
+	}
+	if lastInitiatorCode == ownerActorCode {
+		explanation.LastInteractionDirection = cityRealtimeCharacterSocialLastInteractionOutbound
+	} else {
+		explanation.LastInteractionDirection = cityRealtimeCharacterSocialLastInteractionInbound
+	}
+	explanation.ReasonCodes = append(explanation.ReasonCodes, "greeting_recorded")
+	if head.InteractionCount > 1 {
+		explanation.ReasonCodes = append(explanation.ReasonCodes, "repeated_greeting")
+	}
+	if explanation.InteractionPattern == cityRealtimeCharacterSocialInteractionPatternReciprocal {
+		explanation.ReasonCodes = append(explanation.ReasonCodes, "reciprocal_greeting")
+	}
+	if head.AffinityMilli == cityRealtimeCharacterSocialAffinityMaximum {
+		explanation.ReasonCodes = append(explanation.ReasonCodes, "affinity_cap_reached")
+	}
+	return explanation, nil
+}
+
 // ListRealtimeMyCharacterSocialRelations returns only relation heads that
 // include the requesting user's own character. The target is resolved from
 // the public actor identity table; no account or Agent ownership join is
@@ -145,7 +279,10 @@ SELECT head.actor_code_low, head.actor_code_high, head.relation_revision,
        head.last_frame_sequence, head.affinity_milli, head.interaction_count,
        head.event_chain_hash, head.state_hash,
        identity.actor_code, identity.actor_kind, identity.public_label,
-       identity.lifecycle_status
+       identity.lifecycle_status,
+       interaction_summary.outbound_interaction_count,
+       interaction_summary.inbound_interaction_count,
+       last_event.event_sequence, last_event.initiator_code, last_event.event_hash
 FROM city_realtime_character_social_heads head
 JOIN city_realtime_actor_identities identity
   ON identity.world_id = head.world_id
@@ -153,6 +290,19 @@ JOIN city_realtime_actor_identities identity
      WHEN head.actor_code_low = $2 THEN head.actor_code_high
      ELSE head.actor_code_low
    END
+LEFT JOIN LATERAL (
+    SELECT COUNT(*) FILTER (WHERE event.initiator_code = $2)::BIGINT AS outbound_interaction_count,
+           COUNT(*) FILTER (WHERE event.recipient_code = $2)::BIGINT AS inbound_interaction_count
+    FROM city_realtime_character_social_events event
+    WHERE event.world_id = head.world_id
+      AND event.actor_code_low = head.actor_code_low
+      AND event.actor_code_high = head.actor_code_high
+) interaction_summary ON TRUE
+LEFT JOIN city_realtime_character_social_events last_event
+  ON last_event.world_id = head.world_id
+ AND last_event.actor_code_low = head.actor_code_low
+ AND last_event.actor_code_high = head.actor_code_high
+ AND last_event.event_sequence = head.relation_revision
 WHERE head.world_id = $1
   AND (head.actor_code_low = $2 OR head.actor_code_high = $2)
   AND (
@@ -171,11 +321,16 @@ LIMIT $6`, input.WorldID, actorCode, cursor.FrameSequence, cursor.ActorCodeLow, 
 	for rows.Next() {
 		head := cityRealtimeCharacterSocialHead{}
 		item := CityRealtimeCharacterSocialRelation{}
+		var lastEventSequence sql.NullInt64
+		var lastInitiatorCode, lastEventHash sql.NullString
+		var outboundInteractions, inboundInteractions int64
 		if err = rows.Scan(
 			&head.ActorCodeLow, &head.ActorCodeHigh, &head.RelationRevision,
 			&head.LastFrameSequence, &head.AffinityMilli, &head.InteractionCount,
 			&head.EventChainHash, &head.StateHash,
 			&item.ActorCode, &item.ActorKind, &item.PublicLabel, &item.LifecycleStatus,
+			&outboundInteractions, &inboundInteractions,
+			&lastEventSequence, &lastInitiatorCode, &lastEventHash,
 		); err != nil {
 			return nil, fmt.Errorf("scan realtime character social relation: %w", err)
 		}
@@ -198,10 +353,29 @@ LIMIT $6`, input.WorldID, actorCode, cursor.FrameSequence, cursor.ActorCodeLow, 
 		if !cityRealtimeCharacterSocialHeadValid(head) {
 			return nil, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "realtime_character_social_relation_head"})
 		}
+		lastInitiator := ""
+		if head.InteractionCount == 0 {
+			if lastEventSequence.Valid || lastInitiatorCode.Valid || lastEventHash.Valid {
+				return nil, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "realtime_character_social_relation_last_event"})
+			}
+		} else {
+			if !lastEventSequence.Valid || !lastInitiatorCode.Valid || !lastEventHash.Valid ||
+				lastEventSequence.Int64 != head.RelationRevision || lastEventHash.String != head.EventChainHash {
+				return nil, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "realtime_character_social_relation_last_event"})
+			}
+			lastInitiator = lastInitiatorCode.String
+		}
+		explanation, projectionErr := projectCityRealtimeCharacterSocialRelationExplanation(
+			head, actorCode, item.ActorCode, outboundInteractions, inboundInteractions, lastInitiator,
+		)
+		if projectionErr != nil {
+			return nil, projectionErr
+		}
 		item.RelationRevision = head.RelationRevision
 		item.LastFrameSequence = head.LastFrameSequence
 		item.AffinityMilli = head.AffinityMilli
 		item.InteractionCount = head.InteractionCount
+		item.Explanation = explanation
 		heads = append(heads, head)
 		page.Items = append(page.Items, item)
 	}

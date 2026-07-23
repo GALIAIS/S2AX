@@ -51,6 +51,8 @@ export default {
           visualPackPublishHint: '仅开放管理员审核后的视觉包暂存、审核与发布工作流。关闭后已发布的世界资料仍可读取，新的视觉资料不能进入发布态。',
           realtimeScheduler: '允许生产实时调度',
           realtimeSchedulerHint: '仅在部署并验证 Clock Authority 后开启。未配置可信时间源时 worker 会安全拒绝，不会使用浏览器或未校验的系统时间推进世界。',
+          agentDecisionWorker: '允许 Agent 模型决策执行',
+          agentDecisionWorkerHint: '仅消费服务端已封存的 Agent 决策队列。它独立于时间调度，默认关闭；未注册受控模型适配器或熔断冷却期间，任务只会安全延后，不会借用用户密钥或暴露模型内容。',
         },
         affiliate: {
           title: '邀请返利',

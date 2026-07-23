@@ -198,6 +198,7 @@ const dropdownStyle = computed(() => {
 
   const rect = triggerRect.value
   const viewportWidth = document.documentElement.clientWidth || window.innerWidth
+  const viewportHeight = document.documentElement.clientHeight || window.innerHeight
   const viewportMargin = 8
   const width = Math.min(rect.width, Math.max(0, viewportWidth - viewportMargin * 2))
   const maxLeft = Math.max(viewportMargin, viewportWidth - viewportMargin - width)
@@ -211,9 +212,11 @@ const dropdownStyle = computed(() => {
   }
 
   if (dropdownPosition.value === 'top') {
-    style.bottom = `${window.innerHeight - rect.top + 4}px`
+    style.bottom = `${viewportHeight - rect.top + 4}px`
+    style.maxHeight = `${Math.max(96, rect.top - viewportMargin - 4)}px`
   } else {
     style.top = `${rect.bottom + 4}px`
+    style.maxHeight = `${Math.max(96, viewportHeight - rect.bottom - viewportMargin - 4)}px`
   }
 
   return style
@@ -506,11 +509,17 @@ onUnmounted(() => {
   @apply rounded text-gray-400 transition-colors;
   @apply hover:text-gray-600 dark:hover:text-gray-200;
 }
+
+@media (max-width: 639px) {
+  .select-trigger {
+    min-height: 2.75rem;
+  }
+}
 </style>
 
 <style>
 .select-dropdown-portal {
-  @apply overflow-hidden;
+  @apply flex flex-col overflow-hidden;
   background: var(--ui-surface-solid);
   border: 1px solid var(--ui-separator);
   box-shadow: var(--ui-shadow);
@@ -518,7 +527,7 @@ onUnmounted(() => {
 }
 
 .select-dropdown-portal .select-search {
-  @apply flex items-center gap-2 px-4 py-2;
+  @apply flex flex-shrink-0 items-center gap-2 px-4 py-2;
   @apply border-b border-gray-100 dark:border-dark-700;
 }
 
@@ -530,12 +539,14 @@ onUnmounted(() => {
 }
 
 .select-dropdown-portal .select-options {
-  @apply max-h-80 overflow-y-auto p-1 outline-none;
+  @apply min-h-0 flex-1 overflow-y-auto p-1 outline-none;
+  max-height: min(20rem, calc(100dvh - 6rem));
 }
 
 .select-dropdown-portal .select-option {
-  @apply flex items-center justify-between gap-2;
+  @apply flex min-w-0 items-center justify-between gap-2;
   @apply px-3 py-2.5 text-sm;
+  min-height: 2.75rem;
   @apply cursor-pointer transition-[background-color,color] duration-150;
   color: var(--ui-label);
   pointer-events: auto !important;

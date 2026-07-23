@@ -609,6 +609,7 @@ export interface SystemSettings {
   city_pixel_renderer_enabled: boolean;
   city_visual_pack_publish_enabled: boolean;
   city_realtime_scheduler_enabled: boolean;
+  city_realtime_agent_decision_worker_enabled: boolean;
 
   // Cyber session block
   cyber_session_block_enabled: boolean;
@@ -894,6 +895,7 @@ export interface UpdateSettingsRequest {
   city_pixel_renderer_enabled?: boolean;
   city_visual_pack_publish_enabled?: boolean;
   city_realtime_scheduler_enabled?: boolean;
+  city_realtime_agent_decision_worker_enabled?: boolean;
 
   // Cyber session block
   cyber_session_block_enabled?: boolean;

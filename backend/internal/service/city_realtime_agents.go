@@ -12,21 +12,28 @@ import (
 const (
 	cityRealtimeAgentRuntimeSchemaVersion = 1
 	cityRealtimeAgentCorePolicyID         = "city-realtime-agent-core"
-	// New worlds bind 1.6.0. Each historical policy remains an explicit
+	// New worlds bind 1.13.0. Each historical policy remains an explicit
 	// compatibility branch: a world pin commits both its authorization hashes
 	// and its canonical decision-state shape, so an upgraded binary must never
 	// reinterpret an old binding as the current policy.
-	cityRealtimeAgentCorePolicyVersion         = "1.6.0"
-	cityRealtimeAgentCorePolicyVersionReview   = "1.6.0"
-	cityRealtimeAgentCorePolicyVersionCase     = "1.4.0"
-	cityRealtimeAgentCorePolicyVersionSocial   = "1.5.0"
-	cityRealtimeAgentCorePolicyVersionActions  = "1.3.0"
-	cityRealtimeAgentCorePolicyVersionAutonomy = "1.2.0"
-	cityRealtimeAgentCorePolicyVersionDecision = "1.1.0"
-	cityRealtimeAgentCorePolicyVersionLegacy   = "1.0.0"
-	cityRealtimeAgentBindingVersion            = "city-realtime-agent-binding-v1"
-	cityRealtimeAgentDefinitionVersion         = "city-realtime-agent-definition-v1"
-	cityRealtimeAgentAuthorizationVersion      = "city-realtime-agent-authorization-v1"
+	cityRealtimeAgentCorePolicyVersion                   = "1.13.0"
+	cityRealtimeAgentCorePolicyVersionNavigationPlan     = "1.13.0"
+	cityRealtimeAgentCorePolicyVersionTask               = "1.12.0"
+	cityRealtimeAgentCorePolicyVersionProcedureDispatch  = "1.11.0"
+	cityRealtimeAgentCorePolicyVersionEvidenceAssignment = "1.10.0"
+	cityRealtimeAgentCorePolicyVersionEvidence           = "1.9.0"
+	cityRealtimeAgentCorePolicyVersionIntake             = "1.8.0"
+	cityRealtimeAgentCorePolicyVersionReport             = "1.7.0"
+	cityRealtimeAgentCorePolicyVersionReview             = "1.6.0"
+	cityRealtimeAgentCorePolicyVersionCase               = "1.4.0"
+	cityRealtimeAgentCorePolicyVersionSocial             = "1.5.0"
+	cityRealtimeAgentCorePolicyVersionActions            = "1.3.0"
+	cityRealtimeAgentCorePolicyVersionAutonomy           = "1.2.0"
+	cityRealtimeAgentCorePolicyVersionDecision           = "1.1.0"
+	cityRealtimeAgentCorePolicyVersionLegacy             = "1.0.0"
+	cityRealtimeAgentBindingVersion                      = "city-realtime-agent-binding-v1"
+	cityRealtimeAgentDefinitionVersion                   = "city-realtime-agent-definition-v1"
+	cityRealtimeAgentAuthorizationVersion                = "city-realtime-agent-authorization-v1"
 
 	cityRealtimeAgentRootCode       = "system.root"
 	cityRealtimeAgentNPCManagerCode = "system.npc-manager"
@@ -524,6 +531,157 @@ func cityRealtimeAgentAuthorizationScopes(binding cityRealtimeAgentPolicyBinding
 				"character.case.acknowledge",
 				"character.case.review.file",
 				"character.social.greet",
+				"character.control.configure",
+				"agent.decision.request",
+			}, true
+		default:
+			return nil, false
+		}
+	}
+	// Policy 1.7.0 retains every earlier bounded Character action and adds a
+	// non-evidentiary adjacent-Actor case-report intake. It is intentionally a
+	// separate authorization branch so 1.6.0 instance hashes stay immutable.
+	if binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionReport {
+		switch agentSubtype {
+		case "system.root":
+			return []string{"agent.lifecycle.observe", "agent.lifecycle.supervise", "agent.decision.request"}, true
+		case "system.npc_manager":
+			return []string{"npc.lifecycle.observe", "npc.lifecycle.supervise", "agent.decision.request"}, true
+		case "character.npc":
+			return []string{"actor.patrol.deterministic", "character.observe.public", "character.intent.propose", "agent.decision.request"}, true
+		case "character.user":
+			return []string{
+				"character.observe.private",
+				"character.intent.propose",
+				"character.activity.propose",
+				"character.navigation.propose",
+				"character.role.propose",
+				"character.case.acknowledge",
+				"character.case.review.file",
+				"character.case.report.file",
+				"character.social.greet",
+				"character.control.configure",
+				"agent.decision.request",
+			}, true
+		default:
+			return nil, false
+		}
+	}
+	// Policy 1.8.0 preserves 1.7.0's action surface exactly. Its only new
+	// canonical state is an evidence-required Case-intake work item created by
+	// the already-sealed report reducer; no model receives a wider authority.
+	if binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionIntake {
+		switch agentSubtype {
+		case "system.root":
+			return []string{"agent.lifecycle.observe", "agent.lifecycle.supervise", "agent.decision.request"}, true
+		case "system.npc_manager":
+			return []string{"npc.lifecycle.observe", "npc.lifecycle.supervise", "agent.decision.request"}, true
+		case "character.npc":
+			return []string{"actor.patrol.deterministic", "character.observe.public", "character.intent.propose", "agent.decision.request"}, true
+		case "character.user":
+			return []string{
+				"character.observe.private",
+				"character.intent.propose",
+				"character.activity.propose",
+				"character.navigation.propose",
+				"character.role.propose",
+				"character.case.acknowledge",
+				"character.case.review.file",
+				"character.case.report.file",
+				"character.social.greet",
+				"character.control.configure",
+				"agent.decision.request",
+			}, true
+		default:
+			return nil, false
+		}
+	}
+	// Policies 1.9.0/1.10.0/1.11.0 preserve the complete 1.8.0 model surface.
+	// Their server-owned source/correlation/procedural-routing adapters use only
+	// sealed facts and never give a model evidence, case, or adjudication power.
+	if binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionEvidence ||
+		binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionEvidenceAssignment ||
+		binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionProcedureDispatch {
+		switch agentSubtype {
+		case "system.root":
+			return []string{"agent.lifecycle.observe", "agent.lifecycle.supervise", "agent.decision.request"}, true
+		case "system.npc_manager":
+			return []string{"npc.lifecycle.observe", "npc.lifecycle.supervise", "agent.decision.request"}, true
+		case "character.npc":
+			return []string{"actor.patrol.deterministic", "character.observe.public", "character.intent.propose", "agent.decision.request"}, true
+		case "character.user":
+			return []string{
+				"character.observe.private",
+				"character.intent.propose",
+				"character.activity.propose",
+				"character.navigation.propose",
+				"character.role.propose",
+				"character.case.acknowledge",
+				"character.case.review.file",
+				"character.case.report.file",
+				"character.social.greet",
+				"character.control.configure",
+				"agent.decision.request",
+			}, true
+		default:
+			return nil, false
+		}
+	}
+	// Policy 1.12.0 adds one bounded structured-task acceptance scope. Task
+	// completion remains server-derived from a later sealed activity event; the
+	// Agent cannot grant rewards, rewrite an activity, or manufacture a result.
+	if binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionTask {
+		switch agentSubtype {
+		case "system.root":
+			return []string{"agent.lifecycle.observe", "agent.lifecycle.supervise", "agent.decision.request"}, true
+		case "system.npc_manager":
+			return []string{"npc.lifecycle.observe", "npc.lifecycle.supervise", "agent.decision.request"}, true
+		case "character.npc":
+			return []string{"actor.patrol.deterministic", "character.observe.public", "character.intent.propose", "agent.decision.request"}, true
+		case "character.user":
+			return []string{
+				"character.observe.private",
+				"character.intent.propose",
+				"character.activity.propose",
+				"character.navigation.propose",
+				"character.role.propose",
+				"character.case.acknowledge",
+				"character.case.review.file",
+				"character.case.report.file",
+				"character.social.greet",
+				"character.task.accept",
+				"character.control.configure",
+				"agent.decision.request",
+			}, true
+		default:
+			return nil, false
+		}
+	}
+	// Policy 1.13.0 retains the complete 1.12 action surface and adds only a
+	// bounded plan request.  The actual route is recomputed by the authoritative
+	// realtime movement reducer; this scope never grants coordinate, traffic, or
+	// actor-control authority to the provider.
+	if binding.PolicyVersion == cityRealtimeAgentCorePolicyVersionNavigationPlan {
+		switch agentSubtype {
+		case "system.root":
+			return []string{"agent.lifecycle.observe", "agent.lifecycle.supervise", "agent.decision.request"}, true
+		case "system.npc_manager":
+			return []string{"npc.lifecycle.observe", "npc.lifecycle.supervise", "agent.decision.request"}, true
+		case "character.npc":
+			return []string{"actor.patrol.deterministic", "character.observe.public", "character.intent.propose", "agent.decision.request"}, true
+		case "character.user":
+			return []string{
+				"character.observe.private",
+				"character.intent.propose",
+				"character.activity.propose",
+				"character.navigation.propose",
+				"character.navigation.plan",
+				"character.role.propose",
+				"character.case.acknowledge",
+				"character.case.review.file",
+				"character.case.report.file",
+				"character.social.greet",
+				"character.task.accept",
 				"character.control.configure",
 				"agent.decision.request",
 			}, true

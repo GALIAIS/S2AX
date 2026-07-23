@@ -315,10 +315,11 @@ type UpdateSettingsRequest struct {
 	RiskControlEnabled *bool `json:"risk_control_enabled"`
 
 	// 城市模拟功能开关
-	CitySimulationEnabled        *bool `json:"city_simulation_enabled"`
-	CityPixelRendererEnabled     *bool `json:"city_pixel_renderer_enabled"`
-	CityVisualPackPublishEnabled *bool `json:"city_visual_pack_publish_enabled"`
-	CityRealtimeSchedulerEnabled *bool `json:"city_realtime_scheduler_enabled"`
+	CitySimulationEnabled                  *bool `json:"city_simulation_enabled"`
+	CityPixelRendererEnabled               *bool `json:"city_pixel_renderer_enabled"`
+	CityVisualPackPublishEnabled           *bool `json:"city_visual_pack_publish_enabled"`
+	CityRealtimeSchedulerEnabled           *bool `json:"city_realtime_scheduler_enabled"`
+	CityRealtimeAgentDecisionWorkerEnabled *bool `json:"city_realtime_agent_decision_worker_enabled"`
 
 	// cyber 会话屏蔽开关 + TTL
 	CyberSessionBlockEnabled    *bool `json:"cyber_session_block_enabled"`
@@ -1645,6 +1646,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.CityRealtimeSchedulerEnabled
 		}(),
+		CityRealtimeAgentDecisionWorkerEnabled: func() bool {
+			if req.CityRealtimeAgentDecisionWorkerEnabled != nil {
+				return *req.CityRealtimeAgentDecisionWorkerEnabled
+			}
+			return previousSettings.CityRealtimeAgentDecisionWorkerEnabled
+		}(),
 		CyberSessionBlockEnabled: func() bool {
 			if req.CyberSessionBlockEnabled != nil {
 				return *req.CyberSessionBlockEnabled
@@ -1662,6 +1669,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		settings.CityPixelRendererEnabled = false
 		settings.CityVisualPackPublishEnabled = false
 		settings.CityRealtimeSchedulerEnabled = false
+		settings.CityRealtimeAgentDecisionWorkerEnabled = false
 	} else if !settings.CityPixelRendererEnabled {
 		settings.CityVisualPackPublishEnabled = false
 	}
@@ -2030,14 +2038,15 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 
 		AffiliateEnabled: updatedSettings.AffiliateEnabled,
 
-		RiskControlEnabled:           updatedSettings.RiskControlEnabled,
-		CitySimulationEnabled:        updatedSettings.CitySimulationEnabled,
-		CityPixelRendererEnabled:     updatedSettings.CityPixelRendererEnabled,
-		CityVisualPackPublishEnabled: updatedSettings.CityVisualPackPublishEnabled,
-		CityRealtimeSchedulerEnabled: updatedSettings.CityRealtimeSchedulerEnabled,
-		CyberSessionBlockEnabled:     updatedSettings.CyberSessionBlockEnabled,
-		CyberSessionBlockTTLSeconds:  updatedSettings.CyberSessionBlockTTLSeconds,
-		AllowUserViewErrorRequests:   updatedSettings.AllowUserViewErrorRequests,
+		RiskControlEnabled:                     updatedSettings.RiskControlEnabled,
+		CitySimulationEnabled:                  updatedSettings.CitySimulationEnabled,
+		CityPixelRendererEnabled:               updatedSettings.CityPixelRendererEnabled,
+		CityVisualPackPublishEnabled:           updatedSettings.CityVisualPackPublishEnabled,
+		CityRealtimeSchedulerEnabled:           updatedSettings.CityRealtimeSchedulerEnabled,
+		CityRealtimeAgentDecisionWorkerEnabled: updatedSettings.CityRealtimeAgentDecisionWorkerEnabled,
+		CyberSessionBlockEnabled:               updatedSettings.CyberSessionBlockEnabled,
+		CyberSessionBlockTTLSeconds:            updatedSettings.CyberSessionBlockTTLSeconds,
+		AllowUserViewErrorRequests:             updatedSettings.AllowUserViewErrorRequests,
 	}
 	if fastPolicy, err := h.settingService.GetOpenAIFastPolicySettings(c.Request.Context()); err != nil {
 		slog.Error("openai_fast_policy_settings_get_failed", "error", err)

@@ -1363,6 +1363,128 @@ func (h *CityEconomyHandler) ListRealtimeMyCharacterCaseReviews(c *gin.Context) 
 	response.Success(c, page)
 }
 
+// ListRealtimeMyCharacterCaseProcess returns the caller's own procedural
+// report/intake status and a deliberately coarse independent-record state.
+// It does not accept an Actor code, evidence code, or case code from the
+// browser, preventing enumeration of another member's process or source data.
+func (h *CityEconomyHandler) ListRealtimeMyCharacterCaseProcess(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	limit, ok := parseCityQueryInt(c, "limit", 0)
+	if !ok || limit > int64(^uint(0)>>1) {
+		if ok {
+			response.BadRequest(c, "Invalid realtime character case process query")
+		}
+		return
+	}
+	page, err := h.service.ListRealtimeMyCharacterCaseProcess(c.Request.Context(), service.CityRealtimeCharacterCaseProcessListInput{
+		UserID: subject.UserID, WorldID: worldID,
+		BeforeCursor: strings.TrimSpace(c.Query("before_cursor")), Limit: int(limit),
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, page)
+}
+
+// ListRealtimeMyCharacterTasks returns only the caller's bounded structured
+// task ledger. There is intentionally no browser mutation endpoint: task
+// acceptance and completion remain sealed autonomous-Agent reducer facts.
+func (h *CityEconomyHandler) ListRealtimeMyCharacterTasks(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	limit, ok := parseCityQueryInt(c, "limit", 0)
+	if !ok || limit > int64(^uint(0)>>1) {
+		if ok {
+			response.BadRequest(c, "Invalid realtime character task query")
+		}
+		return
+	}
+	items, err := h.service.ListRealtimeCharacterTasks(c.Request.Context(), service.CityRealtimeCharacterTaskListInput{
+		UserID: subject.UserID, WorldID: worldID, Limit: int(limit),
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, items)
+}
+
+// ListRealtimeMyCharacterNavigationPlans returns only the caller's bounded
+// autonomous route ledger. Planning remains Agent-only, while a mode change is
+// the sole owner action allowed to cancel an active plan.
+func (h *CityEconomyHandler) ListRealtimeMyCharacterNavigationPlans(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	limit, ok := parseCityQueryInt(c, "limit", 0)
+	if !ok || limit > int64(^uint(0)>>1) {
+		if ok {
+			response.BadRequest(c, "Invalid realtime character navigation plan query")
+		}
+		return
+	}
+	items, err := h.service.ListRealtimeCharacterNavigationPlans(c.Request.Context(), service.CityRealtimeCharacterNavigationPlanListInput{
+		UserID: subject.UserID, WorldID: worldID, Limit: int(limit),
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, items)
+}
+
+// ListRealtimeMyCharacterTrafficReservations returns only the caller's
+// coarse traffic-capacity receipts. Reservation targets and other actors stay
+// private, and no browser mutation endpoint exists.
+func (h *CityEconomyHandler) ListRealtimeMyCharacterTrafficReservations(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	worldID, ok := parseCityPathID(c, "world_id", "world")
+	if !ok {
+		return
+	}
+	limit, ok := parseCityQueryInt(c, "limit", 0)
+	if !ok || limit > int64(^uint(0)>>1) {
+		if ok {
+			response.BadRequest(c, "Invalid realtime character traffic reservation query")
+		}
+		return
+	}
+	items, err := h.service.ListRealtimeCharacterTrafficReservations(c.Request.Context(), service.CityRealtimeCharacterTrafficReservationListInput{
+		UserID: subject.UserID, WorldID: worldID, Limit: int(limit),
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, items)
+}
+
 // ListRealtimePublicCharacterEvents is the member-safe shared activity
 // feed. It deliberately excludes private character life and reward data.
 func (h *CityEconomyHandler) ListRealtimePublicCharacterEvents(c *gin.Context) {

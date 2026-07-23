@@ -51,6 +51,8 @@ export default {
           visualPackPublishHint: 'Opens only the administrator-reviewed staging, review, and publication workflow. Existing published world content remains readable; no new visual content may enter the published state.',
           realtimeScheduler: 'Allow production realtime scheduling',
           realtimeSchedulerHint: 'Enable only after deploying a verified Clock Authority. Without one, the worker fails closed and never advances a world from browser or unverified system time.',
+          agentDecisionWorker: 'Allow Agent model decision execution',
+          agentDecisionWorkerHint: 'Consumes only server-sealed Agent decision work. It is independent from clock scheduling and disabled by default; without a registered trusted adapter or during breaker cooldown, work is safely deferred without using user keys or exposing model content.',
         },
         affiliate: {
           title: 'Affiliate (Invite Rebate)',

@@ -28,39 +28,58 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 
 const isMobile = ref(false)
+const compactViewportQuery = '(max-width: 767px)'
+let compactViewport: MediaQueryList | null = null
 
+// Keep this in lockstep with DataTable's mobile-card breakpoint. Previously
+// the shell switched at 1024px while its table stayed in desktop mode until
+// 768px, which left tablet-width pages with a mismatched fixed-height layout.
 const checkMobile = () => {
-  isMobile.value = window.innerWidth < 1024
+  isMobile.value = compactViewport?.matches ?? window.matchMedia(compactViewportQuery).matches
 }
 
 onMounted(() => {
+  compactViewport = window.matchMedia(compactViewportQuery)
   checkMobile()
-  window.addEventListener('resize', checkMobile)
+  compactViewport.addEventListener('change', checkMobile)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('resize', checkMobile)
+  compactViewport?.removeEventListener('change', checkMobile)
+  compactViewport = null
 })
 </script>
 
 <style scoped>
 /* 桌面端：Flexbox 布局 */
 .table-page-layout {
-  @apply flex flex-col gap-6;
-  height: calc(100vh - 64px - 4rem); /* 减去 header + lg:p-8 的上下padding */
+  @apply flex min-w-0 flex-col gap-4 sm:gap-6;
+  height: calc(100dvh - 64px - 2rem); /* header + base main padding */
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .table-page-layout {
+    height: calc(100dvh - 64px - 3rem); /* md main padding */
+  }
+}
+
+@media (min-width: 1024px) {
+  .table-page-layout {
+    height: calc(100dvh - 64px - 4rem); /* lg main padding */
+  }
 }
 
 .layout-section-fixed {
-  @apply flex-shrink-0;
+  @apply min-w-0 flex-shrink-0;
 }
 
 .layout-section-scrollable {
-  @apply flex-1 min-h-0 flex flex-col;
+  @apply flex flex-1 min-h-0 min-w-0 flex-col;
 }
 
 /* 表格滚动容器 - 增强版表体滚动方案 */
 .table-scroll-container {
-  @apply flex flex-col overflow-hidden h-full bg-white dark:bg-dark-800 rounded-2xl border border-gray-200 dark:border-dark-700 shadow-sm;
+  @apply flex h-full min-w-0 flex-col overflow-hidden border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800;
 }
 
 .table-scroll-container :deep(.table-wrapper) {
@@ -93,16 +112,24 @@ onUnmounted(() => {
 
 /* 移动端：恢复正常滚动 */
 .table-page-layout.mobile-mode .table-scroll-container {
-  @apply h-auto overflow-visible border-none shadow-none bg-transparent;
+  @apply h-auto overflow-x-auto overflow-y-visible border-none bg-transparent shadow-none;
 }
 
 .table-page-layout.mobile-mode .layout-section-scrollable {
-  @apply flex-none min-h-fit;
+  @apply flex-none min-h-0;
+}
+
+.table-page-layout.mobile-mode {
+  height: auto;
+  min-height: 0;
+}
+
+.table-page-layout.mobile-mode .table-scroll-container :deep(.table-wrapper) {
+  @apply min-w-0 flex-none overflow-x-auto overflow-y-visible;
 }
 
 .table-page-layout.mobile-mode .table-scroll-container :deep(table) {
-  @apply flex-none;
+  @apply min-w-full flex-none;
   display: table;
-  min-width: 100%;
 }
 </style>

@@ -40,18 +40,22 @@ const (
 )
 
 var (
-	ErrCityCommandNotFound         = infraerrors.NotFound("CITY_COMMAND_NOT_FOUND", "city command not found")
-	ErrCityManagementRequired      = infraerrors.Forbidden("CITY_ADMIN_REQUIRED", "city simulation management requires administrator access")
-	ErrCityCommandConflict         = infraerrors.Conflict("CITY_COMMAND_CONFLICT", "city command idempotency key was reused with different intent")
-	ErrCityExpectedTickConflict    = infraerrors.Conflict("CITY_EXPECTED_TICK_CONFLICT", "city world tick no longer matches the expected tick")
-	ErrCityPermissionDenied        = infraerrors.Forbidden("CITY_PERMISSION_DENIED", "city operation requires the owner role")
-	ErrCityWorldUnavailable        = infraerrors.Conflict("CITY_WORLD_UNAVAILABLE", "city world cannot accept simulation writes in its current state")
-	ErrCitySimulationVersion       = infraerrors.Conflict("CITY_SIMULATION_VERSION_UNSUPPORTED", "city simulation version is not supported by this engine")
-	ErrCityCommandVersion          = infraerrors.Conflict("CITY_COMMAND_VERSION_UNSUPPORTED", "city command is not supported by the world's engine version")
-	ErrCityCommandQueueFull        = infraerrors.TooManyRequests("CITY_COMMAND_QUEUE_FULL", "city command queue is full")
-	ErrCitySimulationInvariant     = infraerrors.InternalServer("CITY_SIMULATION_INVARIANT_FAILED", "city simulation invariant failed")
-	ErrCityStepIdempotencyConflict = infraerrors.Conflict("CITY_STEP_CONFLICT", "city step idempotency key was reused with different intent")
-	cityTickEpochTime              = time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+	ErrCityCommandNotFound                      = infraerrors.NotFound("CITY_COMMAND_NOT_FOUND", "city command not found")
+	ErrCityManagementRequired                   = infraerrors.Forbidden("CITY_ADMIN_REQUIRED", "city simulation management requires administrator access")
+	ErrCityCommandConflict                      = infraerrors.Conflict("CITY_COMMAND_CONFLICT", "city command idempotency key was reused with different intent")
+	ErrCityExpectedTickConflict                 = infraerrors.Conflict("CITY_EXPECTED_TICK_CONFLICT", "city world tick no longer matches the expected tick")
+	ErrCityPermissionDenied                     = infraerrors.Forbidden("CITY_PERMISSION_DENIED", "city operation requires the owner role")
+	ErrCityWorldUnavailable                     = infraerrors.Conflict("CITY_WORLD_UNAVAILABLE", "city world cannot accept simulation writes in its current state")
+	ErrCitySimulationVersion                    = infraerrors.Conflict("CITY_SIMULATION_VERSION_UNSUPPORTED", "city simulation version is not supported by this engine")
+	ErrCityCommandVersion                       = infraerrors.Conflict("CITY_COMMAND_VERSION_UNSUPPORTED", "city command is not supported by the world's engine version")
+	ErrCityCommandQueueFull                     = infraerrors.TooManyRequests("CITY_COMMAND_QUEUE_FULL", "city command queue is full")
+	ErrCitySimulationInvariant                  = infraerrors.InternalServer("CITY_SIMULATION_INVARIANT_FAILED", "city simulation invariant failed")
+	ErrCityStepIdempotencyConflict              = infraerrors.Conflict("CITY_STEP_CONFLICT", "city step idempotency key was reused with different intent")
+	ErrCityRealtimeAgentModelProfileNotFound    = infraerrors.NotFound("CITY_REALTIME_AGENT_MODEL_PROFILE_NOT_FOUND", "realtime agent model profile not found")
+	ErrCityRealtimeAgentModelProfileUnavailable = infraerrors.Conflict("CITY_REALTIME_AGENT_MODEL_PROFILE_UNAVAILABLE", "realtime agent model profile is unavailable")
+	ErrCityRealtimeAgentModelBudgetExceeded     = infraerrors.TooManyRequests("CITY_REALTIME_AGENT_MODEL_BUDGET_EXCEEDED", "realtime agent model budget is exhausted")
+	ErrCityRealtimeAgentProviderUnavailable     = infraerrors.Conflict("CITY_REALTIME_AGENT_PROVIDER_UNAVAILABLE", "realtime agent provider is unavailable")
+	cityTickEpochTime                           = time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
 )
 
 type citySystemAdministratorContextKey struct{}
@@ -2524,41 +2528,49 @@ func writeCityHashInt64(writer cityHashWriter, value int64) {
 }
 
 type cityHashState struct {
-	Name                         string                                      `json:"name"`
-	Status                       string                                      `json:"status"`
-	SimulationVersion            string                                      `json:"simulation_version"`
-	Seed                         int64                                       `json:"seed"`
-	CurrentTick                  int64                                       `json:"current_tick"`
-	SimulatedAt                  string                                      `json:"simulated_at"`
-	SpeedMilli                   int64                                       `json:"speed_milli"`
-	Timezone                     string                                      `json:"timezone"`
-	Settings                     json.RawMessage                             `json:"settings"`
-	MonetaryUnits                []cityHashMonetaryUnit                      `json:"monetary_units"`
-	AccountTemplates             []cityHashAccountTemplate                   `json:"account_templates"`
-	Entities                     []cityHashEntity                            `json:"entities"`
-	Accounts                     []cityHashAccount                           `json:"accounts"`
-	Physical                     cityPhysicalHashState                       `json:"physical"`
-	Markets                      cityMarketHashState                         `json:"markets"`
-	Demography                   cityDemographyHashState                     `json:"demography"`
-	OpenWorld                    *cityOpenWorldHashState                     `json:"open_world,omitempty"`
-	Spatial                      *citySpatialHashState                       `json:"spatial,omitempty"`
-	Land                         *cityLandHashState                          `json:"land,omitempty"`
-	Development                  *cityDevelopmentHashState                   `json:"development,omitempty"`
-	EnterpriseLocation           *cityEnterpriseLocationHashState            `json:"enterprise_location,omitempty"`
-	WorldRuntime                 *worldRuntimeHashState                      `json:"world_runtime,omitempty"`
-	OpenWorldRuntime             *cityOpenWorldRuntimeHashState              `json:"open_world_runtime,omitempty"`
-	Realtime                     *cityRealtimeHashState                      `json:"realtime,omitempty"`
-	RealtimeSpatial              *cityRealtimeSpatialHashState               `json:"realtime_spatial,omitempty"`
-	RealtimeActors               *cityRealtimeActorHashState                 `json:"realtime_actors,omitempty"`
-	RealtimeAgents               *cityRealtimeAgentHashState                 `json:"realtime_agents,omitempty"`
-	RealtimeCharacterLife        *cityRealtimeCharacterLifeHashState         `json:"realtime_character_life,omitempty"`
-	RealtimeCharacterCases       *cityRealtimeCharacterCaseResponseHashState `json:"realtime_character_cases,omitempty"`
-	RealtimeCharacterCaseReviews *cityRealtimeCharacterCaseReviewHashState   `json:"realtime_character_case_reviews,omitempty"`
-	RealtimeCharacterSocial      *cityRealtimeCharacterSocialHashState       `json:"realtime_character_social,omitempty"`
-	VersionVector                *CityWorldVersionVector                     `json:"version_vector,omitempty"`
-	PublicServices               *cityPublicServiceHashState                 `json:"public_services,omitempty"`
-	FacilityLifecycle            *cityFacilityLifecycleHashState             `json:"facility_lifecycle,omitempty"`
-	PhysicalNetworks             *cityPhysicalNetworkHashState               `json:"physical_networks,omitempty"`
+	Name                                     string                                                `json:"name"`
+	Status                                   string                                                `json:"status"`
+	SimulationVersion                        string                                                `json:"simulation_version"`
+	Seed                                     int64                                                 `json:"seed"`
+	CurrentTick                              int64                                                 `json:"current_tick"`
+	SimulatedAt                              string                                                `json:"simulated_at"`
+	SpeedMilli                               int64                                                 `json:"speed_milli"`
+	Timezone                                 string                                                `json:"timezone"`
+	Settings                                 json.RawMessage                                       `json:"settings"`
+	MonetaryUnits                            []cityHashMonetaryUnit                                `json:"monetary_units"`
+	AccountTemplates                         []cityHashAccountTemplate                             `json:"account_templates"`
+	Entities                                 []cityHashEntity                                      `json:"entities"`
+	Accounts                                 []cityHashAccount                                     `json:"accounts"`
+	Physical                                 cityPhysicalHashState                                 `json:"physical"`
+	Markets                                  cityMarketHashState                                   `json:"markets"`
+	Demography                               cityDemographyHashState                               `json:"demography"`
+	OpenWorld                                *cityOpenWorldHashState                               `json:"open_world,omitempty"`
+	Spatial                                  *citySpatialHashState                                 `json:"spatial,omitempty"`
+	Land                                     *cityLandHashState                                    `json:"land,omitempty"`
+	Development                              *cityDevelopmentHashState                             `json:"development,omitempty"`
+	EnterpriseLocation                       *cityEnterpriseLocationHashState                      `json:"enterprise_location,omitempty"`
+	WorldRuntime                             *worldRuntimeHashState                                `json:"world_runtime,omitempty"`
+	OpenWorldRuntime                         *cityOpenWorldRuntimeHashState                        `json:"open_world_runtime,omitempty"`
+	Realtime                                 *cityRealtimeHashState                                `json:"realtime,omitempty"`
+	RealtimeSpatial                          *cityRealtimeSpatialHashState                         `json:"realtime_spatial,omitempty"`
+	RealtimeActors                           *cityRealtimeActorHashState                           `json:"realtime_actors,omitempty"`
+	RealtimeAgents                           *cityRealtimeAgentHashState                           `json:"realtime_agents,omitempty"`
+	RealtimeCharacterLife                    *cityRealtimeCharacterLifeHashState                   `json:"realtime_character_life,omitempty"`
+	RealtimeCharacterCases                   *cityRealtimeCharacterCaseResponseHashState           `json:"realtime_character_cases,omitempty"`
+	RealtimeCharacterCaseReviews             *cityRealtimeCharacterCaseReviewHashState             `json:"realtime_character_case_reviews,omitempty"`
+	RealtimeCharacterCaseReports             *cityRealtimeCharacterCaseReportHashState             `json:"realtime_character_case_reports,omitempty"`
+	RealtimeCharacterCaseIntakes             *cityRealtimeCharacterCaseIntakeHashState             `json:"realtime_character_case_intakes,omitempty"`
+	RealtimeCharacterCaseEvidence            *cityRealtimeCharacterCaseEvidenceHashState           `json:"realtime_character_case_evidence,omitempty"`
+	RealtimeCharacterCaseEvidenceAssignments *cityRealtimeCharacterCaseEvidenceAssignmentHashState `json:"realtime_character_case_evidence_assignments,omitempty"`
+	RealtimeCharacterCaseProcedureDispatches *cityRealtimeCharacterCaseProcedureDispatchHashState  `json:"realtime_character_case_procedure_dispatches,omitempty"`
+	RealtimeCharacterTasks                   *cityRealtimeCharacterTaskHashState                   `json:"realtime_character_tasks,omitempty"`
+	RealtimeCharacterNavigationPlans         *cityRealtimeCharacterNavigationPlanHashState         `json:"realtime_character_navigation_plans,omitempty"`
+	RealtimeCharacterTrafficReservations     *cityRealtimeCharacterTrafficReservationHashState     `json:"realtime_character_traffic_reservations,omitempty"`
+	RealtimeCharacterSocial                  *cityRealtimeCharacterSocialHashState                 `json:"realtime_character_social,omitempty"`
+	VersionVector                            *CityWorldVersionVector                               `json:"version_vector,omitempty"`
+	PublicServices                           *cityPublicServiceHashState                           `json:"public_services,omitempty"`
+	FacilityLifecycle                        *cityFacilityLifecycleHashState                       `json:"facility_lifecycle,omitempty"`
+	PhysicalNetworks                         *cityPhysicalNetworkHashState                         `json:"physical_networks,omitempty"`
 }
 
 type cityHashMonetaryUnit struct {
@@ -2755,6 +2767,38 @@ ORDER BY e.entity_type ASC, e.code ASC, u.code ASC, t.code ASC`, worldID)
 			return state, err
 		}
 		state.RealtimeCharacterCaseReviews, err = loadCityRealtimeCharacterCaseReviewHashState(ctx, queryer, worldID)
+		if err != nil {
+			return state, err
+		}
+		state.RealtimeCharacterCaseReports, err = loadCityRealtimeCharacterCaseReportHashState(ctx, queryer, worldID)
+		if err != nil {
+			return state, err
+		}
+		state.RealtimeCharacterCaseIntakes, err = loadCityRealtimeCharacterCaseIntakeHashState(ctx, queryer, worldID)
+		if err != nil {
+			return state, err
+		}
+		state.RealtimeCharacterCaseEvidence, err = loadCityRealtimeCharacterCaseEvidenceHashState(ctx, queryer, worldID)
+		if err != nil {
+			return state, err
+		}
+		state.RealtimeCharacterCaseEvidenceAssignments, err = loadCityRealtimeCharacterCaseEvidenceAssignmentHashState(ctx, queryer, worldID)
+		if err != nil {
+			return state, err
+		}
+		state.RealtimeCharacterCaseProcedureDispatches, err = loadCityRealtimeCharacterCaseProcedureDispatchHashState(ctx, queryer, worldID)
+		if err != nil {
+			return state, err
+		}
+		state.RealtimeCharacterTasks, err = loadCityRealtimeCharacterTaskHashState(ctx, queryer, worldID)
+		if err != nil {
+			return state, err
+		}
+		state.RealtimeCharacterNavigationPlans, err = loadCityRealtimeCharacterNavigationPlanHashState(ctx, queryer, worldID)
+		if err != nil {
+			return state, err
+		}
+		state.RealtimeCharacterTrafficReservations, err = loadCityRealtimeCharacterTrafficReservationHashState(ctx, queryer, worldID)
 		if err != nil {
 			return state, err
 		}

@@ -543,6 +543,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.CityRealtimeSchedulerEnabled != after.CityRealtimeSchedulerEnabled {
 		changed = append(changed, "city_realtime_scheduler_enabled")
 	}
+	if before.CityRealtimeAgentDecisionWorkerEnabled != after.CityRealtimeAgentDecisionWorkerEnabled {
+		changed = append(changed, "city_realtime_agent_decision_worker_enabled")
+	}
 	if before.CyberSessionBlockEnabled != after.CyberSessionBlockEnabled {
 		changed = append(changed, "cyber_session_block_enabled")
 	}

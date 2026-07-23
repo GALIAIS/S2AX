@@ -55,6 +55,7 @@ var (
 	ErrCityRealtimeAgentRuntimeUnavailable      = infraerrors.Conflict("CITY_REALTIME_AGENT_RUNTIME_UNAVAILABLE", "realtime world does not have the current Agent decision runtime enabled")
 	ErrCityRealtimeAgentDecisionUnavailable     = infraerrors.Conflict("CITY_REALTIME_AGENT_DECISION_UNAVAILABLE", "realtime Agent cannot accept a decision in its current state")
 	ErrCityRealtimeAgentDecisionConflict        = infraerrors.Conflict("CITY_REALTIME_AGENT_DECISION_CONFLICT", "realtime Agent decision lease or terminal state changed")
+	ErrCityRealtimeAgentDecisionQuarantined     = infraerrors.Conflict("CITY_REALTIME_AGENT_DECISION_QUARANTINED", "realtime Agent decision is under administrator review")
 	ErrCityRealtimeAgentDecisionNotFound        = infraerrors.NotFound("CITY_REALTIME_AGENT_DECISION_NOT_FOUND", "realtime Agent decision request not found")
 )
 

@@ -32,25 +32,26 @@ type CityRealtimeOperationalHealth struct {
 }
 
 type CityRealtimeWorldOperationalHealth struct {
-	WorldID                   int64                       `json:"world_id"`
-	WorldName                 string                      `json:"world_name"`
-	WorldStatus               string                      `json:"world_status"`
-	TemporalEngineVersion     string                      `json:"temporal_engine_version"`
-	ClockProfileID            string                      `json:"clock_profile_id"`
-	ClockProfileHash          string                      `json:"clock_profile_hash"`
-	SourceClockMode           string                      `json:"source_clock_mode"`
-	DeploymentScope           string                      `json:"deployment_scope"`
-	LifecycleStatus           string                      `json:"lifecycle_status"`
-	ClockState                string                      `json:"clock_state"`
-	RecoveryState             string                      `json:"recovery_state"`
-	CurrentWorldTimeUS        int64                       `json:"current_world_time_us"`
-	LastCommittedEffectiveUTC time.Time                   `json:"last_committed_effective_utc"`
-	TimelineFrameSequence     int64                       `json:"timeline_frame_sequence"`
-	TimelineCursor            string                      `json:"timeline_cursor"`
-	ClockSegmentSequence      int64                       `json:"clock_segment_sequence"`
-	NextDueAtWorldTimeUS      *int64                      `json:"next_due_at_world_time_us,omitempty"`
-	CatchupTargetWorldTimeUS  *int64                      `json:"catchup_target_world_time_us,omitempty"`
-	Scheduler                 CityRealtimeSchedulerHealth `json:"scheduler"`
+	WorldID                   int64                                 `json:"world_id"`
+	WorldName                 string                                `json:"world_name"`
+	WorldStatus               string                                `json:"world_status"`
+	TemporalEngineVersion     string                                `json:"temporal_engine_version"`
+	ClockProfileID            string                                `json:"clock_profile_id"`
+	ClockProfileHash          string                                `json:"clock_profile_hash"`
+	SourceClockMode           string                                `json:"source_clock_mode"`
+	DeploymentScope           string                                `json:"deployment_scope"`
+	LifecycleStatus           string                                `json:"lifecycle_status"`
+	ClockState                string                                `json:"clock_state"`
+	RecoveryState             string                                `json:"recovery_state"`
+	CurrentWorldTimeUS        int64                                 `json:"current_world_time_us"`
+	LastCommittedEffectiveUTC time.Time                             `json:"last_committed_effective_utc"`
+	TimelineFrameSequence     int64                                 `json:"timeline_frame_sequence"`
+	TimelineCursor            string                                `json:"timeline_cursor"`
+	ClockSegmentSequence      int64                                 `json:"clock_segment_sequence"`
+	NextDueAtWorldTimeUS      *int64                                `json:"next_due_at_world_time_us,omitempty"`
+	CatchupTargetWorldTimeUS  *int64                                `json:"catchup_target_world_time_us,omitempty"`
+	Scheduler                 CityRealtimeSchedulerHealth           `json:"scheduler"`
+	AgentDecisionWorker       CityRealtimeAgentDecisionWorkerHealth `json:"agent_decision_worker"`
 }
 
 type CityRealtimeSchedulerHealth struct {
@@ -60,6 +61,23 @@ type CityRealtimeSchedulerHealth struct {
 	LastAttemptAt       *time.Time `json:"last_attempt_at,omitempty"`
 	LastSuccessAt       *time.Time `json:"last_success_at,omitempty"`
 	LastErrorCode       *string    `json:"last_error_code,omitempty"`
+}
+
+// CityRealtimeAgentDecisionWorkerHealth is an administrator-only queue
+// projection. It reports bounded operational counters and safe error codes;
+// provider responses, prompts, model route details and worker leases remain
+// intentionally unavailable to both members and administrators.
+type CityRealtimeAgentDecisionWorkerHealth struct {
+	QueuedRequests              int        `json:"queued_requests"`
+	LeasedRequests              int        `json:"leased_requests"`
+	RetryScheduled              int        `json:"retry_scheduled"`
+	QuarantinedRequests         int        `json:"quarantined_requests"`
+	StaleQuarantinedRequests    int        `json:"stale_quarantined_requests"`
+	QuarantineStaleAfterSeconds int        `json:"quarantine_stale_after_seconds"`
+	OldestQuarantinedAt         *time.Time `json:"oldest_quarantined_at,omitempty"`
+	NextRetryNotBefore          *time.Time `json:"next_retry_not_before,omitempty"`
+	LastFailureCode             *string    `json:"last_failure_code,omitempty"`
+	OpenCircuitBreakers         int        `json:"open_circuit_breakers"`
 }
 
 type CityRealtimeClockNodeHealth struct {
@@ -104,7 +122,11 @@ func (s *CityEconomyService) GetRealtimeOperationalHealth(
 		}
 	}
 
-	query := `
+	// The embedded interval is derived only from a compile-time duration, never
+	// from browser input. Keeping the threshold in the response lets the admin
+	// surface explain exactly when a quarantine turns stale.
+	quarantineStaleSeconds := int(cityRealtimeAgentDecisionDeadLetterStaleAfter / time.Second)
+	query := fmt.Sprintf(`
 SELECT world.id, world.name, world.status,
        state.temporal_engine_version, state.clock_profile_id, state.clock_profile_hash,
        profile.source_clock_mode, profile.deployment_scope,
@@ -114,14 +136,68 @@ SELECT world.id, world.name, world.status,
        segment.segment_sequence, state.next_due_at_world_time_us,
        state.catchup_target_world_time_us,
        schedule.node_id, schedule.consecutive_failures, schedule.retry_not_before,
-       schedule.last_attempt_at, schedule.last_success_at, schedule.last_error_code
+       schedule.last_attempt_at, schedule.last_success_at, schedule.last_error_code,
+       agent_queue.queued_requests, agent_queue.leased_requests,
+       agent_queue.retry_scheduled, agent_queue.quarantined_requests,
+       agent_queue.stale_quarantined_requests, agent_queue.oldest_quarantined_at,
+       agent_queue.next_retry_not_before,
+       agent_failure.last_failure_code, agent_breakers.open_circuit_breakers
 FROM city_world_time_states state
 JOIN city_worlds world ON world.id = state.world_id
 JOIN city_clock_profiles profile ON profile.id = state.clock_profile_id
 JOIN city_world_clock_segments segment
   ON segment.world_id = state.world_id AND segment.id = state.current_clock_segment_id
 JOIN city_realtime_schedule_states schedule ON schedule.world_id = state.world_id
-WHERE world.simulation_version IN ('city-openworld-realtime-v1', 'city-openworld-realtime-v2')`
+LEFT JOIN LATERAL (
+    SELECT COUNT(*) FILTER (
+               WHERE request.status = 'queued' AND outbox.status = 'queued'
+           ) AS queued_requests,
+           COUNT(*) FILTER (
+               WHERE request.status = 'leased' OR outbox.status = 'leased'
+           ) AS leased_requests,
+           COUNT(*) FILTER (
+               WHERE request.status = 'queued' AND request.retry_not_before IS NOT NULL
+           ) AS retry_scheduled,
+           COUNT(*) FILTER (
+               WHERE request.status = 'queued' AND dead_letter.dead_letter_status = 'quarantined'
+           ) AS quarantined_requests,
+		   COUNT(*) FILTER (
+		       WHERE request.status = 'queued'
+		         AND dead_letter.dead_letter_status = 'quarantined'
+		         AND dead_letter.quarantined_at <= NOW() - make_interval(secs => %d)
+		   ) AS stale_quarantined_requests,
+		   MIN(dead_letter.quarantined_at) FILTER (
+		       WHERE request.status = 'queued' AND dead_letter.dead_letter_status = 'quarantined'
+		   ) AS oldest_quarantined_at,
+           MIN(request.retry_not_before) FILTER (
+               WHERE request.status = 'queued' AND request.retry_not_before > NOW()
+           ) AS next_retry_not_before
+    FROM city_realtime_agent_decision_requests request
+    JOIN city_realtime_agent_outbox outbox
+      ON outbox.world_id = request.world_id AND outbox.request_code = request.request_code
+    LEFT JOIN city_realtime_agent_decision_dead_letters dead_letter
+      ON dead_letter.world_id = request.world_id AND dead_letter.request_code = request.request_code
+    WHERE request.world_id = state.world_id
+) agent_queue ON TRUE
+LEFT JOIN LATERAL (
+    SELECT attempt.error_code AS last_failure_code
+    FROM city_realtime_agent_decision_attempts attempt
+    JOIN city_realtime_agent_decision_requests request
+      ON request.world_id = attempt.world_id AND request.request_code = attempt.request_code
+    WHERE attempt.world_id = state.world_id AND attempt.error_code IS NOT NULL
+    ORDER BY attempt.completed_at DESC NULLS LAST, attempt.attempt_number DESC, attempt.attempt_code DESC
+    LIMIT 1
+) agent_failure ON TRUE
+LEFT JOIN LATERAL (
+    SELECT COUNT(DISTINCT breaker.profile_code || '@' || breaker.profile_version::text) AS open_circuit_breakers
+    FROM city_realtime_agent_model_circuit_breakers breaker
+    JOIN city_realtime_agent_model_profile_world_bindings binding
+      ON binding.profile_code = breaker.profile_code AND binding.profile_version = breaker.profile_version
+    WHERE binding.world_id = state.world_id
+      AND binding.binding_status = 'active'
+      AND breaker.breaker_state IN ('open', 'half_open')
+) agent_breakers ON TRUE
+WHERE world.simulation_version IN ('city-openworld-realtime-v1', 'city-openworld-realtime-v2')`, quarantineStaleSeconds)
 	args := make([]any, 0, 2)
 	if input.WorldID > 0 {
 		query += ` AND state.world_id = $1`
@@ -147,7 +223,8 @@ WHERE world.simulation_version IN ('city-openworld-realtime-v1', 'city-openworld
 		item := &CityRealtimeWorldOperationalHealth{}
 		var nextDue, catchup sql.NullInt64
 		var nodeID, lastErrorCode sql.NullString
-		var retryNotBefore, lastAttemptAt, lastSuccessAt sql.NullTime
+		var retryNotBefore, lastAttemptAt, lastSuccessAt, agentNextRetry, agentOldestQuarantine sql.NullTime
+		var agentLastFailure sql.NullString
 		if err = rows.Scan(
 			&item.WorldID, &item.WorldName, &item.WorldStatus,
 			&item.TemporalEngineVersion, &item.ClockProfileID, &item.ClockProfileHash,
@@ -158,6 +235,13 @@ WHERE world.simulation_version IN ('city-openworld-realtime-v1', 'city-openworld
 			&item.ClockSegmentSequence, &nextDue, &catchup,
 			&nodeID, &item.Scheduler.ConsecutiveFailures, &retryNotBefore,
 			&lastAttemptAt, &lastSuccessAt, &lastErrorCode,
+			&item.AgentDecisionWorker.QueuedRequests,
+			&item.AgentDecisionWorker.LeasedRequests,
+			&item.AgentDecisionWorker.RetryScheduled,
+			&item.AgentDecisionWorker.QuarantinedRequests,
+			&item.AgentDecisionWorker.StaleQuarantinedRequests,
+			&agentOldestQuarantine,
+			&agentNextRetry, &agentLastFailure, &item.AgentDecisionWorker.OpenCircuitBreakers,
 		); err != nil {
 			return nil, fmt.Errorf("scan city realtime operational health: %w", err)
 		}
@@ -169,6 +253,10 @@ WHERE world.simulation_version IN ('city-openworld-realtime-v1', 'city-openworld
 		item.Scheduler.LastAttemptAt = cityRealtimeNullTimePointer(lastAttemptAt)
 		item.Scheduler.LastSuccessAt = cityRealtimeNullTimePointer(lastSuccessAt)
 		item.Scheduler.LastErrorCode = cityRealtimeNullStringPointer(lastErrorCode)
+		item.AgentDecisionWorker.NextRetryNotBefore = cityRealtimeNullTimePointer(agentNextRetry)
+		item.AgentDecisionWorker.OldestQuarantinedAt = cityRealtimeNullTimePointer(agentOldestQuarantine)
+		item.AgentDecisionWorker.QuarantineStaleAfterSeconds = quarantineStaleSeconds
+		item.AgentDecisionWorker.LastFailureCode = cityRealtimeNullStringPointer(agentLastFailure)
 		result.Worlds = append(result.Worlds, item)
 	}
 	if err = rows.Err(); err != nil {

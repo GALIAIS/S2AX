@@ -6271,6 +6271,20 @@
               </div>
               <Toggle v-model="form.city_realtime_scheduler_enabled" />
             </div>
+            <div class="flex items-center justify-between border-t border-gray-100 pt-5 dark:border-dark-700">
+              <div>
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.features.citySimulation.agentDecisionWorker') }}
+                </label>
+                <p class="mt-0.5 max-w-3xl text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.features.citySimulation.agentDecisionWorkerHint') }}
+                </p>
+              </div>
+              <Toggle
+                v-model="form.city_realtime_agent_decision_worker_enabled"
+                :disabled="!form.city_simulation_enabled"
+              />
+            </div>
           </div>
         </div>
 
@@ -8490,6 +8504,7 @@ const form = reactive<SettingsForm>({
   city_pixel_renderer_enabled: false,
   city_visual_pack_publish_enabled: false,
   city_realtime_scheduler_enabled: false,
+  city_realtime_agent_decision_worker_enabled: false,
   cyber_session_block_enabled: false,
   cyber_session_block_ttl_seconds: 3600,
   payment_min_amount: 1,
@@ -9489,6 +9504,7 @@ function handleCitySimulationEnabledChange(enabled: boolean): void {
   form.city_pixel_renderer_enabled = false
   form.city_visual_pack_publish_enabled = false
   form.city_realtime_scheduler_enabled = false
+  form.city_realtime_agent_decision_worker_enabled = false
 }
 
 function handleCityPixelRendererEnabledChange(enabled: boolean): void {
@@ -10169,6 +10185,7 @@ async function saveSettings() {
       city_pixel_renderer_enabled: form.city_pixel_renderer_enabled,
       city_visual_pack_publish_enabled: form.city_visual_pack_publish_enabled,
       city_realtime_scheduler_enabled: form.city_realtime_scheduler_enabled,
+      city_realtime_agent_decision_worker_enabled: form.city_realtime_agent_decision_worker_enabled,
       cyber_session_block_enabled: form.cyber_session_block_enabled,
       cyber_session_block_ttl_seconds:
         Number(form.cyber_session_block_ttl_seconds) || 3600,

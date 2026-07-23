@@ -2,7 +2,7 @@
   <aside
     class="sidebar"
     :class="[
-      sidebarCollapsed ? 'w-[72px]' : 'w-64',
+      sidebarCollapsed ? 'w-64 lg:w-[72px]' : 'w-64',
       { '-translate-x-full lg:translate-x-0': !mobileOpen }
     ]"
   >
@@ -166,7 +166,7 @@
       <!-- Collapse Button -->
       <button
         @click="toggleSidebar"
-        class="sidebar-link w-full"
+        class="sidebar-link hidden w-full lg:flex"
         :class="{ 'sidebar-link-collapsed': sidebarCollapsed }"
         :title="sidebarCollapsed ? t('nav.expand') : t('nav.collapse')"
       >
@@ -761,6 +761,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true },
     { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, hideInSimpleMode: true },
     { path: '/admin/city/visual-packs', label: t('nav.cityVisualPacks'), icon: BatchImageIcon, hideInSimpleMode: true, featureFlag: flagCitySimulation },
+    { path: '/admin/city/agent-runtime', label: t('nav.cityAgentRuntime'), icon: ShieldIcon, hideInSimpleMode: true, featureFlag: flagCitySimulation },
     { path: '/admin/currencies', label: t('nav.virtualCurrencies'), icon: CreditCardIcon, hideInSimpleMode: true },
     { path: '/admin/currency-integrations', label: t('nav.virtualCurrencyIntegrations'), icon: KeyIcon, hideInSimpleMode: true },
     {

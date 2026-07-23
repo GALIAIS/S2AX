@@ -11,7 +11,7 @@
         {{ mode === 'bundle' ? t('admin.accounts.dataImportHint') : t('admin.accounts.codexImportHint') }}
       </div>
 
-      <div class="grid grid-cols-2 gap-2 rounded-lg bg-gray-100 p-1 dark:bg-dark-800" role="tablist">
+      <div class="grid grid-cols-1 gap-2 rounded-lg bg-gray-100 p-1 sm:grid-cols-2 dark:bg-dark-800" role="tablist">
         <button
           type="button"
           role="tab"
@@ -82,7 +82,7 @@
           {{ mode === 'bundle' ? t('admin.accounts.dataImportFile') : t('admin.accounts.codexImportFile') }}
         </label>
         <div
-          class="flex items-center justify-between gap-3 rounded-lg border border-dashed px-4 py-3 transition-colors"
+          class="flex flex-col items-stretch gap-3 rounded-lg border border-dashed px-4 py-3 transition-colors sm:flex-row sm:items-center sm:justify-between"
           :class="dragActive
             ? 'border-primary-400 bg-primary-50/70 dark:border-primary-500 dark:bg-primary-900/20'
             : 'border-gray-300 bg-gray-50 dark:border-dark-600 dark:bg-dark-800'"
@@ -155,12 +155,12 @@
     </form>
 
     <template #footer>
-      <div class="flex justify-end gap-3">
-        <button class="btn btn-secondary" type="button" :disabled="importing" @click="handleClose">
+      <div class="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+        <button class="btn btn-secondary w-full sm:w-auto" type="button" :disabled="importing" @click="handleClose">
           {{ t('common.cancel') }}
         </button>
         <button
-          class="btn btn-primary"
+          class="btn btn-primary w-full sm:w-auto"
           type="submit"
           form="import-data-form"
           :disabled="importing"

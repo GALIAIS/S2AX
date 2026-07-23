@@ -141,7 +141,7 @@ onBeforeUnmount(() => {
         role="tooltip"
         :data-placement="placement"
         :class="[
-          'fixed z-[99999] -translate-x-1/2 bg-gray-900 p-3 text-xs leading-relaxed text-white shadow-xl ring-1 ring-white/10 dark:bg-gray-800',
+          'fixed z-[99999] max-w-[calc(100vw-1.5rem)] -translate-x-1/2 bg-gray-900 p-3 text-xs leading-relaxed text-white shadow-xl ring-1 ring-white/10 dark:bg-gray-800',
           placement === 'top' && '-translate-y-full',
           props.widthClass,
         ]"

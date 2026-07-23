@@ -435,7 +435,15 @@ WHERE review.world_id = $1`, worldID).Scan(
 	if err != nil {
 		return nil, fmt.Errorf("load realtime character case-review binding: %w", err)
 	}
-	if policyID != cityRealtimeAgentCorePolicyID || policyVersion != cityRealtimeAgentCorePolicyVersionReview ||
+	if policyID != cityRealtimeAgentCorePolicyID ||
+		(policyVersion != cityRealtimeAgentCorePolicyVersionReview &&
+			policyVersion != cityRealtimeAgentCorePolicyVersionReport &&
+			policyVersion != cityRealtimeAgentCorePolicyVersionIntake &&
+			policyVersion != cityRealtimeAgentCorePolicyVersionEvidence &&
+			policyVersion != cityRealtimeAgentCorePolicyVersionEvidenceAssignment &&
+			policyVersion != cityRealtimeAgentCorePolicyVersionProcedureDispatch &&
+			policyVersion != cityRealtimeAgentCorePolicyVersionTask &&
+			policyVersion != cityRealtimeAgentCorePolicyVersionNavigationPlan) ||
 		binding.AgentBindingHash != currentAgentBindingHash || !validateCityRealtimeCharacterCaseReviewBinding(binding) {
 		return nil, ErrCitySimulationInvariant.WithMetadata(map[string]string{"field": "realtime_character_case_review_binding"})
 	}
