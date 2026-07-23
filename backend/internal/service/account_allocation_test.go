@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"regexp"
 	"testing"
 	"time"
@@ -52,11 +53,12 @@ func TestAccountAllocationReleaseReasonHonorsReplacementToggles(t *testing.T) {
 		{name: "group unbound always releases", policy: accountAllocationPolicyLock{}, health: accountAllocationAssignmentHealth{AccountStatus: StatusActive, Schedulable: true}, want: "account_group_unbound"},
 		{name: "429 enabled", policy: accountAllocationPolicyLock{ReplaceOn429: true}, health: withAllocationRateLimit(healthy, &future), want: "rate_limited_429"},
 		{name: "429 disabled", policy: accountAllocationPolicyLock{ReplaceOn429: false}, health: withAllocationRateLimit(healthy, &future), want: ""},
-		{name: "inactive account enabled", policy: accountAllocationPolicyLock{ReplaceOn401: true}, health: withAllocationStatus(healthy, StatusDisabled), want: "account_unavailable"},
-		{name: "inactive account disabled", policy: accountAllocationPolicyLock{ReplaceOn401: false}, health: withAllocationStatus(healthy, StatusDisabled), want: ""},
+		{name: "inactive account always releases", policy: accountAllocationPolicyLock{ReplaceOn401: false}, health: withAllocationStatus(healthy, StatusDisabled), want: "account_unavailable"},
 		{name: "temporary normalized 401", policy: accountAllocationPolicyLock{ReplaceOn401: true}, health: withAllocationTempReason(healthy, &future, `{"status_code":401}`), want: "authentication_failed_401"},
+		{name: "persistent canonical 401", policy: accountAllocationPolicyLock{ReplaceOn401: true}, health: withAllocationError(healthy, "Authentication failed (401): revoked"), want: "authentication_failed_401"},
+		{name: "persistent 401 disabled", policy: accountAllocationPolicyLock{ReplaceOn401: false}, health: withAllocationError(withAllocationStatus(healthy, StatusError), "Authentication failed (401): revoked"), want: ""},
 		{name: "temporary non 401", policy: accountAllocationPolicyLock{ReplaceOn401: true}, health: withAllocationTempReason(healthy, &future, `{"status_code":503}`), want: ""},
-		{name: "expired account", policy: accountAllocationPolicyLock{ReplaceOn401: true}, health: accountAllocationAssignmentHealth{InPolicyGroup: true, AccountStatus: StatusActive, Schedulable: true, AutoPauseOnExpired: true, ExpiresAt: &past}, want: "account_expired"},
+		{name: "expired account independent of 401 toggle", policy: accountAllocationPolicyLock{ReplaceOn401: false}, health: accountAllocationAssignmentHealth{InPolicyGroup: true, AccountStatus: StatusActive, Schedulable: true, AutoPauseOnExpired: true, ExpiresAt: &past}, want: "account_expired"},
 	}
 
 	for _, tc := range cases {
@@ -79,6 +81,11 @@ func withAllocationStatus(health accountAllocationAssignmentHealth, status strin
 func withAllocationTempReason(health accountAllocationAssignmentHealth, until *time.Time, reason string) accountAllocationAssignmentHealth {
 	health.TempUnschedulableUntil = until
 	health.TempUnschedulableReason = reason
+	return health
+}
+
+func withAllocationError(health accountAllocationAssignmentHealth, message string) accountAllocationAssignmentHealth {
+	health.ErrorMessage = message
 	return health
 }
 
@@ -118,6 +125,165 @@ func TestListUserAssignmentsDerivesUsageTotalsFromStoredTokenColumns(t *testing.
 	require.Equal(t, int64(8), items[0].Usage.RequestCount)
 	require.Equal(t, int64(1234), items[0].Usage.TotalTokens)
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestListUserVisibleAccountsMasksEmailsAndSeparatesUsageScopes(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	assignedAt := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
+	lastActivityAt := assignedAt.Add(30 * time.Minute)
+	futureCooldown := time.Now().Add(time.Hour)
+	futureQuotaReset := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+	quotaSnapshotAt := time.Now().Add(-time.Minute).UTC().Truncate(time.Second)
+	dedicatedExtra, err := json.Marshal(map[string]any{
+		"codex_5h_used_percent":  35.0,
+		"codex_5h_reset_at":      futureQuotaReset.Format(time.RFC3339),
+		"codex_7d_used_percent":  12.0,
+		"codex_7d_reset_at":      futureQuotaReset.Add(24 * time.Hour).Format(time.RFC3339),
+		"codex_usage_updated_at": quotaSnapshotAt.Format(time.RFC3339),
+		"credentials":            "must-not-leak",
+	})
+	require.NoError(t, err)
+	mock.ExpectQuery(`(?s)WITH public_accounts AS .*ul\.group_id = aa\.group_id.*FROM user_allowed_groups uag`).
+		WithArgs(int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"source", "group_id", "group_name", "subscription_type", "account_name", "platform", "account_type", "concurrency",
+			"account_status", "schedulable", "rate_limit_reset_at", "expires_at", "auto_pause_on_expired", "overload_until",
+			"temp_unschedulable_until", "session_window_end", "account_extra", "assigned_at", "request_count", "total_tokens", "last_activity_at",
+			"account_cost", "user_cost",
+		}).
+			AddRow(
+				"dedicated", int64(4), "team-private", "subscription", "private@example.com", "openai", "oauth", 3,
+				StatusActive, true, nil, nil, true, nil, nil, nil, dedicatedExtra, assignedAt, int64(8), int64(1234), lastActivityAt, 2.09, 1.69,
+			).
+			AddRow(
+				"public", int64(5), "open-pool", "standard", "alice@example.com", "anthropic", "apikey", 2,
+				StatusActive, true, futureCooldown, nil, true, nil, nil, nil, []byte(`{}`), nil, int64(21), int64(5678), nil, nil, nil,
+			))
+
+	svc := NewAccountAllocationService(db, nil)
+	overview, err := svc.ListUserVisibleAccounts(context.Background(), 7)
+	require.NoError(t, err)
+	require.Len(t, overview.Items, 2)
+
+	dedicated := overview.Items[0]
+	require.Equal(t, AccountAllocationVisibleSourceDedicated, dedicated.Source)
+	require.Equal(t, "p***e@example.com", dedicated.AccountName)
+	require.True(t, dedicated.AccountNameMasked)
+	require.Equal(t, AccountAllocationVisibleUsageScopePersonalLease, dedicated.Usage.Scope)
+	require.NotNil(t, dedicated.AssignedAt)
+	require.NotNil(t, dedicated.LastActivityAt)
+	require.Equal(t, lastActivityAt, *dedicated.LastActivityAt)
+	require.NotNil(t, dedicated.Usage.AccountCost)
+	require.InDelta(t, 2.09, *dedicated.Usage.AccountCost, 0.00001)
+	require.NotNil(t, dedicated.Usage.UserCost)
+	require.InDelta(t, 1.69, *dedicated.Usage.UserCost, 0.00001)
+	require.NotNil(t, dedicated.UpstreamQuota)
+	require.NotNil(t, dedicated.UpstreamQuota.FiveHour)
+	require.InDelta(t, 35, dedicated.UpstreamQuota.FiveHour.Utilization, 0.00001)
+	require.NotNil(t, dedicated.UpstreamQuota.SevenDay)
+	require.Equal(t, quotaSnapshotAt, *dedicated.UpstreamQuota.UpdatedAt)
+	require.Equal(t, "ready", dedicated.Status)
+	require.NotContains(t, dedicated.ViewKey, "4")
+
+	public := overview.Items[1]
+	require.Equal(t, AccountAllocationVisibleSourcePublic, public.Source)
+	require.Equal(t, "a***e@example.com", public.AccountName)
+	require.True(t, public.AccountNameMasked)
+	require.Equal(t, AccountAllocationVisibleUsageScopeRolling24h, public.Usage.Scope)
+	require.Nil(t, public.AssignedAt)
+	require.Nil(t, public.LastActivityAt)
+	require.Nil(t, public.Usage.AccountCost)
+	require.Nil(t, public.Usage.UserCost)
+	require.Nil(t, public.UpstreamQuota)
+	require.Equal(t, "cooling", public.Status)
+	require.NotNil(t, public.RateLimitResetAt)
+
+	require.Equal(t, 1, overview.Summary.DedicatedGroupCount)
+	require.Equal(t, 1, overview.Summary.PublicGroupCount)
+	require.Equal(t, 1, overview.Summary.DedicatedAccountCount)
+	require.Equal(t, 1, overview.Summary.PublicAccountCount)
+	require.Equal(t, 1, overview.Summary.ReadyAccountCount)
+	payload, err := json.Marshal(overview)
+	require.NoError(t, err)
+	require.NotContains(t, string(payload), "private@example.com")
+	require.NotContains(t, string(payload), "\\\"account_id\\\"")
+	require.NotContains(t, string(payload), "codex_5h_used_percent")
+	require.NotContains(t, string(payload), "must-not-leak")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestAccountAllocationVisibleUpstreamQuotaUsesCachedSnapshotsOnly(t *testing.T) {
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	fiveHourReset := now.Add(2 * time.Hour)
+	sevenDayReset := now.Add(5 * 24 * time.Hour)
+
+	openAIExtra, err := json.Marshal(map[string]any{
+		"codex_5h_used_percent":  48.0,
+		"codex_5h_reset_at":      fiveHourReset.Format(time.RFC3339),
+		"codex_7d_used_percent":  18.0,
+		"codex_7d_reset_at":      sevenDayReset.Format(time.RFC3339),
+		"codex_usage_updated_at": now.Add(-time.Minute).Format(time.RFC3339),
+	})
+	require.NoError(t, err)
+	openAIQuota := accountAllocationVisibleUpstreamQuota(AccountAllocationVisibleSourceDedicated, PlatformOpenAI, AccountTypeOAuth, nil, openAIExtra, now)
+	require.NotNil(t, openAIQuota)
+	require.NotNil(t, openAIQuota.FiveHour)
+	require.NotNil(t, openAIQuota.SevenDay)
+	require.InDelta(t, 48, openAIQuota.FiveHour.Utilization, 0.00001)
+
+	anthropicExtra, err := json.Marshal(map[string]any{
+		"session_window_utilization":   0.42,
+		"passive_usage_7d_utilization": 0.17,
+		"passive_usage_7d_reset":       sevenDayReset.Unix(),
+		"passive_usage_sampled_at":     now.Add(-2 * time.Minute).Format(time.RFC3339),
+	})
+	require.NoError(t, err)
+	anthropicQuota := accountAllocationVisibleUpstreamQuota(AccountAllocationVisibleSourceDedicated, PlatformAnthropic, AccountTypeOAuth, &fiveHourReset, anthropicExtra, now)
+	require.NotNil(t, anthropicQuota)
+	require.NotNil(t, anthropicQuota.FiveHour)
+	require.NotNil(t, anthropicQuota.SevenDay)
+	require.InDelta(t, 42, anthropicQuota.FiveHour.Utilization, 0.00001)
+	require.InDelta(t, 17, anthropicQuota.SevenDay.Utilization, 0.00001)
+
+	require.Nil(t, accountAllocationVisibleUpstreamQuota(AccountAllocationVisibleSourceDedicated, PlatformGemini, AccountTypeOAuth, nil, openAIExtra, now))
+	require.Nil(t, accountAllocationVisibleUpstreamQuota(AccountAllocationVisibleSourcePublic, PlatformOpenAI, AccountTypeOAuth, nil, openAIExtra, now))
+}
+
+func TestMaskAccountAllocationDisplayName(t *testing.T) {
+	cases := []struct {
+		name       string
+		input      string
+		want       string
+		wantMasked bool
+	}{
+		{name: "email", input: "alice@example.com", want: "a***e@example.com", wantMasked: true},
+		{name: "short local part", input: "ab@example.com", want: "a***@example.com", wantMasked: true},
+		{name: "plain label", input: "OpenAI Team 01", want: "OpenAI Team 01", wantMasked: false},
+		{name: "multiple at markers", input: "name@one@two", want: "name@one@two", wantMasked: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, masked := maskAccountAllocationDisplayName(tc.input)
+			require.Equal(t, tc.want, got)
+			require.Equal(t, tc.wantMasked, masked)
+		})
+	}
+}
+
+func TestAccountAllocationVisibleStatusPrioritizesUnavailableState(t *testing.T) {
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	future := now.Add(time.Minute)
+	past := now.Add(-time.Minute)
+
+	require.Equal(t, "ready", accountAllocationVisibleStatus(StatusActive, true, nil, nil, true, nil, nil, now))
+	require.Equal(t, "cooling", accountAllocationVisibleStatus(StatusActive, true, &future, nil, true, nil, nil, now))
+	require.Equal(t, "unavailable", accountAllocationVisibleStatus(StatusDisabled, true, &future, nil, true, nil, nil, now))
+	require.Equal(t, "unavailable", accountAllocationVisibleStatus(StatusActive, true, nil, &past, true, nil, nil, now))
+	require.Equal(t, "unavailable", accountAllocationVisibleStatus(StatusActive, true, nil, nil, true, &future, nil, now))
 }
 
 func TestAccountAllocationAssignmentScannerSupportsDeletedAccountHistory(t *testing.T) {
@@ -265,4 +431,40 @@ func TestAccountAllocationCapabilitiesReflectServerConfiguration(t *testing.T) {
 		MaxDesiredCount:          17,
 		ReconcileIntervalSeconds: 23,
 	}, svc.Capabilities())
+}
+
+func TestAccountAllocationExplicitReconcileAllIsNotLimitedToWorkerBatchSize(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(`(?s)SELECT id.*ORDER BY last_reconciled_at NULLS FIRST, id ASC\s*$`).
+		WithArgs(accountAllocationPolicyActive, accountAllocationAssignmentLive).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	svc := NewAccountAllocationService(db, &config.Config{AccountAllocation: config.AccountAllocationConfig{
+		PolicyBatchSize: 1,
+	}})
+	results, err := svc.ReconcileAll(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, results)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestAccountAllocationBackgroundReconcileUsesConfiguredBatchSize(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(`(?s)SELECT id.*ORDER BY last_reconciled_at NULLS FIRST, id ASC LIMIT \$3`).
+		WithArgs(accountAllocationPolicyActive, accountAllocationAssignmentLive, 7).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	svc := NewAccountAllocationService(db, &config.Config{AccountAllocation: config.AccountAllocationConfig{
+		PolicyBatchSize: 7,
+	}})
+	results, err := svc.reconcileBatch(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, results)
+	require.NoError(t, mock.ExpectationsWereMet())
 }

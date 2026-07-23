@@ -407,6 +407,8 @@ func registerAccountAllocationRoutes(admin *gin.RouterGroup, h *handler.Handlers
 	allocations := admin.Group("/account-allocations")
 	{
 		allocations.GET("/capabilities", h.Admin.AccountAllocation.GetCapabilities)
+		allocations.GET("/overview", h.Admin.AccountAllocation.GetOverview)
+		allocations.POST("/reconcile", h.Admin.AccountAllocation.ReconcileAll)
 		allocations.GET("/policies", h.Admin.AccountAllocation.ListPolicies)
 		allocations.POST("/policies", h.Admin.AccountAllocation.CreatePolicy)
 		allocations.GET("/policies/:id", h.Admin.AccountAllocation.GetPolicy)

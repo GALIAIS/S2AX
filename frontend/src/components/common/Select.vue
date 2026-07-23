@@ -108,7 +108,11 @@
 
             <!-- Empty state -->
             <div v-if="filteredOptions.length === 0" class="select-empty">
-              {{ emptyTextDisplay }}
+              <span v-if="loading" class="inline-flex items-center gap-2">
+                <Icon name="refresh" size="sm" class="animate-spin" />
+                {{ t('common.loading') }}
+              </span>
+              <template v-else>{{ emptyTextDisplay }}</template>
             </div>
           </div>
         </div>
@@ -148,11 +152,14 @@ interface Props {
   creatable?: boolean
   creatablePrefix?: string
   clearable?: boolean
+  remoteSearch?: boolean
+  loading?: boolean
 }
 
 interface Emits {
   (e: 'update:modelValue', value: string | number | boolean | null): void
   (e: 'change', value: string | number | boolean | null, option: SelectOption | null): void
+  (e: 'search', query: string): void
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -162,6 +169,8 @@ const props = withDefaults(defineProps<Props>(), {
   creatable: false,
   creatablePrefix: '',
   clearable: false,
+  remoteSearch: false,
+  loading: false,
   valueKey: 'value',
   labelKey: 'label'
 })
@@ -271,7 +280,7 @@ const hasValue = computed(
 
 const filteredOptions = computed(() => {
   let opts = props.options as any[]
-  if (isSearchable.value && searchQuery.value) {
+  if (isSearchable.value && searchQuery.value && !props.remoteSearch) {
     const query = searchQuery.value.toLowerCase()
     opts = opts.filter((opt) => {
       // Match label
@@ -288,6 +297,10 @@ const filteredOptions = computed(() => {
     }
   }
   return opts
+})
+
+watch(searchQuery, (query) => {
+  if (props.remoteSearch) emit('search', query)
 })
 
 const isSelected = (option: any): boolean => {

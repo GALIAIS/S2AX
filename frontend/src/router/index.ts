@@ -309,7 +309,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: false,
-      title: 'Assigned Accounts',
+      title: 'Account Directory',
       titleKey: 'accountAllocations.title',
       descriptionKey: 'accountAllocations.description'
     }

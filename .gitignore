@@ -141,6 +141,8 @@ docs/*
 !docs/CITY_SIMULATION_GAME_DESIGN_CN.md
 !docs/CITY_SIMULATION_FOUNDATION_IMPLEMENTATION_CN.md
 !docs/ACCOUNT_INTAKE_IMPORT_EXPORT_DESIGN_CN.md
+!docs/ACCOUNT_ALLOCATION_CONTROL_PLANE_DESIGN_CN.md
+!docs/USER_VISIBLE_ACCOUNT_DIRECTORY_DESIGN_CN.md
 !docs/CITY_SIMULATION_ENGINE_HARDENING_CN.md
 !docs/CITY_SIMULATION_*.md
 !docs/legal/
@@ -151,3 +153,7 @@ frontend/coverage/
 frontend-next/
 aicodex
 output/
+.local-e2e-runtime/
+.playability-runtime/
+.playwright-mcp/
+.references/

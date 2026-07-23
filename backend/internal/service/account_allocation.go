@@ -24,6 +24,12 @@ const (
 	accountAllocationMaxFallbackDesiredCount = 50
 	accountAllocationDefaultBatchSize        = 100
 	accountAllocationDefaultInterval         = 15 * time.Second
+
+	AccountAllocationAccessReady                = "ready"
+	AccountAllocationAccessUserUnavailable      = "user_unavailable"
+	AccountAllocationAccessGroupUnavailable     = "group_unavailable"
+	AccountAllocationAccessGroupPermission      = "group_access_required"
+	AccountAllocationAccessSubscriptionRequired = "subscription_required"
 )
 
 var (
@@ -32,6 +38,7 @@ var (
 	ErrAccountAllocationPolicyConflict     = infraerrors.Conflict("ACCOUNT_ALLOCATION_POLICY_EXISTS", "an allocation policy already exists for this user and group")
 	ErrAccountAllocationAccountUnavailable = infraerrors.Conflict("ACCOUNT_ALLOCATION_ACCOUNT_UNAVAILABLE", "account is not an available member of the selected group")
 	ErrAccountAllocationPolicyDisabled     = infraerrors.Conflict("ACCOUNT_ALLOCATION_POLICY_DISABLED", "account allocation policy is disabled")
+	ErrAccountAllocationAccessRequired     = infraerrors.Conflict("ACCOUNT_ALLOCATION_ACCESS_REQUIRED", "target user does not currently have access to the selected group")
 )
 
 // AccountAllocationService owns the durable account lease policy. It is a
@@ -61,6 +68,7 @@ type AccountAllocationPolicy struct {
 	ReplaceOn401          bool       `json:"replace_on_401"`
 	ReplaceOn429          bool       `json:"replace_on_429"`
 	Status                string     `json:"status"`
+	AccessStatus          string     `json:"access_status"`
 	CreatedBy             *int64     `json:"created_by,omitempty"`
 	LastReconciledAt      *time.Time `json:"last_reconciled_at,omitempty"`
 	CreatedAt             time.Time  `json:"created_at"`
@@ -149,6 +157,93 @@ type AccountAllocationUserAssignment struct {
 	AssignedAt time.Time `json:"assigned_at"`
 }
 
+// AccountAllocationVisibleSource explains why the current user can see an
+// account in the read-only directory. It is intentionally a small closed set:
+// callers never receive an internal allocation or account identifier.
+type AccountAllocationVisibleSource string
+
+const (
+	AccountAllocationVisibleSourcePublic    AccountAllocationVisibleSource = "public"
+	AccountAllocationVisibleSourceDedicated AccountAllocationVisibleSource = "dedicated"
+)
+
+// AccountAllocationVisibleUsageScope keeps a number meaningful without
+// exposing another user's individual usage. Public accounts expose an
+// aggregate for the same group in the last 24 hours; dedicated accounts only
+// expose the current user's usage within their active lease.
+type AccountAllocationVisibleUsageScope string
+
+const (
+	AccountAllocationVisibleUsageScopeRolling24h    AccountAllocationVisibleUsageScope = "rolling_24h"
+	AccountAllocationVisibleUsageScopePersonalLease AccountAllocationVisibleUsageScope = "personal_lease"
+)
+
+// AccountAllocationVisibleQuotaWindow is a strictly whitelisted upstream
+// quota snapshot. It is only emitted for an active dedicated lease; public
+// pools never expose per-account quota state because it is a cross-user signal.
+type AccountAllocationVisibleQuotaWindow struct {
+	Utilization float64    `json:"utilization"`
+	ResetsAt    *time.Time `json:"resets_at,omitempty"`
+}
+
+// AccountAllocationVisibleUpstreamQuota contains cached, read-only upstream
+// quota state. It never causes an upstream request and never carries raw
+// provider payloads, credentials, or account identifiers.
+type AccountAllocationVisibleUpstreamQuota struct {
+	UpdatedAt *time.Time                           `json:"updated_at,omitempty"`
+	FiveHour  *AccountAllocationVisibleQuotaWindow `json:"five_hour,omitempty"`
+	SevenDay  *AccountAllocationVisibleQuotaWindow `json:"seven_day,omitempty"`
+}
+
+// AccountAllocationVisibleAccount is the user-facing account-directory
+// projection. Account names are masked server-side when they are email
+// addresses. Do not add account IDs, assignment/policy IDs, credentials,
+// proxy/IP metadata, raw health errors, model lists, or cross-group usage.
+// Cached upstream quotas are deliberately limited to active dedicated leases.
+type AccountAllocationVisibleAccount struct {
+	ViewKey           string                         `json:"view_key"`
+	Source            AccountAllocationVisibleSource `json:"source"`
+	GroupID           int64                          `json:"group_id"`
+	GroupName         string                         `json:"group_name"`
+	SubscriptionType  string                         `json:"subscription_type"`
+	AccountName       string                         `json:"account_name"`
+	AccountNameMasked bool                           `json:"account_name_masked"`
+	Platform          string                         `json:"platform"`
+	AccountType       string                         `json:"account_type"`
+	Capacity          struct {
+		Concurrency int `json:"concurrency"`
+	} `json:"capacity"`
+	Status           string     `json:"status"`
+	RateLimitResetAt *time.Time `json:"rate_limit_reset_at,omitempty"`
+	Usage            struct {
+		Scope        AccountAllocationVisibleUsageScope `json:"scope"`
+		RequestCount int64                              `json:"request_count"`
+		TotalTokens  int64                              `json:"total_tokens"`
+		// AccountCost and UserCost are only populated for the caller's
+		// exclusive lease window. Public-pool costs remain hidden.
+		AccountCost *float64 `json:"account_cost,omitempty"`
+		UserCost    *float64 `json:"user_cost,omitempty"`
+	} `json:"usage"`
+	// LastActivityAt follows the same scope as Usage, not the account-global
+	// last-used timestamp.
+	LastActivityAt *time.Time                             `json:"last_activity_at,omitempty"`
+	AssignedAt     *time.Time                             `json:"assigned_at,omitempty"`
+	UpstreamQuota  *AccountAllocationVisibleUpstreamQuota `json:"upstream_quota,omitempty"`
+}
+
+type AccountAllocationVisibleSummary struct {
+	PublicGroupCount      int `json:"public_group_count"`
+	DedicatedGroupCount   int `json:"dedicated_group_count"`
+	PublicAccountCount    int `json:"public_account_count"`
+	DedicatedAccountCount int `json:"dedicated_account_count"`
+	ReadyAccountCount     int `json:"ready_account_count"`
+}
+
+type AccountAllocationVisibleOverview struct {
+	Items   []AccountAllocationVisibleAccount `json:"items"`
+	Summary AccountAllocationVisibleSummary   `json:"summary"`
+}
+
 type AccountAllocationEvent struct {
 	ID           int64          `json:"id"`
 	PolicyID     int64          `json:"policy_id"`
@@ -160,14 +255,15 @@ type AccountAllocationEvent struct {
 }
 
 type AccountAllocationReconcileResult struct {
-	PolicyID          int64 `json:"policy_id"`
-	DesiredCount      int   `json:"desired_count"`
-	ActiveBefore      int   `json:"active_before"`
-	ActiveAfter       int   `json:"active_after"`
-	ReleasedCount     int   `json:"released_count"`
-	AssignedCount     int   `json:"assigned_count"`
-	Shortage          int   `json:"shortage"`
-	SkippedConcurrent bool  `json:"skipped_concurrent"`
+	PolicyID          int64  `json:"policy_id"`
+	DesiredCount      int    `json:"desired_count"`
+	ActiveBefore      int    `json:"active_before"`
+	ActiveAfter       int    `json:"active_after"`
+	ReleasedCount     int    `json:"released_count"`
+	AssignedCount     int    `json:"assigned_count"`
+	Shortage          int    `json:"shortage"`
+	SkippedConcurrent bool   `json:"skipped_concurrent"`
+	AccessStatus      string `json:"access_status"`
 }
 
 // AccountAllocationCapabilities exposes deployment limits to the administrator
@@ -176,6 +272,22 @@ type AccountAllocationReconcileResult struct {
 type AccountAllocationCapabilities struct {
 	MaxDesiredCount          int `json:"max_desired_count"`
 	ReconcileIntervalSeconds int `json:"reconcile_interval_seconds"`
+}
+
+// AccountAllocationOverview is the administrator-facing control-plane health
+// projection. Counts are calculated from durable policies and live leases, not
+// from the current page in the UI.
+type AccountAllocationOverview struct {
+	PolicyCount              int        `json:"policy_count"`
+	ActivePolicyCount        int        `json:"active_policy_count"`
+	DisabledPolicyCount      int        `json:"disabled_policy_count"`
+	BlockedPolicyCount       int        `json:"blocked_policy_count"`
+	DesiredAccountCount      int        `json:"desired_account_count"`
+	ActiveAssignmentCount    int        `json:"active_assignment_count"`
+	ShortageCount            int        `json:"shortage_count"`
+	PoliciesWithShortage     int        `json:"policies_with_shortage"`
+	LastPolicyReconciledAt   *time.Time `json:"last_policy_reconciled_at,omitempty"`
+	ReconcileIntervalSeconds int        `json:"reconcile_interval_seconds"`
 }
 
 func NewAccountAllocationService(db *sql.DB, cfg *config.Config) *AccountAllocationService {
@@ -219,6 +331,83 @@ func (s *AccountAllocationService) Capabilities() AccountAllocationCapabilities 
 		MaxDesiredCount:          s.maxDesiredCount,
 		ReconcileIntervalSeconds: int(s.reconcileInterval.Seconds()),
 	}
+}
+
+func (s *AccountAllocationService) GetOverview(ctx context.Context) (*AccountAllocationOverview, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("account allocation database is unavailable")
+	}
+
+	overview := &AccountAllocationOverview{
+		ReconcileIntervalSeconds: int(s.reconcileInterval.Seconds()),
+	}
+	var lastReconciledAt sql.NullTime
+	err := s.db.QueryRowContext(ctx, `
+		WITH policy_health AS (
+			SELECT
+				p.id,
+				p.status,
+				p.desired_count,
+				p.last_reconciled_at,
+				COUNT(aa.id) FILTER (WHERE aa.status = 'active')::INTEGER AS active_assignment_count,
+				CASE
+					WHEN u.deleted_at IS NOT NULL OR u.status <> 'active' THEN FALSE
+					WHEN g.deleted_at IS NOT NULL OR g.status <> 'active' THEN FALSE
+					WHEN COALESCE(g.subscription_type, 'standard') = 'subscription' THEN EXISTS (
+						SELECT 1
+						FROM user_subscriptions us
+						WHERE us.user_id = p.user_id
+							AND us.group_id = p.group_id
+							AND us.status = 'active'
+							AND us.deleted_at IS NULL
+							AND us.expires_at > NOW()
+					)
+					WHEN g.is_exclusive = TRUE THEN EXISTS (
+						SELECT 1
+						FROM user_allowed_groups uag
+						WHERE uag.user_id = p.user_id
+							AND uag.group_id = p.group_id
+					)
+					ELSE TRUE
+				END AS access_ready
+			FROM account_allocation_policies p
+			JOIN users u ON u.id = p.user_id
+			JOIN groups g ON g.id = p.group_id
+			LEFT JOIN account_allocation_assignments aa ON aa.policy_id = p.id
+			WHERE p.deleted_at IS NULL
+			GROUP BY p.id, u.id, g.id
+		)
+		SELECT
+			COUNT(*)::INTEGER,
+			COUNT(*) FILTER (WHERE status = 'active')::INTEGER,
+			COUNT(*) FILTER (WHERE status = 'disabled')::INTEGER,
+			COUNT(*) FILTER (WHERE status = 'active' AND access_ready = FALSE)::INTEGER,
+			COALESCE(SUM(desired_count) FILTER (WHERE status = 'active'), 0)::INTEGER,
+			COALESCE(SUM(active_assignment_count) FILTER (WHERE status = 'active'), 0)::INTEGER,
+			COALESCE(SUM(GREATEST(desired_count - active_assignment_count, 0)) FILTER (WHERE status = 'active'), 0)::INTEGER,
+			COUNT(*) FILTER (
+				WHERE status = 'active' AND active_assignment_count < desired_count
+			)::INTEGER,
+			MAX(last_reconciled_at)
+		FROM policy_health`).Scan(
+		&overview.PolicyCount,
+		&overview.ActivePolicyCount,
+		&overview.DisabledPolicyCount,
+		&overview.BlockedPolicyCount,
+		&overview.DesiredAccountCount,
+		&overview.ActiveAssignmentCount,
+		&overview.ShortageCount,
+		&overview.PoliciesWithShortage,
+		&lastReconciledAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get account allocation overview: %w", err)
+	}
+	if lastReconciledAt.Valid {
+		value := lastReconciledAt.Time
+		overview.LastPolicyReconciledAt = &value
+	}
+	return overview, nil
 }
 
 func (s *AccountAllocationService) CreatePolicy(ctx context.Context, input AccountAllocationPolicyInput) (*AccountAllocationPolicy, error) {
@@ -501,6 +690,29 @@ const accountAllocationPolicySelect = `
 	SELECT
 		p.id, p.user_id, u.email, COALESCE(u.username, ''), p.group_id, g.name, COALESCE(g.platform, ''),
 		p.desired_count, p.auto_replenish, p.replace_on_401, p.replace_on_429, p.status,
+		CASE
+			WHEN u.deleted_at IS NOT NULL OR u.status <> 'active' THEN '` + AccountAllocationAccessUserUnavailable + `'
+			WHEN g.deleted_at IS NOT NULL OR g.status <> 'active' THEN '` + AccountAllocationAccessGroupUnavailable + `'
+			WHEN COALESCE(g.subscription_type, 'standard') = 'subscription'
+				AND NOT EXISTS (
+					SELECT 1
+					FROM user_subscriptions us
+					WHERE us.user_id = p.user_id
+						AND us.group_id = p.group_id
+						AND us.status = 'active'
+						AND us.deleted_at IS NULL
+						AND us.expires_at > NOW()
+				) THEN '` + AccountAllocationAccessSubscriptionRequired + `'
+			WHEN g.is_exclusive = TRUE
+				AND COALESCE(g.subscription_type, 'standard') <> 'subscription'
+				AND NOT EXISTS (
+					SELECT 1
+					FROM user_allowed_groups uag
+					WHERE uag.user_id = p.user_id
+						AND uag.group_id = p.group_id
+				) THEN '` + AccountAllocationAccessGroupPermission + `'
+			ELSE '` + AccountAllocationAccessReady + `'
+		END,
 		p.created_by, p.last_reconciled_at, p.created_at, p.updated_at,
 		COUNT(aa.id) FILTER (WHERE aa.status = 'active')
 	FROM account_allocation_policies p
@@ -519,7 +731,7 @@ func scanAccountAllocationPolicy(scanner accountAllocationSQLScanner) (*AccountA
 	if err := scanner.Scan(
 		&policy.ID, &policy.UserID, &policy.UserEmail, &policy.Username, &policy.GroupID, &policy.GroupName, &policy.GroupPlatform,
 		&policy.DesiredCount, &policy.AutoReplenish, &policy.ReplaceOn401, &policy.ReplaceOn429, &policy.Status,
-		&createdBy, &lastReconciledAt, &policy.CreatedAt, &policy.UpdatedAt, &policy.ActiveAssignmentCount,
+		&policy.AccessStatus, &createdBy, &lastReconciledAt, &policy.CreatedAt, &policy.UpdatedAt, &policy.ActiveAssignmentCount,
 	); err != nil {
 		return nil, err
 	}
@@ -556,6 +768,13 @@ func (s *AccountAllocationService) AssignManual(ctx context.Context, policyID, a
 	}
 	if err := ensureActiveAccountAllocationReferences(ctx, tx, policy.UserID, policy.GroupID); err != nil {
 		return nil, err
+	}
+	accessStatus, err := resolveAccountAllocationAccess(ctx, tx, policy.UserID, policy.GroupID)
+	if err != nil {
+		return nil, err
+	}
+	if accessStatus != AccountAllocationAccessReady {
+		return nil, ErrAccountAllocationAccessRequired
 	}
 
 	var (
@@ -618,15 +837,16 @@ func (s *AccountAllocationService) ReleaseAssignment(ctx context.Context, policy
 		return fmt.Errorf("begin account allocation release: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := loadAccountAllocationPolicyForUpdate(ctx, tx, policyID, false); err != nil {
+	policy, err := loadAccountAllocationPolicyForUpdate(ctx, tx, policyID, false)
+	if err != nil {
 		return err
 	}
-	var found bool
+	var releasedAccountID int64
 	if err := tx.QueryRowContext(ctx, `
 		UPDATE account_allocation_assignments
 		SET status = $3, released_at = NOW(), release_reason = $4, updated_at = NOW()
 		WHERE id = $1 AND policy_id = $2 AND status = $5
-		RETURNING TRUE`, assignmentID, policyID, accountAllocationAssignmentGone, "manual_release", accountAllocationAssignmentLive).Scan(&found); errors.Is(err, sql.ErrNoRows) {
+		RETURNING account_id`, assignmentID, policyID, accountAllocationAssignmentGone, "manual_release", accountAllocationAssignmentLive).Scan(&releasedAccountID); errors.Is(err, sql.ErrNoRows) {
 		return ErrAccountAllocationAssignmentNotFound
 	} else if err != nil {
 		return fmt.Errorf("release account allocation assignment: %w", err)
@@ -634,12 +854,43 @@ func (s *AccountAllocationService) ReleaseAssignment(ctx context.Context, policy
 	if err := insertAccountAllocationEvent(ctx, tx, policyID, &assignmentID, "assignment_released", nullablePositiveID(actorUserID), map[string]any{"reason": "manual_release"}); err != nil {
 		return err
 	}
+
+	// Keep a manual release meaningful when auto-replenishment is enabled. Fill
+	// the resulting gap in the same transaction, but exclude the just-released
+	// account from this immediate replacement pass so the control plane does not
+	// appear to undo the administrator's action.
+	if policy.Status == accountAllocationPolicyActive && policy.AutoReplenish && policy.DesiredCount > 0 {
+		accessStatus, accessErr := resolveAccountAllocationAccess(ctx, tx, policy.UserID, policy.GroupID)
+		if accessErr != nil {
+			return accessErr
+		}
+		if accessStatus == AccountAllocationAccessReady {
+			activeCount, countErr := countActiveAccountAllocationAssignments(ctx, tx, policy.ID)
+			if countErr != nil {
+				return countErr
+			}
+			if activeCount < policy.DesiredCount {
+				if _, fillErr := s.fillAccountAllocationAssignments(
+					ctx,
+					tx,
+					policy,
+					policy.DesiredCount-activeCount,
+					"manual_release_replacement",
+					releasedAccountID,
+				); fillErr != nil {
+					return fillErr
+				}
+			}
+			if err := markAccountAllocationAssignmentsReconciled(ctx, tx, policy.ID); err != nil {
+				return err
+			}
+		}
+		if err := markAccountAllocationPolicyReconciled(ctx, tx, policy.ID); err != nil {
+			return err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit account allocation release: %w", err)
-	}
-	policy, err := s.GetPolicy(ctx, policyID)
-	if err == nil && policy.Status == accountAllocationPolicyActive && policy.AutoReplenish && policy.DesiredCount > 0 {
-		_, _ = s.ReconcilePolicy(ctx, policyID)
 	}
 	return nil
 }
@@ -856,6 +1107,447 @@ func accountAllocationDisplayStatus(accountStatus string, schedulable bool, rate
 	return "ready"
 }
 
+// ListUserVisibleAccounts builds the account directory used by regular users.
+// It keeps catalogue visibility and access control deliberately separate:
+//
+//   - every active, non-exclusive group is visible to authenticated users;
+//   - active exclusive allocations are visible only to their assignee, and a
+//     subscription allocation additionally requires the assignee's active
+//     subscription;
+//   - an account with an active exclusive lease is removed from every shared
+//     roster, so one user's dedicated allocation never appears to another
+//     user as a public candidate.
+//
+// The query never returns raw account identifiers. Account names remain inside
+// the service boundary long enough to apply email masking, then only the safe
+// projection below leaves the backend.
+func (s *AccountAllocationService) ListUserVisibleAccounts(ctx context.Context, userID int64) (*AccountAllocationVisibleOverview, error) {
+	overview := &AccountAllocationVisibleOverview{
+		Items: make([]AccountAllocationVisibleAccount, 0),
+	}
+	if userID <= 0 || s == nil || s.db == nil {
+		return overview, nil
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		WITH public_accounts AS (
+			SELECT
+				'public'::text AS source,
+				g.id AS group_id,
+				g.name AS group_name,
+				COALESCE(g.subscription_type, 'standard') AS subscription_type,
+				a.name AS account_name,
+				COALESCE(a.platform, g.platform, '') AS platform,
+				COALESCE(a.type, '') AS account_type,
+				COALESCE(a.concurrency, 0) AS concurrency,
+				COALESCE(a.status, 'removed') AS account_status,
+				COALESCE(a.schedulable, FALSE) AS schedulable,
+				a.rate_limit_reset_at,
+				a.expires_at,
+				COALESCE(a.auto_pause_on_expired, TRUE) AS auto_pause_on_expired,
+				a.overload_until,
+				a.temp_unschedulable_until,
+				a.session_window_end,
+				COALESCE(a.extra, '{}'::jsonb)::text AS account_extra,
+				NULL::TIMESTAMPTZ AS assigned_at,
+				COALESCE(usage.request_count, 0) AS request_count,
+				COALESCE(usage.total_tokens, 0) AS total_tokens,
+				usage.last_activity_at,
+				NULL::DOUBLE PRECISION AS account_cost,
+				NULL::DOUBLE PRECISION AS user_cost
+			FROM groups g
+			JOIN account_groups ag ON ag.group_id = g.id
+			JOIN accounts a ON a.id = ag.account_id AND a.deleted_at IS NULL
+			LEFT JOIN LATERAL (
+				SELECT
+					COUNT(ul.id) AS request_count,
+					COALESCE(SUM(
+						ul.input_tokens + ul.output_tokens + ul.cache_creation_tokens + ul.cache_read_tokens
+					), 0) AS total_tokens,
+					MAX(ul.created_at) AS last_activity_at
+				FROM usage_logs ul
+				WHERE ul.account_id = a.id
+					AND ul.group_id = g.id
+					AND ul.created_at >= NOW() - INTERVAL '24 hours'
+			) usage ON TRUE
+			WHERE g.deleted_at IS NULL
+				AND g.status = 'active'
+				AND g.is_exclusive = FALSE
+				AND NOT EXISTS (
+					SELECT 1
+					FROM account_allocation_assignments leased
+					WHERE leased.account_id = a.id
+						AND leased.status = 'active'
+				)
+		),
+		dedicated_accounts AS (
+			SELECT
+				'dedicated'::text AS source,
+				g.id AS group_id,
+				g.name AS group_name,
+				COALESCE(g.subscription_type, 'standard') AS subscription_type,
+				a.name AS account_name,
+				COALESCE(a.platform, g.platform, '') AS platform,
+				COALESCE(a.type, '') AS account_type,
+				COALESCE(a.concurrency, 0) AS concurrency,
+				COALESCE(a.status, 'removed') AS account_status,
+				COALESCE(a.schedulable, FALSE) AS schedulable,
+				a.rate_limit_reset_at,
+				a.expires_at,
+				COALESCE(a.auto_pause_on_expired, TRUE) AS auto_pause_on_expired,
+				a.overload_until,
+				a.temp_unschedulable_until,
+				a.session_window_end,
+				COALESCE(a.extra, '{}'::jsonb)::text AS account_extra,
+				aa.assigned_at,
+				COALESCE(usage.request_count, 0) AS request_count,
+				COALESCE(usage.total_tokens, 0) AS total_tokens,
+				usage.last_activity_at,
+				COALESCE(usage.account_cost, 0)::DOUBLE PRECISION AS account_cost,
+				COALESCE(usage.user_cost, 0)::DOUBLE PRECISION AS user_cost
+			FROM account_allocation_assignments aa
+			JOIN account_allocation_policies p
+				ON p.id = aa.policy_id
+				AND p.deleted_at IS NULL
+				AND p.status = 'active'
+			JOIN users u
+				ON u.id = p.user_id
+				AND u.deleted_at IS NULL
+				AND u.status = 'active'
+			JOIN groups g
+				ON g.id = p.group_id
+				AND g.deleted_at IS NULL
+				AND g.status = 'active'
+			JOIN accounts a ON a.id = aa.account_id AND a.deleted_at IS NULL
+			JOIN account_groups ag ON ag.account_id = a.id AND ag.group_id = g.id
+			LEFT JOIN LATERAL (
+				SELECT
+					COUNT(ul.id) AS request_count,
+					COALESCE(SUM(
+						ul.input_tokens + ul.output_tokens + ul.cache_creation_tokens + ul.cache_read_tokens
+					), 0) AS total_tokens,
+					MAX(ul.created_at) AS last_activity_at,
+					COALESCE(SUM(
+						COALESCE(ul.account_stats_cost, ul.total_cost) * COALESCE(ul.account_rate_multiplier, 1)
+					), 0) AS account_cost,
+					COALESCE(SUM(ul.actual_cost), 0) AS user_cost
+				FROM usage_logs ul
+				WHERE ul.account_id = aa.account_id
+					AND ul.user_id = $1
+					AND ul.group_id = aa.group_id
+					AND ul.created_at >= aa.assigned_at
+			) usage ON TRUE
+			WHERE aa.user_id = $1
+				AND p.user_id = $1
+				AND aa.group_id = p.group_id
+				AND aa.status = 'active'
+				AND (
+					(
+						COALESCE(g.subscription_type, 'standard') = 'subscription'
+						AND EXISTS (
+							SELECT 1
+							FROM user_subscriptions us
+							WHERE us.user_id = $1
+								AND us.group_id = g.id
+								AND us.status = 'active'
+								AND us.deleted_at IS NULL
+								AND us.expires_at > NOW()
+						)
+					)
+					OR (
+						COALESCE(g.subscription_type, 'standard') <> 'subscription'
+						AND (
+							g.is_exclusive = FALSE
+							OR EXISTS (
+								SELECT 1
+								FROM user_allowed_groups uag
+								WHERE uag.user_id = $1
+									AND uag.group_id = g.id
+							)
+						)
+					)
+				)
+		)
+		SELECT
+			source,
+			group_id,
+			group_name,
+			subscription_type,
+			account_name,
+			platform,
+			account_type,
+			concurrency,
+			account_status,
+			schedulable,
+			rate_limit_reset_at,
+			expires_at,
+			auto_pause_on_expired,
+			overload_until,
+			temp_unschedulable_until,
+			session_window_end,
+			account_extra,
+			assigned_at,
+			request_count,
+			total_tokens,
+			last_activity_at,
+			account_cost,
+			user_cost
+		FROM (
+			SELECT * FROM dedicated_accounts
+			UNION ALL
+			SELECT * FROM public_accounts
+		) visible_accounts
+		ORDER BY CASE source WHEN 'dedicated' THEN 0 ELSE 1 END, group_name ASC, account_name ASC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list user visible account directory: %w", err)
+	}
+	defer rows.Close()
+
+	publicGroups := make(map[int64]struct{})
+	dedicatedGroups := make(map[int64]struct{})
+	now := time.Now()
+	for rows.Next() {
+		var item AccountAllocationVisibleAccount
+		var source string
+		var accountStatus string
+		var schedulable bool
+		var rateLimitResetAt, expiresAt, overloadUntil, tempUnschedulableUntil, sessionWindowEnd, assignedAt, lastActivityAt sql.NullTime
+		var rawAccountExtra []byte
+		var accountCost, userCost sql.NullFloat64
+		var autoPauseOnExpired bool
+		if err := rows.Scan(
+			&source,
+			&item.GroupID,
+			&item.GroupName,
+			&item.SubscriptionType,
+			&item.AccountName,
+			&item.Platform,
+			&item.AccountType,
+			&item.Capacity.Concurrency,
+			&accountStatus,
+			&schedulable,
+			&rateLimitResetAt,
+			&expiresAt,
+			&autoPauseOnExpired,
+			&overloadUntil,
+			&tempUnschedulableUntil,
+			&sessionWindowEnd,
+			&rawAccountExtra,
+			&assignedAt,
+			&item.Usage.RequestCount,
+			&item.Usage.TotalTokens,
+			&lastActivityAt,
+			&accountCost,
+			&userCost,
+		); err != nil {
+			return nil, fmt.Errorf("scan user visible account directory: %w", err)
+		}
+
+		item.Source = AccountAllocationVisibleSource(source)
+		if item.Source != AccountAllocationVisibleSourcePublic && item.Source != AccountAllocationVisibleSourceDedicated {
+			return nil, fmt.Errorf("scan user visible account directory: unknown source")
+		}
+		item.AccountName, item.AccountNameMasked = maskAccountAllocationDisplayName(item.AccountName)
+		item.LastActivityAt = timePointerFromNullTime(lastActivityAt)
+		if rateLimitResetAt.Valid {
+			value := rateLimitResetAt.Time
+			item.RateLimitResetAt = &value
+		}
+		item.Status = accountAllocationVisibleStatus(
+			accountStatus,
+			schedulable,
+			item.RateLimitResetAt,
+			timePointerFromNullTime(expiresAt),
+			autoPauseOnExpired,
+			timePointerFromNullTime(overloadUntil),
+			timePointerFromNullTime(tempUnschedulableUntil),
+			now,
+		)
+		// A reset time is useful only for a visible cooling state. In any other
+		// state, withholding it avoids exposing an operational schedule that the
+		// user cannot act on.
+		if item.Status != "cooling" {
+			item.RateLimitResetAt = nil
+		}
+		if item.Source == AccountAllocationVisibleSourceDedicated {
+			item.Usage.Scope = AccountAllocationVisibleUsageScopePersonalLease
+			item.Usage.AccountCost = floatPointerFromNullFloat64(accountCost)
+			item.Usage.UserCost = floatPointerFromNullFloat64(userCost)
+			item.UpstreamQuota = accountAllocationVisibleUpstreamQuota(
+				item.Source,
+				item.Platform,
+				item.AccountType,
+				timePointerFromNullTime(sessionWindowEnd),
+				rawAccountExtra,
+				now,
+			)
+			if assignedAt.Valid {
+				value := assignedAt.Time
+				item.AssignedAt = &value
+			}
+			overview.Summary.DedicatedAccountCount++
+			dedicatedGroups[item.GroupID] = struct{}{}
+		} else {
+			item.Usage.Scope = AccountAllocationVisibleUsageScopeRolling24h
+			overview.Summary.PublicAccountCount++
+			publicGroups[item.GroupID] = struct{}{}
+		}
+		if item.Status == "ready" {
+			overview.Summary.ReadyAccountCount++
+		}
+		// ViewKey is a stable-in-response UI key, not an account identifier.
+		item.ViewKey = fmt.Sprintf("visible-%s-%d", item.Source, len(overview.Items)+1)
+		overview.Items = append(overview.Items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate user visible account directory: %w", err)
+	}
+	overview.Summary.PublicGroupCount = len(publicGroups)
+	overview.Summary.DedicatedGroupCount = len(dedicatedGroups)
+	return overview, nil
+}
+
+func timePointerFromNullTime(value sql.NullTime) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	copy := value.Time
+	return &copy
+}
+
+func floatPointerFromNullFloat64(value sql.NullFloat64) *float64 {
+	if !value.Valid {
+		return nil
+	}
+	copy := value.Float64
+	return &copy
+}
+
+// accountAllocationVisibleUpstreamQuota projects only two rolling windows from
+// an already persisted provider snapshot. Reading the account directory must
+// never trigger an upstream quota probe, and public pools must never expose a
+// per-account signal that could reveal other users' activity.
+func accountAllocationVisibleUpstreamQuota(
+	source AccountAllocationVisibleSource,
+	platform string,
+	accountType string,
+	sessionWindowEnd *time.Time,
+	rawExtra []byte,
+	now time.Time,
+) *AccountAllocationVisibleUpstreamQuota {
+	if source != AccountAllocationVisibleSourceDedicated || len(rawExtra) == 0 {
+		return nil
+	}
+
+	extra := make(map[string]any)
+	if err := json.Unmarshal(rawExtra, &extra); err != nil {
+		return nil
+	}
+
+	quota := &AccountAllocationVisibleUpstreamQuota{}
+	switch {
+	case platform == PlatformOpenAI && accountType == AccountTypeOAuth:
+		quota.UpdatedAt = timePointerFromExtra(extra, "codex_usage_updated_at")
+		quota.FiveHour = accountAllocationVisibleQuotaWindow(buildCodexUsageProgressFromExtra(extra, "5h", now), now)
+		quota.SevenDay = accountAllocationVisibleQuotaWindow(buildCodexUsageProgressFromExtra(extra, "7d", now), now)
+	case platform == PlatformAnthropic && (accountType == AccountTypeOAuth || accountType == AccountTypeSetupToken):
+		quota.UpdatedAt = timePointerFromExtra(extra, "passive_usage_sampled_at")
+		quota.FiveHour = accountAllocationVisibleSessionQuotaWindow(sessionWindowEnd, extra, now)
+		quota.SevenDay = accountAllocationVisibleQuotaWindow(
+			buildPassiveUsageWindow(extra, "passive_usage_7d_utilization", "passive_usage_7d_reset"),
+			now,
+		)
+	default:
+		return nil
+	}
+
+	if quota.FiveHour == nil && quota.SevenDay == nil {
+		return nil
+	}
+	return quota
+}
+
+func accountAllocationVisibleSessionQuotaWindow(sessionWindowEnd *time.Time, extra map[string]any, now time.Time) *AccountAllocationVisibleQuotaWindow {
+	if sessionWindowEnd == nil {
+		return nil
+	}
+	utilization := parseExtraFloat64(extra["session_window_utilization"]) * 100
+	return accountAllocationVisibleQuotaWindow(&UsageProgress{
+		Utilization: utilization,
+		ResetsAt:    sessionWindowEnd,
+	}, now)
+}
+
+func accountAllocationVisibleQuotaWindow(progress *UsageProgress, now time.Time) *AccountAllocationVisibleQuotaWindow {
+	if progress == nil {
+		return nil
+	}
+	utilization := progress.Utilization
+	if utilization < 0 {
+		utilization = 0
+	}
+	window := &AccountAllocationVisibleQuotaWindow{Utilization: utilization}
+	if progress.ResetsAt != nil && progress.ResetsAt.After(now) {
+		reset := *progress.ResetsAt
+		window.ResetsAt = &reset
+	} else if progress.ResetsAt != nil {
+		window.Utilization = 0
+	}
+	return window
+}
+
+func timePointerFromExtra(extra map[string]any, key string) *time.Time {
+	value, ok := extra[key]
+	if !ok {
+		return nil
+	}
+	parsed, err := parseTime(fmt.Sprint(value))
+	if err != nil {
+		return nil
+	}
+	return &parsed
+}
+
+func maskAccountAllocationDisplayName(name string) (string, bool) {
+	displayName := strings.TrimSpace(name)
+	if strings.Count(displayName, "@") != 1 || strings.ContainsAny(displayName, " \t\r\n") {
+		return displayName, false
+	}
+	parts := strings.SplitN(displayName, "@", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return displayName, false
+	}
+	return MaskEmail(displayName), true
+}
+
+func accountAllocationVisibleStatus(
+	accountStatus string,
+	schedulable bool,
+	rateLimitResetAt *time.Time,
+	expiresAt *time.Time,
+	autoPauseOnExpired bool,
+	overloadUntil *time.Time,
+	tempUnschedulableUntil *time.Time,
+	now time.Time,
+) string {
+	if accountStatus != StatusActive || !schedulable {
+		return "unavailable"
+	}
+	if autoPauseOnExpired && expiresAt != nil && !expiresAt.After(now) {
+		return "unavailable"
+	}
+	if overloadUntil != nil && overloadUntil.After(now) {
+		return "unavailable"
+	}
+	if tempUnschedulableUntil != nil && tempUnschedulableUntil.After(now) {
+		return "unavailable"
+	}
+	if rateLimitResetAt != nil && rateLimitResetAt.After(now) {
+		return "cooling"
+	}
+	return "ready"
+}
+
 // ListManualCandidates returns healthy, currently unleased accounts from the
 // policy's group. It is the only supported source for the manual-assignment
 // picker, which keeps the UI from racing a raw account list or exposing a
@@ -870,6 +1562,9 @@ func (s *AccountAllocationService) ListManualCandidates(ctx context.Context, pol
 	}
 	if policy.Status != accountAllocationPolicyActive {
 		return nil, ErrAccountAllocationPolicyDisabled
+	}
+	if policy.AccessStatus != AccountAllocationAccessReady {
+		return nil, ErrAccountAllocationAccessRequired
 	}
 	if limit <= 0 || limit > 200 {
 		limit = 100
@@ -1090,6 +1785,63 @@ func ensureActiveAccountAllocationReferences(ctx context.Context, queryer accoun
 		return infraerrors.NotFound("ACCOUNT_ALLOCATION_GROUP_NOT_FOUND", "active target group not found")
 	}
 	return nil
+}
+
+func resolveAccountAllocationAccess(ctx context.Context, queryer accountAllocationQueryRower, userID, groupID int64) (string, error) {
+	var accessStatus string
+	err := queryer.QueryRowContext(ctx, `
+		SELECT CASE
+			WHEN u.deleted_at IS NOT NULL OR u.status <> 'active' THEN $3
+			WHEN g.deleted_at IS NOT NULL OR g.status <> 'active' THEN $4
+			WHEN COALESCE(g.subscription_type, 'standard') = 'subscription'
+				AND NOT EXISTS (
+					SELECT 1
+					FROM user_subscriptions us
+					WHERE us.user_id = u.id
+						AND us.group_id = g.id
+						AND us.status = 'active'
+						AND us.deleted_at IS NULL
+						AND us.expires_at > NOW()
+				) THEN $5
+			WHEN g.is_exclusive = TRUE
+				AND COALESCE(g.subscription_type, 'standard') <> 'subscription'
+				AND NOT EXISTS (
+					SELECT 1
+					FROM user_allowed_groups uag
+					WHERE uag.user_id = u.id
+						AND uag.group_id = g.id
+				) THEN $6
+			ELSE $7
+		END
+		FROM users u
+		JOIN groups g ON g.id = $2
+		WHERE u.id = $1`,
+		userID,
+		groupID,
+		AccountAllocationAccessUserUnavailable,
+		AccountAllocationAccessGroupUnavailable,
+		AccountAllocationAccessSubscriptionRequired,
+		AccountAllocationAccessGroupPermission,
+		AccountAllocationAccessReady,
+	).Scan(&accessStatus)
+	if errors.Is(err, sql.ErrNoRows) {
+		return AccountAllocationAccessUserUnavailable, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("resolve account allocation access: %w", err)
+	}
+	return accessStatus, nil
+}
+
+func accountAllocationBlockedReleaseReason(accessStatus string) string {
+	switch accessStatus {
+	case AccountAllocationAccessUserUnavailable:
+		return "target_user_unavailable"
+	case AccountAllocationAccessGroupUnavailable:
+		return "target_group_unavailable"
+	default:
+		return "target_group_access_unavailable"
+	}
 }
 
 type accountAllocationPolicyLock struct {

@@ -56,6 +56,34 @@ func (h *AccountAllocationHandler) GetCapabilities(c *gin.Context) {
 	response.Success(c, h.service.Capabilities())
 }
 
+// GetOverview GET /api/v1/admin/account-allocations/overview
+func (h *AccountAllocationHandler) GetOverview(c *gin.Context) {
+	if h == nil || h.service == nil {
+		response.InternalError(c, "Account allocation service unavailable")
+		return
+	}
+	overview, err := h.service.GetOverview(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, overview)
+}
+
+// ReconcileAll POST /api/v1/admin/account-allocations/reconcile
+func (h *AccountAllocationHandler) ReconcileAll(c *gin.Context) {
+	if h == nil || h.service == nil {
+		response.InternalError(c, "Account allocation service unavailable")
+		return
+	}
+	results, err := h.service.ReconcileAll(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"items": results, "processed": len(results)})
+}
+
 // ListPolicies GET /api/v1/admin/account-allocations/policies
 func (h *AccountAllocationHandler) ListPolicies(c *gin.Context) {
 	if h == nil || h.service == nil {

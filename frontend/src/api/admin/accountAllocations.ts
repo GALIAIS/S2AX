@@ -3,6 +3,12 @@ import type { PaginatedResponse } from '@/types'
 
 export type AccountAllocationPolicyStatus = 'active' | 'disabled'
 export type AccountAllocationAssignmentStatus = 'active' | 'released'
+export type AccountAllocationAccessStatus =
+  | 'ready'
+  | 'user_unavailable'
+  | 'group_unavailable'
+  | 'group_access_required'
+  | 'subscription_required'
 
 export interface AccountAllocationPolicy {
   id: number
@@ -17,6 +23,7 @@ export interface AccountAllocationPolicy {
   replace_on_401: boolean
   replace_on_429: boolean
   status: AccountAllocationPolicyStatus
+  access_status: AccountAllocationAccessStatus
   created_by?: number | null
   last_reconciled_at?: string | null
   created_at: string
@@ -74,10 +81,24 @@ export interface AccountAllocationReconcileResult {
   assigned_count: number
   shortage: number
   skipped_concurrent: boolean
+  access_status: AccountAllocationAccessStatus
 }
 
 export interface AccountAllocationCapabilities {
   max_desired_count: number
+  reconcile_interval_seconds: number
+}
+
+export interface AccountAllocationOverview {
+  policy_count: number
+  active_policy_count: number
+  disabled_policy_count: number
+  blocked_policy_count: number
+  desired_account_count: number
+  active_assignment_count: number
+  shortage_count: number
+  policies_with_shortage: number
+  last_policy_reconciled_at?: string | null
   reconcile_interval_seconds: number
 }
 
@@ -121,6 +142,21 @@ export async function getCapabilities(): Promise<AccountAllocationCapabilities> 
   return data
 }
 
+export async function getOverview(): Promise<AccountAllocationOverview> {
+  const { data } = await apiClient.get<AccountAllocationOverview>('/admin/account-allocations/overview')
+  return data
+}
+
+export async function reconcileAll(): Promise<{ items: AccountAllocationReconcileResult[]; processed: number }> {
+  const { data } = await apiClient.post<{ items: AccountAllocationReconcileResult[]; processed: number }>(
+    '/admin/account-allocations/reconcile'
+  )
+  return {
+    items: data.items ?? [],
+    processed: data.processed ?? 0
+  }
+}
+
 export async function getById(id: number): Promise<AccountAllocationPolicy> {
   const { data } = await apiClient.get<AccountAllocationPolicy>(`/admin/account-allocations/policies/${id}`)
   return data
@@ -156,9 +192,15 @@ export async function listAssignments(id: number): Promise<AccountAllocationAssi
   return data.items ?? []
 }
 
-export async function listCandidates(id: number, query = '', limit = 100): Promise<AccountAllocationCandidate[]> {
+export async function listCandidates(
+  id: number,
+  query = '',
+  limit = 100,
+  options?: { signal?: AbortSignal }
+): Promise<AccountAllocationCandidate[]> {
   const { data } = await apiClient.get<{ items: AccountAllocationCandidate[] }>(`/admin/account-allocations/policies/${id}/candidates`, {
-    params: { q: query || undefined, limit }
+    params: { q: query || undefined, limit },
+    signal: options?.signal
   })
   return data.items ?? []
 }
@@ -190,6 +232,8 @@ export async function listEvents(
 
 const accountAllocationsAPI = {
   getCapabilities,
+  getOverview,
+  reconcileAll,
   list,
   getById,
   create,

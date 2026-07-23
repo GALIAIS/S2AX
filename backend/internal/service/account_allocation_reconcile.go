@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 const accountAllocationReconcileTimeout = 20 * time.Second
@@ -55,31 +57,64 @@ func (s *AccountAllocationService) Stop() {
 func (s *AccountAllocationService) runReconcileOnce() {
 	ctx, cancel := context.WithTimeout(context.Background(), accountAllocationReconcileTimeout)
 	defer cancel()
-	if _, err := s.ReconcileAll(ctx); err != nil {
+	if _, err := s.reconcileBatch(ctx); err != nil {
 		slog.Warn("account allocation reconciliation failed", "error", err)
 	}
 }
 
-// ReconcileAll processes a bounded, oldest-first page of active automatic
-// policies. Per-policy row locks make this safe when multiple server instances
-// run the same loop.
+// ReconcileAll processes a stable snapshot of every eligible active policy.
+// This is the administrator-triggered repair operation; unlike the background
+// worker it must not silently stop at policyBatchSize while presenting itself
+// as a full reconciliation.
 func (s *AccountAllocationService) ReconcileAll(ctx context.Context) ([]AccountAllocationReconcileResult, error) {
+	return s.reconcilePolicies(ctx, 0)
+}
+
+// reconcileBatch processes one bounded, oldest-first page for the periodic
+// worker. Manual-only policies with live leases are included so revoked access
+// and unhealthy accounts cannot remain leased forever merely because automatic
+// replenishment is disabled. Per-policy row locks make this safe when multiple
+// server instances run the same loop.
+func (s *AccountAllocationService) reconcileBatch(ctx context.Context) ([]AccountAllocationReconcileResult, error) {
+	return s.reconcilePolicies(ctx, s.policyBatchSize)
+}
+
+func (s *AccountAllocationService) reconcilePolicies(ctx context.Context, limit int) ([]AccountAllocationReconcileResult, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("account allocation database is unavailable")
 	}
 
-	rows, err := s.db.QueryContext(ctx, `
+	query := `
 		SELECT id
 		FROM account_allocation_policies
-		WHERE status = $1 AND auto_replenish = TRUE AND desired_count > 0 AND deleted_at IS NULL
-		ORDER BY last_reconciled_at NULLS FIRST, id ASC
-		LIMIT $2`, accountAllocationPolicyActive, s.policyBatchSize)
+		WHERE status = $1
+			AND deleted_at IS NULL
+			AND (
+				(auto_replenish = TRUE AND desired_count > 0)
+				OR EXISTS (
+					SELECT 1
+					FROM account_allocation_assignments aa
+					WHERE aa.policy_id = account_allocation_policies.id
+						AND aa.status = $2
+				)
+			)
+		ORDER BY last_reconciled_at NULLS FIRST, id ASC`
+	args := []any{accountAllocationPolicyActive, accountAllocationAssignmentLive}
+	if limit > 0 {
+		query += ` LIMIT $3`
+		args = append(args, limit)
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list account allocation policies for reconciliation: %w", err)
 	}
 	defer rows.Close()
 
-	policyIDs := make([]int64, 0, s.policyBatchSize)
+	capacity := limit
+	if capacity <= 0 {
+		capacity = accountAllocationDefaultBatchSize
+	}
+	policyIDs := make([]int64, 0, capacity)
 	for rows.Next() {
 		var policyID int64
 		if err := rows.Scan(&policyID); err != nil {
@@ -111,7 +146,10 @@ func (s *AccountAllocationService) ReconcileAll(ctx context.Context) ([]AccountA
 // group. It never automatically removes healthy assignments merely because the
 // desired count was reduced; that action stays explicitly administrator-driven.
 func (s *AccountAllocationService) ReconcilePolicy(ctx context.Context, policyID int64) (AccountAllocationReconcileResult, error) {
-	result := AccountAllocationReconcileResult{PolicyID: policyID}
+	result := AccountAllocationReconcileResult{
+		PolicyID:     policyID,
+		AccessStatus: AccountAllocationAccessReady,
+	}
 	if policyID <= 0 {
 		return result, ErrAccountAllocationPolicyNotFound
 	}
@@ -144,18 +182,55 @@ func (s *AccountAllocationService) ReconcilePolicy(ctx context.Context, policyID
 		}
 		return result, nil
 	}
-	// Soft-delete triggers normally disable a policy before it is selected, but
-	// make reconciliation independently fail closed if a historical/manual DB
-	// state leaves an active policy pointing to an inactive user or group.
-	if err := ensureActiveAccountAllocationReferences(ctx, tx, policy.UserID, policy.GroupID); err != nil {
+	accessStatus, err := resolveAccountAllocationAccess(ctx, tx, policy.UserID, policy.GroupID)
+	if err != nil {
 		return result, err
 	}
+	result.AccessStatus = accessStatus
 
 	activeBefore, err := countActiveAccountAllocationAssignments(ctx, tx, policy.ID)
 	if err != nil {
 		return result, err
 	}
 	result.ActiveBefore = activeBefore
+
+	// An allocation lease is useful only while the target user can actually use
+	// the policy group. Release inaccessible leases immediately, but retain the
+	// active policy so a later subscription renewal or permission grant can be
+	// detected and replenished automatically.
+	if accessStatus != AccountAllocationAccessReady {
+		reason := accountAllocationBlockedReleaseReason(accessStatus)
+		assignmentIDs, err := releaseActiveAssignmentsForPolicy(ctx, tx, policy.ID, reason)
+		if err != nil {
+			return result, err
+		}
+		for _, assignmentID := range assignmentIDs {
+			if err := insertAccountAllocationEvent(ctx, tx, policy.ID, &assignmentID, "assignment_released", nil, map[string]any{
+				"reason":        reason,
+				"access_status": accessStatus,
+			}); err != nil {
+				return result, err
+			}
+		}
+		if len(assignmentIDs) > 0 {
+			if err := insertAccountAllocationEvent(ctx, tx, policy.ID, nil, "policy_access_blocked", nil, map[string]any{
+				"access_status":        accessStatus,
+				"released_assignments": len(assignmentIDs),
+			}); err != nil {
+				return result, err
+			}
+		}
+		result.ReleasedCount = len(assignmentIDs)
+		result.ActiveAfter = 0
+		result.Shortage = policy.DesiredCount
+		if err := markAccountAllocationPolicyReconciled(ctx, tx, policy.ID); err != nil {
+			return result, err
+		}
+		if err := tx.Commit(); err != nil {
+			return result, fmt.Errorf("commit blocked account allocation reconciliation: %w", err)
+		}
+		return result, nil
+	}
 
 	released, err := s.releaseUnhealthyAccountAllocationAssignments(ctx, tx, policy)
 	if err != nil {
@@ -170,7 +245,7 @@ func (s *AccountAllocationService) ReconcilePolicy(ctx context.Context, policyID
 
 	if policy.AutoReplenish && activeAfterRelease < policy.DesiredCount {
 		needed := policy.DesiredCount - activeAfterRelease
-		assigned, err := s.fillAccountAllocationAssignments(ctx, tx, policy, needed)
+		assigned, err := s.fillAccountAllocationAssignments(ctx, tx, policy, needed, "reconciler")
 		if err != nil {
 			return result, err
 		}
@@ -228,6 +303,7 @@ type accountAllocationAssignmentHealth struct {
 	RateLimitResetAt        *time.Time
 	TempUnschedulableUntil  *time.Time
 	TempUnschedulableReason string
+	ErrorMessage            string
 }
 
 func (s *AccountAllocationService) releaseUnhealthyAccountAllocationAssignments(ctx context.Context, tx *sql.Tx, policy accountAllocationPolicyLock) (int, error) {
@@ -244,7 +320,8 @@ func (s *AccountAllocationService) releaseUnhealthyAccountAllocationAssignments(
 			COALESCE(a.auto_pause_on_expired, FALSE),
 			a.rate_limit_reset_at,
 			a.temp_unschedulable_until,
-			COALESCE(a.temp_unschedulable_reason, '')
+			COALESCE(a.temp_unschedulable_reason, ''),
+			COALESCE(a.error_message, '')
 		FROM account_allocation_assignments aa
 		LEFT JOIN accounts a ON a.id = aa.account_id
 		WHERE aa.policy_id = $1 AND aa.status = $2
@@ -271,6 +348,7 @@ func (s *AccountAllocationService) releaseUnhealthyAccountAllocationAssignments(
 			&rateLimitResetAt,
 			&tempUnschedulableUntil,
 			&item.TempUnschedulableReason,
+			&item.ErrorMessage,
 		); err != nil {
 			return 0, fmt.Errorf("scan account allocation assignment health: %w", err)
 		}
@@ -321,20 +399,22 @@ func accountAllocationReleaseReason(policy accountAllocationPolicyLock, health a
 	if !health.InPolicyGroup {
 		return "account_group_unbound"
 	}
+	if health.AutoPauseOnExpired && health.ExpiresAt != nil && !health.ExpiresAt.After(now) {
+		return "account_expired"
+	}
 	if policy.ReplaceOn429 && health.RateLimitResetAt != nil && health.RateLimitResetAt.After(now) {
 		return "rate_limited_429"
 	}
-	if !policy.ReplaceOn401 {
+	isAuthenticationFailure := accountAllocationIs401Failure(health.TempUnschedulableReason) ||
+		accountAllocationIs401Failure(health.ErrorMessage)
+	if isAuthenticationFailure {
+		if policy.ReplaceOn401 {
+			return "authentication_failed_401"
+		}
 		return ""
 	}
 	if health.AccountStatus != StatusActive || !health.Schedulable {
 		return "account_unavailable"
-	}
-	if health.AutoPauseOnExpired && health.ExpiresAt != nil && !health.ExpiresAt.After(now) {
-		return "account_expired"
-	}
-	if health.TempUnschedulableUntil != nil && health.TempUnschedulableUntil.After(now) && accountAllocationIs401Failure(health.TempUnschedulableReason) {
-		return "authentication_failed_401"
 	}
 	return ""
 }
@@ -360,7 +440,7 @@ func accountAllocationIs401Failure(reason string) bool {
 		strings.HasPrefix(lower, "unauthorized (401):")
 }
 
-func (s *AccountAllocationService) fillAccountAllocationAssignments(ctx context.Context, tx *sql.Tx, policy accountAllocationPolicyLock, needed int) (int, error) {
+func (s *AccountAllocationService) fillAccountAllocationAssignments(ctx context.Context, tx *sql.Tx, policy accountAllocationPolicyLock, needed int, source string, excludedAccountIDs ...int64) (int, error) {
 	if needed <= 0 {
 		return 0, nil
 	}
@@ -371,6 +451,9 @@ func (s *AccountAllocationService) fillAccountAllocationAssignments(ctx context.
 	}
 	if candidateLimit > 200 {
 		candidateLimit = 200
+	}
+	if excludedAccountIDs == nil {
+		excludedAccountIDs = []int64{}
 	}
 	rows, err := tx.QueryContext(ctx, `
 		SELECT a.id, COALESCE(a.type, ''), COALESCE(a.extra, '{}'::jsonb)::text
@@ -387,9 +470,16 @@ func (s *AccountAllocationService) fillAccountAllocationAssignments(ctx context.
 				SELECT 1 FROM account_allocation_assignments aa
 				WHERE aa.account_id = a.id AND aa.status = $3
 			)
+			AND NOT (a.id = ANY($4::BIGINT[]))
 		ORDER BY a.priority ASC, a.id ASC
-		LIMIT $4
-		FOR UPDATE OF a SKIP LOCKED`, policy.GroupID, StatusActive, accountAllocationAssignmentLive, candidateLimit)
+		LIMIT $5
+		FOR UPDATE OF a SKIP LOCKED`,
+		policy.GroupID,
+		StatusActive,
+		accountAllocationAssignmentLive,
+		pq.Array(excludedAccountIDs),
+		candidateLimit,
+	)
 	if err != nil {
 		return 0, fmt.Errorf("lock account allocation fill candidates: %w", err)
 	}
@@ -416,8 +506,19 @@ func (s *AccountAllocationService) fillAccountAllocationAssignments(ctx context.
 	if err := rows.Err(); err != nil {
 		return 0, fmt.Errorf("iterate account allocation fill candidates: %w", err)
 	}
+	// lib/pq requires every result set on a transaction connection to be fully
+	// closed before another statement is issued. We stop after collecting the
+	// requested number of candidates, so the deferred close would otherwise run
+	// too late: the following INSERT ... RETURNING may observe a stale protocol
+	// response (for example, "unexpected Parse response 'C'").
+	if err := rows.Close(); err != nil {
+		return 0, fmt.Errorf("close account allocation fill candidates: %w", err)
+	}
 
 	assigned := 0
+	if strings.TrimSpace(source) == "" {
+		source = "reconciler"
+	}
 	for _, accountID := range accountIDs {
 		assignmentID, _, err := createAccountAllocationAssignment(ctx, tx, policy, accountID, nil)
 		if err != nil {
@@ -426,7 +527,7 @@ func (s *AccountAllocationService) fillAccountAllocationAssignments(ctx context.
 			}
 			return 0, err
 		}
-		if err := insertAccountAllocationEvent(ctx, tx, policy.ID, &assignmentID, "assignment_assigned_auto", nil, map[string]any{"source": "reconciler"}); err != nil {
+		if err := insertAccountAllocationEvent(ctx, tx, policy.ID, &assignmentID, "assignment_assigned_auto", nil, map[string]any{"source": source}); err != nil {
 			return 0, err
 		}
 		assigned++

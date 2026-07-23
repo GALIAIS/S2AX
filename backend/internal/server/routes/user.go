@@ -42,6 +42,7 @@ func RegisterUserRoutes(
 		// 用户仅可查看由管理员分配给自己的安全账号摘要，不能操作租约。
 		accountAllocations := authenticated.Group("/account-allocations")
 		{
+			accountAllocations.GET("/visible", h.AccountAllocation.ListVisible)
 			accountAllocations.GET("", h.AccountAllocation.ListMine)
 		}
 

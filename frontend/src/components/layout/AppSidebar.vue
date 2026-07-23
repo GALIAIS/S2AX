@@ -708,7 +708,7 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/monitor', label: t('nav.channelStatus'), icon: SignalIcon, featureFlag: flagChannelMonitor },
     { path: '/subscriptions', label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
     { path: '/currencies', label: t('nav.virtualCurrency'), icon: CreditCardIcon, hideInSimpleMode: true },
-    { path: '/account-allocations', label: t('nav.accountAllocations'), icon: ServerIcon, hideInSimpleMode: true },
+    { path: '/account-allocations', label: t('nav.accountDirectory'), icon: ServerIcon, hideInSimpleMode: true },
     { path: '/city', label: t('nav.citySimulation'), icon: GlobeIcon, hideInSimpleMode: true, featureFlag: flagCitySimulation },
     { path: '/purchase', label: t('nav.buySubscription'), icon: RechargeSubscriptionIcon, hideInSimpleMode: true, featureFlag: flagPayment },
     { path: '/orders', label: t('nav.myOrders'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },

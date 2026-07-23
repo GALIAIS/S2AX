@@ -16,6 +16,7 @@ const i18n = createI18n({
         searchPlaceholder: 'Search',
         noOptionsFound: 'No options',
         search: 'Search',
+        loading: 'Loading...',
       },
     },
   },
@@ -112,5 +113,40 @@ describe('Select', () => {
     expect(document.body.querySelector('.select-search')).not.toBeNull()
 
     longList.unmount()
+  })
+
+  it('delegates filtering to a remote data source and exposes loading state', async () => {
+    const wrapper = mount(Select, {
+      attachTo: document.body,
+      props: {
+        modelValue: null,
+        options: [],
+        searchable: true,
+        remoteSearch: true,
+        loading: true,
+      },
+      global: { plugins: [i18n] },
+    })
+
+    await wrapper.get('.select-trigger').trigger('click')
+    await nextTick()
+
+    const search = document.body.querySelector<HTMLInputElement>('.select-search-input')
+    expect(search).not.toBeNull()
+    search!.value = 'alice'
+    search!.dispatchEvent(new Event('input'))
+    await nextTick()
+
+    expect(wrapper.emitted('search')?.at(-1)).toEqual(['alice'])
+    expect(document.body.querySelector('.select-empty .animate-spin')).not.toBeNull()
+
+    await wrapper.setProps({
+      loading: false,
+      options: [{ value: 7, label: 'alice@example.com' }],
+    })
+    await nextTick()
+    expect(document.body.querySelector('[role="option"]')?.textContent).toContain('alice@example.com')
+
+    wrapper.unmount()
   })
 })

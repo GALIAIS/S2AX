@@ -1,6 +1,38 @@
 <template>
   <AppLayout>
     <TablePageLayout>
+      <template #actions>
+        <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div class="card border border-gray-200 p-4 dark:border-dark-700">
+            <p class="text-xs font-medium text-gray-500 dark:text-dark-400">{{ t('admin.accountAllocations.overview.activePolicies') }}</p>
+            <p class="mt-2 font-mono text-2xl font-semibold text-gray-900 dark:text-white">
+              {{ overview?.active_policy_count ?? '—' }}
+              <span class="text-sm font-normal text-gray-400">/ {{ overview?.policy_count ?? '—' }}</span>
+            </p>
+          </div>
+          <div class="card border border-gray-200 p-4 dark:border-dark-700">
+            <p class="text-xs font-medium text-gray-500 dark:text-dark-400">{{ t('admin.accountAllocations.overview.allocatedCapacity') }}</p>
+            <p class="mt-2 font-mono text-2xl font-semibold text-gray-900 dark:text-white">
+              {{ overview?.active_assignment_count ?? '—' }}
+              <span class="text-sm font-normal text-gray-400">/ {{ overview?.desired_account_count ?? '—' }}</span>
+            </p>
+          </div>
+          <div class="card border border-gray-200 p-4 dark:border-dark-700">
+            <p class="text-xs font-medium text-gray-500 dark:text-dark-400">{{ t('admin.accountAllocations.overview.shortage') }}</p>
+            <p :class="['mt-2 font-mono text-2xl font-semibold', (overview?.shortage_count ?? 0) > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400']">
+              {{ overview?.shortage_count ?? '—' }}
+              <span class="text-sm font-normal text-gray-400">{{ t('admin.accountAllocations.overview.policyUnit', { count: overview?.policies_with_shortage ?? 0 }) }}</span>
+            </p>
+          </div>
+          <div class="card border border-gray-200 p-4 dark:border-dark-700">
+            <p class="text-xs font-medium text-gray-500 dark:text-dark-400">{{ t('admin.accountAllocations.overview.blockedPolicies') }}</p>
+            <p :class="['mt-2 font-mono text-2xl font-semibold', (overview?.blocked_policy_count ?? 0) > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white']">
+              {{ overview?.blocked_policy_count ?? '—' }}
+            </p>
+          </div>
+        </div>
+      </template>
+
       <template #filters>
         <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div class="grid flex-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -16,8 +48,11 @@
                 :placeholder="t('admin.accountAllocations.filters.allUsers')"
                 :empty-text="t('admin.accountAllocations.noUsers')"
                 searchable
+                remote-search
+                :loading="usersLoading"
                 clearable
                 @change="applyFilters"
+                @search="queueUserSearch"
               />
             </div>
             <div>
@@ -34,8 +69,12 @@
             </div>
           </div>
           <div class="flex shrink-0 items-center justify-end gap-3">
-            <button type="button" class="btn btn-secondary" :disabled="loading" :title="t('common.refresh')" @click="loadPolicies">
-              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
+            <button type="button" class="btn btn-secondary" :disabled="reconcilingAll || listBusy" @click="reconcileAllPolicies">
+              <Icon name="refresh" size="md" :class="reconcilingAll ? 'animate-spin' : ''" />
+              {{ t('admin.accountAllocations.reconcileAll') }}
+            </button>
+            <button type="button" class="btn btn-secondary" :disabled="listBusy" :title="t('common.refresh')" @click="refreshControlPlane">
+              <Icon name="refresh" size="md" :class="listBusy && !initialLoading ? 'animate-spin' : ''" />
             </button>
             <button type="button" class="btn btn-primary" @click="openCreateDialog">
               <Icon name="plus" size="md" />
@@ -46,7 +85,7 @@
       </template>
 
       <template #table>
-        <DataTable :columns="columns" :data="policies" :loading="loading" :error="loadError" @retry="loadPolicies">
+        <DataTable :columns="columns" :data="policies" :loading="initialLoading" :error="loadError" @retry="refreshControlPlane">
           <template #cell-user_email="{ row }">
             <div class="min-w-48">
               <p class="truncate font-medium text-gray-900 dark:text-white">{{ row.user_email }}</p>
@@ -82,9 +121,17 @@
           </template>
 
           <template #cell-status="{ row }">
-            <span :class="['badge', row.status === 'active' ? 'badge-success' : 'badge-gray']">
-              {{ row.status === 'active' ? t('common.active') : t('common.disabled') }}
-            </span>
+            <div class="flex min-w-32 flex-col items-start gap-1.5">
+              <span :class="['badge', row.status === 'active' ? 'badge-success' : 'badge-gray']">
+                {{ row.status === 'active' ? t('common.active') : t('common.disabled') }}
+              </span>
+              <span
+                v-if="row.status === 'active' && row.access_status !== 'ready'"
+                class="badge badge-warning"
+              >
+                {{ accessStatusLabel(row.access_status) }}
+              </span>
+            </div>
           </template>
 
           <template #cell-actions="{ row }">
@@ -116,6 +163,9 @@
               :placeholder="t('admin.accountAllocations.selectUser')"
               :empty-text="t('admin.accountAllocations.noUsers')"
               searchable
+              remote-search
+              :loading="usersLoading"
+              @search="queueUserSearch"
             />
             <p class="input-hint">{{ t('admin.accountAllocations.userHint') }}</p>
           </div>
@@ -199,6 +249,13 @@
 
     <BaseDialog :show="showDetailsDialog" :title="selectedPolicy ? t('admin.accountAllocations.detailsTitle', { user: selectedPolicy.user_email, group: selectedPolicy.group_name }) : t('admin.accountAllocations.details')" width="extra-wide" @close="showDetailsDialog = false">
       <div v-if="selectedPolicy" class="space-y-6">
+        <div
+          v-if="selectedPolicy.access_status !== 'ready'"
+          class="border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
+        >
+          <p class="font-medium">{{ accessStatusLabel(selectedPolicy.access_status) }}</p>
+          <p class="mt-1 text-xs leading-5">{{ t('admin.accountAllocations.accessBlockedHint') }}</p>
+        </div>
         <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div class="rounded-lg border border-gray-200 p-3 dark:border-dark-700"><p class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accountAllocations.desiredCount') }}</p><p class="mt-1 font-mono text-lg font-semibold text-gray-900 dark:text-white">{{ selectedPolicy.desired_count }}</p></div>
           <div class="rounded-lg border border-gray-200 p-3 dark:border-dark-700"><p class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accountAllocations.activeAssignments') }}</p><p class="mt-1 font-mono text-lg font-semibold text-gray-900 dark:text-white">{{ selectedPolicy.active_assignment_count }}</p></div>
@@ -222,11 +279,15 @@
               v-model="selectedCandidateID"
               class="min-w-0 flex-1"
               :options="candidateOptions"
-              :placeholder="selectedPolicy.status === 'active' ? t('admin.accountAllocations.selectCandidate') : t('admin.accountAllocations.policyDisabled')"
+              :placeholder="selectedPolicy.status !== 'active' ? t('admin.accountAllocations.policyDisabled') : selectedPolicy.access_status !== 'ready' ? accessStatusLabel(selectedPolicy.access_status) : t('admin.accountAllocations.selectCandidate')"
               :empty-text="t('admin.accountAllocations.noCandidates')"
-              :disabled="selectedPolicy.status !== 'active' || detailsLoading"
+              :disabled="selectedPolicy.status !== 'active' || selectedPolicy.access_status !== 'ready' || detailsLoading"
+              searchable
+              remote-search
+              :loading="candidatesLoading"
+              @search="queueCandidateSearch"
             />
-            <button type="button" class="btn btn-primary shrink-0" :disabled="!selectedCandidateID || assigning || selectedPolicy.status !== 'active'" @click="assignCandidate">
+            <button type="button" class="btn btn-primary shrink-0" :disabled="!selectedCandidateID || assigning || selectedPolicy.status !== 'active' || selectedPolicy.access_status !== 'ready'" @click="assignCandidate">
               <Icon name="plus" size="sm" />
               {{ assigning ? t('common.submitting') : t('admin.accountAllocations.assignManually') }}
             </button>
@@ -306,9 +367,11 @@ import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type {
+  AccountAllocationAccessStatus,
   AccountAllocationAssignment,
   AccountAllocationCandidate,
   AccountAllocationEvent,
+  AccountAllocationOverview,
   AccountAllocationPolicy,
   AccountAllocationPolicyStatus
 } from '@/api/admin/accountAllocations'
@@ -333,7 +396,10 @@ const { t } = useI18n()
 const appStore = useAppStore()
 
 const policies = ref<AccountAllocationPolicy[]>([])
-const loading = ref(true)
+const overview = ref<AccountAllocationOverview | null>(null)
+const initialLoading = ref(true)
+const listBusy = ref(false)
+const hasLoadedPolicies = ref(false)
 const loadError = ref<string | null>(null)
 const pagination = reactive({ page: 1, page_size: getPersistedPageSize(), total: 0 })
 const statusFilter = ref<AccountAllocationPolicyStatus | null>(null)
@@ -342,8 +408,14 @@ const groupFilter = ref<number | null>(null)
 const users = ref<AdminUser[]>([])
 const groups = ref<AdminGroup[]>([])
 const referencesLoading = ref(false)
+const usersLoading = ref(false)
+const candidatesLoading = ref(false)
 let listController: AbortController | null = null
 let listRequestID = 0
+let userSearchController: AbortController | null = null
+let candidateSearchController: AbortController | null = null
+let userSearchTimer: ReturnType<typeof setTimeout> | null = null
+let candidateSearchTimer: ReturnType<typeof setTimeout> | null = null
 
 const showCreateDialog = ref(false)
 const showEditDialog = ref(false)
@@ -353,6 +425,7 @@ const updating = ref(false)
 const assigning = ref(false)
 const detailsLoading = ref(false)
 const reconcilingPolicyID = ref<number | null>(null)
+const reconcilingAll = ref(false)
 const editingPolicy = ref<AccountAllocationPolicy | null>(null)
 const selectedPolicy = ref<AccountAllocationPolicy | null>(null)
 const statusTarget = ref<AccountAllocationPolicy | null>(null)
@@ -414,6 +487,9 @@ const candidateOptions = computed(() => candidates.value.map((candidate) => ({
   description: `${t('admin.accountAllocations.capacity')}: ${candidate.concurrency} · P${candidate.priority}`
 })))
 
+const accessStatusLabel = (status: AccountAllocationAccessStatus) =>
+  t(`admin.accountAllocations.accessStatus.${status}`)
+
 const policyActionItems = (policy: AccountAllocationPolicy): RowActionMenuItem[] => [
   { key: 'details', label: t('admin.accountAllocations.details'), icon: 'eye' },
   { key: 'reconcile', label: t('admin.accountAllocations.reconcileNow'), icon: 'refresh', disabled: policy.status !== 'active' },
@@ -436,20 +512,116 @@ const handlePolicyAction = (key: string, policy: AccountAllocationPolicy) => {
 }
 
 const loadReferences = async () => {
-  if (referencesLoading.value || (users.value.length > 0 && groups.value.length > 0)) return
+  if (referencesLoading.value) return
   referencesLoading.value = true
   try {
-    const [userResponse, groupList] = await Promise.all([
-      adminAPI.users.list(1, 200, { status: 'active', sort_by: 'email', sort_order: 'asc' }),
-      adminAPI.groups.getAll()
-    ])
-    users.value = userResponse.items
-    groups.value = groupList
+    const jobs: Promise<unknown>[] = []
+    if (users.value.length === 0) jobs.push(loadUsers(''))
+    if (groups.value.length === 0) {
+      jobs.push(adminAPI.groups.getAll().then((groupList) => {
+        groups.value = groupList
+      }))
+    }
+    await Promise.all(jobs)
   } catch (error: unknown) {
     appStore.showError(extractApiErrorMessage(error, t('admin.accountAllocations.referencesLoadFailed')))
   } finally {
     referencesLoading.value = false
   }
+}
+
+const mergeUserSearchResults = (items: AdminUser[]) => {
+  const pinnedIDs = new Set(
+    [userFilter.value, createForm.user_id].filter((value): value is number => typeof value === 'number')
+  )
+  const merged = new Map<number, AdminUser>()
+  for (const user of items) merged.set(user.id, user)
+  for (const user of users.value) {
+    if (pinnedIDs.has(user.id) && !merged.has(user.id)) merged.set(user.id, user)
+  }
+  users.value = Array.from(merged.values())
+}
+
+const loadUsers = async (query: string) => {
+  userSearchController?.abort()
+  const controller = new AbortController()
+  userSearchController = controller
+  usersLoading.value = true
+  try {
+    const response = await adminAPI.users.list(
+      1,
+      50,
+      {
+        status: 'active',
+        search: query.trim() || undefined,
+        sort_by: 'email',
+        sort_order: 'asc'
+      },
+      { signal: controller.signal }
+    )
+    if (!controller.signal.aborted) mergeUserSearchResults(response.items)
+  } catch (error: unknown) {
+    if (!controller.signal.aborted) {
+      appStore.showError(extractApiErrorMessage(error, t('admin.accountAllocations.referencesLoadFailed')))
+    }
+  } finally {
+    if (userSearchController === controller) {
+      userSearchController = null
+      usersLoading.value = false
+    }
+  }
+}
+
+const queueUserSearch = (query: string) => {
+  if (userSearchTimer) clearTimeout(userSearchTimer)
+  userSearchTimer = setTimeout(() => {
+    userSearchTimer = null
+    void loadUsers(query)
+  }, 250)
+}
+
+const mergeCandidateSearchResults = (items: AccountAllocationCandidate[]) => {
+  const merged = new Map<number, AccountAllocationCandidate>()
+  for (const candidate of items) merged.set(candidate.account_id, candidate)
+  if (selectedCandidateID.value) {
+    const selected = candidates.value.find((candidate) => candidate.account_id === selectedCandidateID.value)
+    if (selected && !merged.has(selected.account_id)) merged.set(selected.account_id, selected)
+  }
+  candidates.value = Array.from(merged.values())
+}
+
+const loadCandidateSearch = async (query: string) => {
+  const policy = selectedPolicy.value
+  if (!policy || policy.status !== 'active' || policy.access_status !== 'ready') return
+  candidateSearchController?.abort()
+  const controller = new AbortController()
+  candidateSearchController = controller
+  candidatesLoading.value = true
+  try {
+    const items = await adminAPI.accountAllocations.listCandidates(policy.id, query, 50, {
+      signal: controller.signal
+    })
+    if (!controller.signal.aborted && selectedPolicy.value?.id === policy.id) {
+      mergeCandidateSearchResults(items)
+    }
+  } catch (error: unknown) {
+    if (!controller.signal.aborted) {
+      appStore.showError(extractApiErrorMessage(error, t('admin.accountAllocations.detailsLoadFailed')))
+    }
+  } finally {
+    if (candidateSearchController === controller) {
+      candidateSearchController = null
+      candidatesLoading.value = false
+    }
+  }
+}
+
+const queueCandidateSearch = (query: string) => {
+  if (candidateSearchTimer) clearTimeout(candidateSearchTimer)
+  candidateSearchTimer = setTimeout(() => {
+    candidateSearchTimer = null
+    void loadCandidateSearch(query)
+  }, 250)
 }
 
 const loadCapabilities = async () => {
@@ -469,7 +641,8 @@ const loadPolicies = async () => {
   const controller = new AbortController()
   listController = controller
   const currentRequestID = ++listRequestID
-  loading.value = true
+  listBusy.value = true
+  if (!hasLoadedPolicies.value) initialLoading.value = true
   loadError.value = null
   try {
     const result = await adminAPI.accountAllocations.list(
@@ -485,14 +658,64 @@ const loadPolicies = async () => {
     if (currentRequestID === listRequestID) {
       policies.value = result.items
       pagination.total = result.total
+      hasLoadedPolicies.value = true
     }
   } catch (error: unknown) {
     if (currentRequestID === listRequestID && !controller.signal.aborted) {
-      loadError.value = extractApiErrorMessage(error, t('admin.accountAllocations.loadFailed'))
+      const message = extractApiErrorMessage(error, t('admin.accountAllocations.loadFailed'))
+      if (hasLoadedPolicies.value) appStore.showError(message)
+      else loadError.value = message
     }
   } finally {
-    if (currentRequestID === listRequestID) loading.value = false
+    if (currentRequestID === listRequestID) {
+      initialLoading.value = false
+      listBusy.value = false
+    }
     if (listController === controller) listController = null
+  }
+}
+
+const loadOverview = async () => {
+  try {
+    overview.value = await adminAPI.accountAllocations.getOverview()
+  } catch (error: unknown) {
+    appStore.showError(extractApiErrorMessage(error, t('admin.accountAllocations.overviewLoadFailed')))
+  }
+}
+
+const refreshControlPlane = async () => {
+  await Promise.all([loadPolicies(), loadOverview()])
+}
+
+const reconcileAllPolicies = async () => {
+  if (reconcilingAll.value) return
+  reconcilingAll.value = true
+  try {
+    const response = await adminAPI.accountAllocations.reconcileAll()
+    const totals = response.items.reduce(
+      (acc, item) => {
+        acc.assigned += item.assigned_count
+        acc.released += item.released_count
+        acc.shortage += item.shortage
+        return acc
+      },
+      { assigned: 0, released: 0, shortage: 0 }
+    )
+    appStore.showSuccess(t('admin.accountAllocations.reconciledAll', {
+      processed: response.processed,
+      assigned: totals.assigned,
+      released: totals.released,
+      shortage: totals.shortage
+    }))
+    await refreshControlPlane()
+    if (selectedPolicy.value) {
+      const updated = await adminAPI.accountAllocations.getById(selectedPolicy.value.id)
+      await loadDetails(updated)
+    }
+  } catch (error: unknown) {
+    appStore.showError(extractApiErrorMessage(error, t('admin.accountAllocations.reconcileAllFailed')))
+  } finally {
+    reconcilingAll.value = false
   }
 }
 
@@ -540,7 +763,7 @@ const createPolicy = async () => {
     showCreateDialog.value = false
     appStore.showSuccess(t('admin.accountAllocations.created'))
     pagination.page = 1
-    await loadPolicies()
+    await refreshControlPlane()
     await openDetails(policy)
   } catch (error: unknown) {
     appStore.showError(extractApiErrorMessage(error, t('admin.accountAllocations.createFailed')))
@@ -574,7 +797,7 @@ const updatePolicy = async () => {
     replacePolicyInView(updated)
     showEditDialog.value = false
     appStore.showSuccess(t('admin.accountAllocations.updated'))
-    await loadPolicies()
+    await refreshControlPlane()
     if (selectedPolicy.value?.id === updated.id) await loadDetails(updated)
   } catch (error: unknown) {
     appStore.showError(extractApiErrorMessage(error, t('admin.accountAllocations.updateFailed')))
@@ -584,6 +807,11 @@ const updatePolicy = async () => {
 }
 
 const openDetails = async (policy: AccountAllocationPolicy) => {
+  candidateSearchController?.abort()
+  if (candidateSearchTimer) {
+    clearTimeout(candidateSearchTimer)
+    candidateSearchTimer = null
+  }
   selectedPolicy.value = policy
   selectedCandidateID.value = null
   showDetailsDialog.value = true
@@ -595,11 +823,13 @@ const loadDetails = async (policy = selectedPolicy.value) => {
   const selectedID = policy.id
   detailsLoading.value = true
   try {
-    const [policyDetails, assignmentRows, eventResponse, candidateRows] = await Promise.all([
-      adminAPI.accountAllocations.getById(selectedID),
+    const policyDetails = await adminAPI.accountAllocations.getById(selectedID)
+    const [assignmentRows, eventResponse, candidateRows] = await Promise.all([
       adminAPI.accountAllocations.listAssignments(selectedID),
       adminAPI.accountAllocations.listEvents(selectedID),
-      policy.status === 'active' ? adminAPI.accountAllocations.listCandidates(selectedID) : Promise.resolve([])
+      policyDetails.status === 'active' && policyDetails.access_status === 'ready'
+        ? adminAPI.accountAllocations.listCandidates(selectedID)
+        : Promise.resolve([])
     ])
     if (selectedPolicy.value?.id === selectedID) {
       selectedPolicy.value = policyDetails
@@ -624,7 +854,7 @@ const reconcilePolicy = async (policy: AccountAllocationPolicy) => {
   try {
     const result = await adminAPI.accountAllocations.reconcile(policy.id)
     appStore.showSuccess(t('admin.accountAllocations.reconciled', { assigned: result.assigned_count, released: result.released_count, shortage: result.shortage }))
-    await loadPolicies()
+    await refreshControlPlane()
     if (selectedPolicy.value?.id === policy.id) {
       const updated = await adminAPI.accountAllocations.getById(policy.id)
       await loadDetails(updated)
@@ -642,7 +872,7 @@ const assignCandidate = async () => {
   try {
     await adminAPI.accountAllocations.assign(selectedPolicy.value.id, selectedCandidateID.value)
     appStore.showSuccess(t('admin.accountAllocations.assigned'))
-    await loadPolicies()
+    await refreshControlPlane()
     await loadDetails(selectedPolicy.value)
   } catch (error: unknown) {
     appStore.showError(extractApiErrorMessage(error, t('admin.accountAllocations.assignFailed')))
@@ -662,7 +892,7 @@ const releaseAssignment = async () => {
   try {
     await adminAPI.accountAllocations.release(selectedPolicy.value.id, assignment.id)
     appStore.showSuccess(t('admin.accountAllocations.released'))
-    await loadPolicies()
+    await refreshControlPlane()
     await loadDetails(selectedPolicy.value)
   } catch (error: unknown) {
     appStore.showError(extractApiErrorMessage(error, t('admin.accountAllocations.releaseFailed')))
@@ -678,7 +908,7 @@ const togglePolicyStatus = async () => {
     const updated = await adminAPI.accountAllocations.setStatus(target.id, enabled)
     replacePolicyInView(updated)
     appStore.showSuccess(enabled ? t('admin.accountAllocations.enabled') : t('admin.accountAllocations.disabled'))
-    await loadPolicies()
+    await refreshControlPlane()
     if (selectedPolicy.value?.id === updated.id) await loadDetails(updated)
   } catch (error: unknown) {
     appStore.showError(extractApiErrorMessage(error, t('admin.accountAllocations.statusFailed')))
@@ -705,7 +935,7 @@ const deletePolicy = async () => {
     }
     if (policies.value.length === 1 && pagination.page > 1) pagination.page -= 1
     appStore.showSuccess(t('admin.accountAllocations.deleted'))
-    await loadPolicies()
+    await refreshControlPlane()
   } catch (error: unknown) {
     appStore.showError(extractApiErrorMessage(error, t('admin.accountAllocations.deleteFailed')))
   }
@@ -714,11 +944,15 @@ const deletePolicy = async () => {
 onMounted(() => {
   void loadCapabilities()
   void loadReferences()
-  void loadPolicies()
+  void refreshControlPlane()
 })
 
 onUnmounted(() => {
   listRequestID += 1
   listController?.abort()
+  userSearchController?.abort()
+  candidateSearchController?.abort()
+  if (userSearchTimer) clearTimeout(userSearchTimer)
+  if (candidateSearchTimer) clearTimeout(candidateSearchTimer)
 })
 </script>
