@@ -146,7 +146,7 @@ func TestListUserVisibleAccountsMasksEmailsAndSeparatesUsageScopes(t *testing.T)
 		"credentials":            "must-not-leak",
 	})
 	require.NoError(t, err)
-	mock.ExpectQuery(`(?s)WITH public_accounts AS .*ul\.group_id = aa\.group_id.*FROM user_allowed_groups uag`).
+	mock.ExpectQuery(`(?s)WITH shared_accounts AS .*FROM user_subscriptions us.*FROM user_allowed_groups uag.*ul\.group_id = aa\.group_id`).
 		WithArgs(int64(7)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"source", "group_id", "group_name", "subscription_type", "account_name", "platform", "account_type", "concurrency",
@@ -159,6 +159,10 @@ func TestListUserVisibleAccountsMasksEmailsAndSeparatesUsageScopes(t *testing.T)
 				StatusActive, true, nil, nil, true, nil, nil, nil, dedicatedExtra, assignedAt, int64(8), int64(1234), lastActivityAt, 2.09, 1.69,
 			).
 			AddRow(
+				"dedicated", int64(6), "subscriber-pool", "subscription", "subscriber@example.com", "openai", "oauth", 4,
+				StatusActive, true, nil, nil, true, nil, nil, nil, []byte(`{}`), nil, int64(13), int64(3456), lastActivityAt, nil, nil,
+			).
+			AddRow(
 				"public", int64(5), "open-pool", "standard", "alice@example.com", "anthropic", "apikey", 2,
 				StatusActive, true, futureCooldown, nil, true, nil, nil, nil, []byte(`{}`), nil, int64(21), int64(5678), nil, nil, nil,
 			))
@@ -166,7 +170,7 @@ func TestListUserVisibleAccountsMasksEmailsAndSeparatesUsageScopes(t *testing.T)
 	svc := NewAccountAllocationService(db, nil)
 	overview, err := svc.ListUserVisibleAccounts(context.Background(), 7)
 	require.NoError(t, err)
-	require.Len(t, overview.Items, 2)
+	require.Len(t, overview.Items, 3)
 
 	dedicated := overview.Items[0]
 	require.Equal(t, AccountAllocationVisibleSourceDedicated, dedicated.Source)
@@ -188,7 +192,17 @@ func TestListUserVisibleAccountsMasksEmailsAndSeparatesUsageScopes(t *testing.T)
 	require.Equal(t, "ready", dedicated.Status)
 	require.NotContains(t, dedicated.ViewKey, "4")
 
-	public := overview.Items[1]
+	subscribed := overview.Items[1]
+	require.Equal(t, AccountAllocationVisibleSourceDedicated, subscribed.Source)
+	require.Equal(t, "s***r@example.com", subscribed.AccountName)
+	require.True(t, subscribed.AccountNameMasked)
+	require.Equal(t, AccountAllocationVisibleUsageScopeRolling24h, subscribed.Usage.Scope)
+	require.Nil(t, subscribed.AssignedAt)
+	require.Nil(t, subscribed.Usage.AccountCost)
+	require.Nil(t, subscribed.Usage.UserCost)
+	require.Nil(t, subscribed.UpstreamQuota)
+
+	public := overview.Items[2]
 	require.Equal(t, AccountAllocationVisibleSourcePublic, public.Source)
 	require.Equal(t, "a***e@example.com", public.AccountName)
 	require.True(t, public.AccountNameMasked)
@@ -201,11 +215,11 @@ func TestListUserVisibleAccountsMasksEmailsAndSeparatesUsageScopes(t *testing.T)
 	require.Equal(t, "cooling", public.Status)
 	require.NotNil(t, public.RateLimitResetAt)
 
-	require.Equal(t, 1, overview.Summary.DedicatedGroupCount)
+	require.Equal(t, 2, overview.Summary.DedicatedGroupCount)
 	require.Equal(t, 1, overview.Summary.PublicGroupCount)
-	require.Equal(t, 1, overview.Summary.DedicatedAccountCount)
+	require.Equal(t, 2, overview.Summary.DedicatedAccountCount)
 	require.Equal(t, 1, overview.Summary.PublicAccountCount)
-	require.Equal(t, 1, overview.Summary.ReadyAccountCount)
+	require.Equal(t, 2, overview.Summary.ReadyAccountCount)
 	payload, err := json.Marshal(overview)
 	require.NoError(t, err)
 	require.NotContains(t, string(payload), "private@example.com")

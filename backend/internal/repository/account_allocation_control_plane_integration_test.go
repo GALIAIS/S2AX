@@ -223,6 +223,47 @@ func TestAccountAllocationControlPlaneLifecycle(t *testing.T) {
 	require.GreaterOrEqual(t, eventCount, 12)
 }
 
+func TestAccountDirectoryIncludesSubscribedExclusiveGroupWithoutAllocationPolicy(t *testing.T) {
+	isolateIntegrationData(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	adminID := insertAccountAllocationTestUser(t, ctx, "directory-admin@example.test", "admin")
+	subscriberID := insertAccountAllocationTestUser(t, ctx, "directory-subscriber@example.test", "user")
+	observerID := insertAccountAllocationTestUser(t, ctx, "directory-observer@example.test", "user")
+	groupID := insertAccountAllocationTestSubscriptionGroup(t, ctx, "directory-subscription")
+	insertAccountAllocationTestAccount(t, ctx, groupID, "subscribed.account@example.test", 10)
+
+	_, err := integrationDB.ExecContext(ctx, `
+		INSERT INTO user_subscriptions (
+			user_id, group_id, starts_at, expires_at, status, assigned_by
+		)
+		VALUES ($1, $2, NOW(), NOW() + INTERVAL '30 days', 'active', $3)`,
+		subscriberID, groupID, adminID)
+	require.NoError(t, err)
+
+	svc := service.NewAccountAllocationService(integrationDB, nil)
+	subscriberDirectory, err := svc.ListUserVisibleAccounts(ctx, subscriberID)
+	require.NoError(t, err)
+	require.Equal(t, 1, subscriberDirectory.Summary.DedicatedGroupCount)
+	require.Equal(t, 1, subscriberDirectory.Summary.DedicatedAccountCount)
+	require.Len(t, subscriberDirectory.Items, 1)
+	item := subscriberDirectory.Items[0]
+	require.Equal(t, groupID, item.GroupID)
+	require.Equal(t, service.AccountAllocationVisibleSourceDedicated, item.Source)
+	require.Equal(t, service.AccountAllocationVisibleUsageScopeRolling24h, item.Usage.Scope)
+	require.Nil(t, item.AssignedAt)
+	require.True(t, item.AccountNameMasked)
+	require.NotContains(t, item.AccountName, "subscribed.account")
+
+	observerDirectory, err := svc.ListUserVisibleAccounts(ctx, observerID)
+	require.NoError(t, err)
+	for _, observerItem := range observerDirectory.Items {
+		require.NotEqual(t, groupID, observerItem.GroupID)
+	}
+}
+
 func insertAccountAllocationTestUser(t *testing.T, ctx context.Context, email, role string) int64 {
 	t.Helper()
 	var id int64
@@ -230,6 +271,17 @@ func insertAccountAllocationTestUser(t *testing.T, ctx context.Context, email, r
 		INSERT INTO users (email, password_hash, role, status)
 		VALUES ($1, 'integration-test-hash', $2, 'active')
 		RETURNING id`, email, role).Scan(&id)
+	require.NoError(t, err)
+	return id
+}
+
+func insertAccountAllocationTestSubscriptionGroup(t *testing.T, ctx context.Context, name string) int64 {
+	t.Helper()
+	var id int64
+	err := integrationDB.QueryRowContext(ctx, `
+		INSERT INTO groups (name, description, rate_multiplier, is_exclusive, status, platform, subscription_type)
+		VALUES ($1, 'account directory subscription fixture', 1, TRUE, 'active', 'openai', 'subscription')
+		RETURNING id`, name).Scan(&id)
 	require.NoError(t, err)
 	return id
 }

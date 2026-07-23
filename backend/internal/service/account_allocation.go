@@ -1111,12 +1111,12 @@ func accountAllocationDisplayStatus(accountStatus string, schedulable bool, rate
 // It keeps catalogue visibility and access control deliberately separate:
 //
 //   - every active, non-exclusive group is visible to authenticated users;
-//   - active exclusive allocations are visible only to their assignee, and a
-//     subscription allocation additionally requires the assignee's active
-//     subscription;
+//   - accounts in an active exclusive group are visible while the caller has
+//     explicit group access or an active subscription;
+//   - active exclusive allocations are visible only to their assignee;
 //   - an account with an active exclusive lease is removed from every shared
 //     roster, so one user's dedicated allocation never appears to another
-//     user as a public candidate.
+//     user as a shared candidate.
 //
 // The query never returns raw account identifiers. Account names remain inside
 // the service boundary long enough to apply email masking, then only the safe
@@ -1130,9 +1130,9 @@ func (s *AccountAllocationService) ListUserVisibleAccounts(ctx context.Context, 
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		WITH public_accounts AS (
+		WITH shared_accounts AS (
 			SELECT
-				'public'::text AS source,
+				CASE WHEN g.is_exclusive THEN 'dedicated' ELSE 'public' END::text AS source,
 				g.id AS group_id,
 				g.name AS group_name,
 				COALESCE(g.subscription_type, 'standard') AS subscription_type,
@@ -1172,7 +1172,35 @@ func (s *AccountAllocationService) ListUserVisibleAccounts(ctx context.Context, 
 			) usage ON TRUE
 			WHERE g.deleted_at IS NULL
 				AND g.status = 'active'
-				AND g.is_exclusive = FALSE
+				AND (
+					g.is_exclusive = FALSE
+					OR (
+						g.is_exclusive = TRUE
+						AND (
+							(
+								COALESCE(g.subscription_type, 'standard') = 'subscription'
+								AND EXISTS (
+									SELECT 1
+									FROM user_subscriptions us
+									WHERE us.user_id = $1
+										AND us.group_id = g.id
+										AND us.status = 'active'
+										AND us.deleted_at IS NULL
+										AND us.expires_at > NOW()
+								)
+							)
+							OR (
+								COALESCE(g.subscription_type, 'standard') <> 'subscription'
+								AND EXISTS (
+									SELECT 1
+									FROM user_allowed_groups uag
+									WHERE uag.user_id = $1
+										AND uag.group_id = g.id
+								)
+							)
+						)
+					)
+				)
 				AND NOT EXISTS (
 					SELECT 1
 					FROM account_allocation_assignments leased
@@ -1295,7 +1323,7 @@ func (s *AccountAllocationService) ListUserVisibleAccounts(ctx context.Context, 
 		FROM (
 			SELECT * FROM dedicated_accounts
 			UNION ALL
-			SELECT * FROM public_accounts
+			SELECT * FROM shared_accounts
 		) visible_accounts
 		ORDER BY CASE source WHEN 'dedicated' THEN 0 ELSE 1 END, group_name ASC, account_name ASC`, userID)
 	if err != nil {
@@ -1370,20 +1398,22 @@ func (s *AccountAllocationService) ListUserVisibleAccounts(ctx context.Context, 
 			item.RateLimitResetAt = nil
 		}
 		if item.Source == AccountAllocationVisibleSourceDedicated {
-			item.Usage.Scope = AccountAllocationVisibleUsageScopePersonalLease
-			item.Usage.AccountCost = floatPointerFromNullFloat64(accountCost)
-			item.Usage.UserCost = floatPointerFromNullFloat64(userCost)
-			item.UpstreamQuota = accountAllocationVisibleUpstreamQuota(
-				item.Source,
-				item.Platform,
-				item.AccountType,
-				timePointerFromNullTime(sessionWindowEnd),
-				rawAccountExtra,
-				now,
-			)
 			if assignedAt.Valid {
+				item.Usage.Scope = AccountAllocationVisibleUsageScopePersonalLease
+				item.Usage.AccountCost = floatPointerFromNullFloat64(accountCost)
+				item.Usage.UserCost = floatPointerFromNullFloat64(userCost)
+				item.UpstreamQuota = accountAllocationVisibleUpstreamQuota(
+					item.Source,
+					item.Platform,
+					item.AccountType,
+					timePointerFromNullTime(sessionWindowEnd),
+					rawAccountExtra,
+					now,
+				)
 				value := assignedAt.Time
 				item.AssignedAt = &value
+			} else {
+				item.Usage.Scope = AccountAllocationVisibleUsageScopeRolling24h
 			}
 			overview.Summary.DedicatedAccountCount++
 			dedicatedGroups[item.GroupID] = struct{}{}
