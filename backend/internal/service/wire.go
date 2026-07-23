@@ -797,6 +797,8 @@ func ProvideAdminService(
 	privacyClientFactory PrivacyClientFactory,
 	runtimeBlocker AccountRuntimeBlocker,
 	affiliateService *AffiliateService,
+	compositeRouteRepo CompositeModelRouteRepository,
+	compositeResolver *CompositeRouteResolver,
 	virtualCurrency *VirtualCurrencyService,
 ) AdminService {
 	return NewAdminService(
@@ -819,6 +821,8 @@ func ProvideAdminService(
 		privacyClientFactory,
 		runtimeBlocker,
 		affiliateService,
+		compositeRouteRepo,
+		compositeResolver,
 		virtualCurrency,
 	)
 }
@@ -832,6 +836,7 @@ var ProviderSet = wire.NewSet(
 	ProvideAPIKeyAuthCacheInvalidator,
 	ProvideAuthCacheInvalidationWorker,
 	NewGroupService,
+	NewCompositeRouteResolver,
 	NewAccountService,
 	NewProxyService,
 	ProvideRedeemService,
@@ -878,6 +883,7 @@ var ProviderSet = wire.NewSet(
 	ProvideAccountUsageService,
 	ProvideAccountTestService,
 	ProvideUpstreamBillingProbeService,
+	ProvideOllamaCloudUsageService,
 	ProvideSettingService,
 	NewDataManagementService,
 	ProvideBackupService,

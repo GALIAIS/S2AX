@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -337,7 +338,7 @@ func TestApplyGrokCacheIdentityWritesResponsesBodyAndHeader(t *testing.T) {
 	require.False(t, gjson.GetBytes(unscopedBody, "tool_choice").Exists())
 }
 
-func TestApplyGrokCacheIdentityAppendsNativeToolsToResponseFunctions(t *testing.T) {
+func TestGrokFreeMessagesClientToolCacheDefaultsOnForKnownFree(t *testing.T) {
 	account := healthyGrokOAuthGatewayTestAccount(901, "access-token")
 	account.Credentials["subscription_tier"] = " FREE "
 	tests := []struct {
@@ -351,7 +352,6 @@ func TestApplyGrokCacheIdentityAppendsNativeToolsToResponseFunctions(t *testing.
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Pure client function tools without search → no native injection (#4486).
 			intentBody := []byte(`{"model":"grok","tools":[{"type":"function","name":"lookup","description":"look up a value","parameters":{"type":"object"}},{"type":"function","name":"save","parameters":{"type":"object"}}]` + tt.toolChoiceJSON + `}`)
 			body, err := applyGrokResponsesCacheIdentity(intentBody, intentBody, "isolated-id", true)
 			require.NoError(t, err)
@@ -360,12 +360,42 @@ func TestApplyGrokCacheIdentityAppendsNativeToolsToResponseFunctions(t *testing.
 			require.NoError(t, err)
 			require.Equal(t, "isolated-id", gjson.GetBytes(body, "prompt_cache_key").String())
 			tools := gjson.GetBytes(body, "tools").Array()
-			require.Len(t, tools, 2, "pure client functions should not get native search injected")
+			require.Len(t, tools, 4)
 			require.Equal(t, "function", tools[0].Get("type").String())
 			require.Equal(t, "lookup", tools[0].Get("name").String())
 			require.Equal(t, "function", tools[1].Get("type").String())
 			require.Equal(t, "save", tools[1].Get("name").String())
+			require.Equal(t, "web_search", tools[2].Get("type").String())
+			require.Equal(t, "x_search", tools[3].Get("type").String())
 			require.Equal(t, tt.wantChoice, gjson.GetBytes(body, "tool_choice").Exists())
+		})
+	}
+}
+
+func TestGrokFreeMessagesClientToolCacheDefaultsWithMissingAccountSetting(t *testing.T) {
+	body := []byte(`{"model":"grok","tools":[{"type":"function","name":"view_image","parameters":{"type":"object"}}],"tool_choice":"auto"}`)
+	tests := []struct {
+		name  string
+		extra map[string]any
+	}{
+		{name: "nil extra"},
+		{name: "empty extra", extra: map[string]any{}},
+		{name: "unrelated extra", extra: map[string]any{"other_setting": true}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			account := healthyGrokOAuthGatewayTestAccount(90101, "access-token")
+			account.Credentials["subscription_tier"] = "free"
+			account.Extra = tt.extra
+
+			patched, err := applyGrokFreeMessagesFunctionToolCacheRoute(body, body, account, "isolated-id")
+
+			require.NoError(t, err)
+			tools := gjson.GetBytes(patched, "tools").Array()
+			require.Len(t, tools, 3)
+			require.Equal(t, "web_search", tools[1].Get("type").String())
+			require.Equal(t, "x_search", tools[2].Get("type").String())
 		})
 	}
 }
@@ -679,7 +709,7 @@ func TestApplyGrokCacheIdentityRequiresPatchedFunctionTools(t *testing.T) {
 		{name: "missing tools", patchedBody: `{"model":"grok-4.5"}`},
 		{name: "empty tools", patchedBody: `{"model":"grok-4.5","tools":[]}`},
 		{name: "native tools only", patchedBody: `{"model":"grok-4.5","tools":[{"type":"web_search"}]}`},
-		{name: "unexpected patched tool", patchedBody: `{"model":"grok-4.5","tools":[{"type":"function","name":"lookup"},{"type":"mcp","name":"server"}]}`},
+		{name: "unexpected patched tool", patchedBody: `{"model":"grok-4.5","tools":[{"type":"function","name":"lookup"},{"type":"namespace","name":"server"}]}`},
 	}
 
 	for _, tt := range tests {
@@ -699,8 +729,7 @@ func TestApplyGrokCacheIdentityRequiresPatchedFunctionTools(t *testing.T) {
 }
 
 func TestGrokFreeMessagesFunctionToolCacheRouteRequiresKnownFreeTier(t *testing.T) {
-	// Include web_search as function to trigger native tool injection (pure client
-	// functions no longer trigger injection after #4486 fix).
+	// Include web_search as a function to also cover its conversion to a native tool.
 	intentBody := []byte(`{"model":"grok","tools":[{"type":"function","name":"lookup"},{"type":"function","name":"web_search"}],"tool_choice":"auto"}`)
 	tests := []struct {
 		name    string
@@ -744,7 +773,19 @@ func TestGrokFreeMessagesFunctionToolCacheRouteRequiresKnownFreeTier(t *testing.
 				a := healthyGrokOAuthGatewayTestAccount(9112, "access-token")
 				a.Extra = map[string]any{grokQuotaSnapshotExtraKey: map[string]any{
 					"headers_observed": true,
-					"tokens":           map[string]any{"limit": grokFreeRolling24hTokenLimit},
+					"tokens":           map[string]any{"limit": xai.GrokFreeRolling24hTokenLimit},
+				}}
+				return a
+			}(),
+			wantMix: true,
+		},
+		{
+			name: "legacy free rolling token quota",
+			account: func() *Account {
+				a := healthyGrokOAuthGatewayTestAccount(9113, "access-token")
+				a.Extra = map[string]any{grokQuotaSnapshotExtraKey: map[string]any{
+					"headers_observed": true,
+					"tokens":           map[string]any{"limit": int64(2_000_000)},
 				}}
 				return a
 			}(),
@@ -766,7 +807,7 @@ func TestGrokFreeMessagesFunctionToolCacheRouteRequiresKnownFreeTier(t *testing.
 					grokBillingExtraKey: map[string]any{"plan": "SuperGrok", "status_code": http.StatusOK},
 					grokQuotaSnapshotExtraKey: map[string]any{
 						"headers_observed": true,
-						"tokens":           map[string]any{"limit": grokFreeRolling24hTokenLimit},
+						"tokens":           map[string]any{"limit": int64(2_000_000)},
 					},
 				}
 				return a

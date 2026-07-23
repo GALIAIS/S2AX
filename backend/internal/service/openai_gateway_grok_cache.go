@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -331,7 +332,7 @@ func isKnownGrokFreeAccount(account *Account) bool {
 			}
 		}
 		if snapshot.Tokens != nil && snapshot.Tokens.Limit != nil &&
-			*snapshot.Tokens.Limit == grokFreeRolling24hTokenLimit {
+			xai.IsGrokFreeRolling24hTokenLimit(*snapshot.Tokens.Limit) {
 			inferredFreeSignal = true
 		}
 	}

@@ -155,6 +155,21 @@ func TestGrokChatResponsesBridgeEligibility(t *testing.T) {
 			reason: "invalid_tool_function_parameters",
 		},
 		{
+			name:   "invalid tool call arguments fall back",
+			body:   `{"model":"grok","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"call_lookup","type":"function","function":{"name":"lookup","arguments":"{"}}]}]}`,
+			reason: "invalid_tool_call_arguments",
+		},
+		{
+			name:   "tool result without call id falls back",
+			body:   `{"model":"grok","messages":[{"role":"tool","content":"ok"}]}`,
+			reason: "invalid_tool_call_id",
+		},
+		{
+			name:   "non boolean parallel tool calls falls back",
+			body:   `{"model":"grok","messages":[{"role":"user","content":"hi"}],"parallel_tool_calls":"true"}`,
+			reason: "invalid_parallel_tool_calls",
+		},
+		{
 			name:   "reasoning effort falls back because conversion adds summary",
 			body:   `{"model":"grok","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"high"}`,
 			reason: "unsupported_reasoning_effort",
@@ -170,7 +185,7 @@ func TestGrokChatResponsesBridgeEligibility(t *testing.T) {
 			reason: "empty_message_content",
 		},
 		{
-			name:   "tool history falls back",
+			name:   "empty tool history falls back",
 			body:   `{"model":"grok","messages":[{"role":"assistant","content":"","tool_calls":[]}]}`,
 			reason: "empty_message_content",
 		},
