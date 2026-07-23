@@ -56,8 +56,8 @@ type agentIdentityTaskRegistrationResponse struct {
 }
 
 // OpenAIAgentIdentityProvision contains the durable credentials created by
-// the official Codex Agent Identity bootstrap flow. The source at-* token is
-// deliberately not part of the result and is never persisted.
+// the official Codex Agent Identity bootstrap flow. The source bearer token
+// is deliberately not part of the result and is never persisted.
 type OpenAIAgentIdentityProvision struct {
 	Credentials map[string]any
 }
@@ -214,6 +214,30 @@ func (s *OpenAIOAuthService) ProvisionCodexAgentIdentity(ctx context.Context, ac
 	if err != nil {
 		return nil, nil, err
 	}
+	return s.provisionCodexAgentIdentity(ctx, accessToken, proxyURL, tokenInfo)
+}
+
+// ProvisionChatGPTSessionAgentIdentity registers an Agent Identity from a
+// validated ChatGPT /api/auth/session identity. Unlike a Codex PAT, a web
+// session access token is a JWT and is sent directly to the registration API.
+func (s *OpenAIOAuthService) ProvisionChatGPTSessionAgentIdentity(ctx context.Context, session *OpenAITokenInfo, proxyURL string) (*OpenAIAgentIdentityProvision, *OpenAITokenInfo, error) {
+	if session == nil {
+		return nil, nil, errors.New("ChatGPT session identity is required")
+	}
+	tokenInfo := *session
+	tokenInfo.AccessToken = strings.TrimSpace(tokenInfo.AccessToken)
+	tokenInfo.ChatGPTAccountID = strings.TrimSpace(tokenInfo.ChatGPTAccountID)
+	tokenInfo.ChatGPTUserID = strings.TrimSpace(tokenInfo.ChatGPTUserID)
+	if tokenInfo.AccessToken == "" {
+		return nil, nil, errors.New("ChatGPT session access token is required")
+	}
+	if tokenInfo.ChatGPTAccountID == "" || tokenInfo.ChatGPTUserID == "" {
+		return nil, nil, errors.New("ChatGPT session identity is incomplete")
+	}
+	return s.provisionCodexAgentIdentity(ctx, tokenInfo.AccessToken, proxyURL, &tokenInfo)
+}
+
+func (s *OpenAIOAuthService) provisionCodexAgentIdentity(ctx context.Context, accessToken, proxyURL string, tokenInfo *OpenAITokenInfo) (*OpenAIAgentIdentityProvision, *OpenAITokenInfo, error) {
 
 	_, privateKeyBase64, publicKeySSH, err := generateAgentIdentityKeyMaterial()
 	if err != nil {

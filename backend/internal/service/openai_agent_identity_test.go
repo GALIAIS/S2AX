@@ -188,6 +188,42 @@ func TestProvisionCodexAgentIdentityBootstrapsFromPATWithoutPersistingBearerToke
 	require.NoError(t, ValidateOpenAIAgentIdentityPrivateKey(provision.Credentials["agent_private_key"].(string)))
 }
 
+func TestProvisionChatGPTSessionAgentIdentityBootstrapsWithoutPAT(t *testing.T) {
+	registrationServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/agent/register":
+			require.Equal(t, http.MethodPost, r.Method)
+			require.Equal(t, "Bearer eyJ.session.jwt", r.Header.Get("Authorization"))
+			_, _ = w.Write([]byte(`{"agent_runtime_id":"runtime-session"}`))
+		case "/v1/agent/runtime-session/task/register":
+			require.Equal(t, http.MethodPost, r.Method)
+			_, _ = w.Write([]byte(`{"task_id":"task-session"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer registrationServer.Close()
+
+	originalAgentIdentityURL := openAIAgentIdentityAuthAPIBaseURL
+	openAIAgentIdentityAuthAPIBaseURL = registrationServer.URL
+	defer func() { openAIAgentIdentityAuthAPIBaseURL = originalAgentIdentityURL }()
+
+	svc := NewOpenAIOAuthService(nil, nil)
+	defer svc.Stop()
+	provision, tokenInfo, err := svc.ProvisionChatGPTSessionAgentIdentity(context.Background(), &OpenAITokenInfo{
+		AccessToken:      "eyJ.session.jwt",
+		Email:            "session@example.com",
+		ChatGPTAccountID: "acct-session",
+		ChatGPTUserID:    "user-session",
+		PlanType:         "plus",
+	}, "")
+	require.NoError(t, err)
+	require.Equal(t, "session@example.com", tokenInfo.Email)
+	require.NotContains(t, provision.Credentials, "access_token")
+	require.Equal(t, "runtime-session", provision.Credentials["agent_runtime_id"])
+	require.Equal(t, "task-session", provision.Credentials["task_id"])
+}
+
 func TestEnsureAgentIdentityTaskPersistsAndRedactsCredentials(t *testing.T) {
 	key, privateKey := newTestAgentIdentityKey(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

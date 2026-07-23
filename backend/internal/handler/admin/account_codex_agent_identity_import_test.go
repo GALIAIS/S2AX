@@ -51,7 +51,7 @@ func TestNormalizeCodexImportEntryRecognizesChatGPTSessionJSON(t *testing.T) {
 	item, err := normalizeCodexImportEntry(codexImportEntry{
 		Index: 1,
 		Value: map[string]any{
-			"accessToken": "at-session-token",
+			"accessToken": "eyJhbGciOiJub25lIn0.eyJzdWIiOiJ1c2VyLXNlc3Npb24ifQ.signature",
 			"account":     map[string]any{"id": "account-session"},
 			"user":        map[string]any{"id": "user-session"},
 		},
@@ -60,7 +60,7 @@ func TestNormalizeCodexImportEntryRecognizesChatGPTSessionJSON(t *testing.T) {
 	require.NotNil(t, item)
 	require.True(t, item.IsChatGPTSession)
 	require.False(t, item.IsAgentIdentity)
-	require.Equal(t, "at-session-token", item.AccessToken)
+	require.Equal(t, "eyJhbGciOiJub25lIn0.eyJzdWIiOiJ1c2VyLXNlc3Npb24ifQ.signature", item.AccessToken)
 }
 
 func TestNormalizeCodexImportEntryAcceptsNestedSub2APIAgentIdentityCredentials(t *testing.T) {

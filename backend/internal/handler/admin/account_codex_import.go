@@ -104,12 +104,13 @@ type codexJWTClaims struct {
 }
 
 type codexJWTOpenAIClaims struct {
-	ChatGPTAccountID string                     `json:"chatgpt_account_id"`
-	ChatGPTUserID    string                     `json:"chatgpt_user_id"`
-	ChatGPTPlanType  string                     `json:"chatgpt_plan_type"`
-	UserID           string                     `json:"user_id"`
-	POID             string                     `json:"poid"`
-	Organizations    []openai.OrganizationClaim `json:"organizations"`
+	ChatGPTAccountID      string                     `json:"chatgpt_account_id"`
+	ChatGPTUserID         string                     `json:"chatgpt_user_id"`
+	ChatGPTPlanType       string                     `json:"chatgpt_plan_type"`
+	ChatGPTAccountFedRAMP bool                       `json:"chatgpt_account_is_fedramp"`
+	UserID                string                     `json:"user_id"`
+	POID                  string                     `json:"poid"`
+	Organizations         []openai.OrganizationClaim `json:"organizations"`
 }
 
 type codexAccountIndex struct {
@@ -415,6 +416,9 @@ func (h *AccountHandler) prepareCodexAgentIdentityImport(ctx context.Context, it
 	if strings.TrimSpace(item.AccessToken) == "" {
 		return errors.New("ChatGPT session JSON 中缺少 accessToken")
 	}
+	if _, err := decodeCodexJWTClaims(item.AccessToken); err != nil {
+		return errors.New("ChatGPT session JSON 中的 accessToken 不是有效 JWT")
+	}
 	if h.openaiOAuthService == nil {
 		return errors.New("OpenAI Agent Identity 服务不可用")
 	}
@@ -429,7 +433,14 @@ func (h *AccountHandler) prepareCodexAgentIdentityImport(ctx context.Context, it
 			proxyURL = proxy.URL()
 		}
 	}
-	provision, tokenInfo, err := h.openaiOAuthService.ProvisionCodexAgentIdentity(ctx, item.AccessToken, proxyURL)
+	provision, tokenInfo, err := h.openaiOAuthService.ProvisionChatGPTSessionAgentIdentity(ctx, &service.OpenAITokenInfo{
+		AccessToken:           item.AccessToken,
+		Email:                 item.Email,
+		ChatGPTAccountID:      item.AccountID,
+		ChatGPTUserID:         item.UserID,
+		ChatGPTAccountFedRAMP: item.AgentFedRAMP,
+		PlanType:              item.PlanType,
+	}, proxyURL)
 	if err != nil {
 		return err
 	}
@@ -632,6 +643,12 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 			return item, nil
 		}
 		item.IsChatGPTSession = isCodexChatGPTSession(raw)
+		item.AgentFedRAMP = firstCodexBool(raw,
+			[]string{"chatgpt_account_is_fedramp"},
+			[]string{"chatgptAccountIsFedramp"},
+			[]string{"account", "isFedrampCompliantWorkspace"},
+			[]string{"account", "is_fedramp_compliant_workspace"},
+		)
 		item.AccessToken = firstCodexString(raw,
 			[]string{"tokens", "access_token"},
 			[]string{"tokens", "accessToken"},
@@ -819,6 +836,9 @@ func enrichCodexImportAccountFromJWT(item *codexImportAccount, token string, val
 	}
 	if item.PlanType == "" {
 		item.PlanType = strings.TrimSpace(claims.OpenAIAuth.ChatGPTPlanType)
+	}
+	if claims.OpenAIAuth.ChatGPTAccountFedRAMP {
+		item.AgentFedRAMP = true
 	}
 	if item.Organization == "" {
 		item.Organization = strings.TrimSpace(claims.OpenAIAuth.POID)
