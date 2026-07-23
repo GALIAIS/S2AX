@@ -276,6 +276,45 @@ describe('admin RiskControlView', () => {
     expect(showError).not.toHaveBeenCalled()
   })
 
+  it('submits Go RE2 rules without rejecting syntax unsupported by JavaScript', async () => {
+    const credentialTheftRule = {
+      name: 'credential_theft',
+      pattern: String.raw`(?i)\bsteal\b.{0,50}\bcredentials?\b`,
+      weight: 100,
+      category: 'malicious',
+      strict: true,
+    }
+    getConfig.mockResolvedValue({
+      ...baseConfig(),
+      builtin_regex_rules: [credentialTheftRule],
+      builtin_regex_default_rules: [credentialTheftRule],
+    })
+
+    const wrapper = mount(RiskControlView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          BaseDialog: BaseDialogStub,
+          Icon: true,
+          Select: true,
+          Toggle: true,
+          Pagination: true,
+          ModelWhitelistSelector: ModelWhitelistSelectorStub,
+        },
+      },
+    })
+
+    await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click')
+    await flushPromises()
+
+    expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({
+      builtin_regex_rules: [credentialTheftRule],
+    }))
+    expect(showError).not.toHaveBeenCalled()
+  })
+
   it('describes worker runtime as async audit and pre-block record processing', async () => {
     getStatus.mockResolvedValue({
       ...runtimeStatus(),

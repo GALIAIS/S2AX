@@ -2326,12 +2326,6 @@ function validateBuiltinRegexRules(): boolean {
       appStore.showError(t('admin.riskControl.builtinRegexRuleWeightInvalid', { name }))
       return false
     }
-    try {
-      new RegExp(pattern)
-    } catch {
-      appStore.showError(t('admin.riskControl.builtinRegexRulePatternInvalid', { name }))
-      return false
-    }
   }
   return true
 }
