@@ -22,6 +22,7 @@ func TestRegisterUserRoutesIncludesCitySimulationKernel(t *testing.T) {
 		servermiddleware.AuditLogMiddleware(noop),
 		nil,
 		nil,
+		nil,
 	)
 
 	wanted := map[string]bool{

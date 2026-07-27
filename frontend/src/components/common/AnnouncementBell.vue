@@ -164,6 +164,7 @@ import { useAppStore } from '@/stores/app'
 import { formatRelativeTime, formatRelativeWithDateTime } from '@/utils/format'
 import { renderMarkdown } from '@/utils/markdown'
 import type { UserAnnouncement } from '@/types'
+import '@/styles/announcement-markdown.css'
 
 const { t } = useI18n()
 const appStore = useAppStore()

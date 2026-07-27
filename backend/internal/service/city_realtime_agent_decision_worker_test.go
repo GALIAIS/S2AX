@@ -151,7 +151,7 @@ func TestCityRealtimeAgentDecisionWorkerDefersBudgetUntilTheNextWindow(t *testin
 func TestCityRealtimeAgentDecisionNextBudgetWindowUsesNextUTCHour(t *testing.T) {
 	now := time.Date(2026, time.July, 23, 10, 59, 59, 999999000, time.FixedZone("UTC+8", 8*60*60))
 	deadline := cityRealtimeAgentDecisionNextBudgetWindow(now)
-	require.Equal(t, time.Date(2026, time.July, 23, 4, 0, 1, 0, time.UTC), deadline)
+	require.Equal(t, time.Date(2026, time.July, 23, 3, 0, 1, 0, time.UTC), deadline)
 }
 
 func TestCityRealtimeAgentDecisionWorkerClassifiesSafeErrors(t *testing.T) {
