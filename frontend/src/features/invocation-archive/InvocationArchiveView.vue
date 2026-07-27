@@ -1,39 +1,33 @@
 <template>
   <AppLayout>
     <div class="mx-auto max-w-[1600px] pb-8">
-      <header class="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p class="text-xs font-semibold uppercase tracking-[0.16em] text-primary-600 dark:text-primary-400">{{ t('nav.invocationArchive') }}</p>
-          <h1 class="mt-1 text-2xl font-semibold tracking-tight text-gray-950 dark:text-white">{{ t('admin.invocationArchive.title') }}</h1>
-          <p class="mt-2 max-w-4xl text-sm text-gray-500 dark:text-dark-300">{{ t('admin.invocationArchive.description') }}</p>
-        </div>
-        <div class="flex gap-2">
-          <button type="button" class="btn btn-secondary" :disabled="loading.config" @click="openConfig">{{ t('common.settings') }}</button>
-          <button type="button" class="btn btn-secondary" :disabled="loading.runtime" @click="loadRuntime">
-            {{ loading.runtime ? t('common.refreshing') : t('common.refresh') }}
-          </button>
-        </div>
-      </header>
-
       <div v-if="errors.config && !draft" role="alert" class="mb-6 rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
         <p>{{ errors.config }}</p>
-        <button type="button" class="btn btn-secondary btn-sm mt-3" @click="loadConfig">{{ t('common.retry') }}</button>
+        <button type="button" class="btn btn-secondary btn-sm mt-3" @click="loadConfig()">{{ t('common.retry') }}</button>
       </div>
 
       <template v-else>
-        <div class="mb-5" role="tablist" :aria-label="t('admin.invocationArchive.title')">
-          <div class="tabs inline-flex">
-            <button
-              v-for="tab in tabs"
-              :key="tab.id"
-              type="button"
-              role="tab"
-              class="tab"
-              :class="{ 'tab-active': activeTab === tab.id }"
-              :aria-selected="activeTab === tab.id"
-              @click="activeTab = tab.id"
-            >
-              {{ tab.label }}
+        <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <div role="tablist" :aria-label="t('admin.invocationArchive.title')">
+            <div class="tabs inline-flex">
+              <button
+                v-for="tab in tabs"
+                :key="tab.id"
+                type="button"
+                role="tab"
+                class="tab"
+                :class="{ 'tab-active': activeTab === tab.id }"
+                :aria-selected="activeTab === tab.id"
+                @click="activeTab = tab.id"
+              >
+                {{ tab.label }}
+              </button>
+            </div>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-gray-500 dark:text-dark-400" aria-live="polite">{{ refreshStatus }}</span>
+            <button type="button" class="btn btn-secondary btn-sm" :disabled="refreshing" @click="refreshWorkspace">
+              {{ refreshing ? t('common.refreshing') : t('common.refresh') }}
             </button>
           </div>
         </div>
@@ -109,8 +103,8 @@
                   <th class="px-3 py-3 text-right font-medium">{{ t('common.actions') }}</th>
                 </tr>
               </thead>
-              <tbody class="divide-y divide-gray-100 bg-white dark:divide-dark-700 dark:bg-transparent">
-                <tr v-if="loading.records"><td colspan="7" class="px-4 py-12 text-center text-gray-500" aria-busy="true">{{ t('common.loading') }}</td></tr>
+              <tbody class="divide-y divide-gray-100 bg-white dark:divide-dark-700 dark:bg-transparent" :aria-busy="loading.records">
+                <tr v-if="loading.records && !recordsLoaded"><td colspan="7" class="px-4 py-12 text-center text-gray-500">{{ t('common.loading') }}</td></tr>
                 <tr v-else-if="records.items.length === 0"><td colspan="7" class="px-4 py-12 text-center text-gray-500">{{ t('admin.invocationArchive.records.empty') }}</td></tr>
                 <tr v-for="record in records.items" v-else :key="record.id" class="align-top hover:bg-gray-50/70 dark:hover:bg-dark-800/70">
                   <td class="px-3 py-3"><input type="checkbox" :checked="selectedIDs.includes(record.id)" :aria-label="t('admin.invocationArchive.records.selectRecord', { id: record.id })" @change="toggleOne(record.id)" /></td>
@@ -175,11 +169,11 @@
               </label>
               <label class="text-sm text-gray-700 dark:text-dark-200">
                 <span>{{ t('admin.invocationArchive.config.requestLimit') }}</span>
-                <input :value="bytesToMiB(draft.max_request_bytes)" type="number" min="0.001" max="16" step="0.001" class="input mt-1 w-full" @input="setDraftMiB('max_request_bytes', $event)" />
+                <input :value="bytesToMiB(draft.max_request_bytes)" type="number" min="0.001" max="256" step="0.001" class="input mt-1 w-full" @input="setDraftMiB('max_request_bytes', $event)" />
               </label>
               <label class="text-sm text-gray-700 dark:text-dark-200">
                 <span>{{ t('admin.invocationArchive.config.responseLimit') }}</span>
-                <input :value="bytesToMiB(draft.max_response_bytes)" type="number" min="0.001" max="16" step="0.001" class="input mt-1 w-full" @input="setDraftMiB('max_response_bytes', $event)" />
+                <input :value="bytesToMiB(draft.max_response_bytes)" type="number" min="0.001" max="256" step="0.001" class="input mt-1 w-full" @input="setDraftMiB('max_response_bytes', $event)" />
               </label>
             </div>
 
@@ -269,7 +263,7 @@
               <h2 class="text-base font-semibold text-gray-950 dark:text-white">{{ t('admin.invocationArchive.runtime.title') }}</h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-dark-300">{{ t('admin.invocationArchive.runtime.description') }}</p>
             </div>
-            <button type="button" class="btn btn-secondary btn-sm" :disabled="loading.runtime" @click="loadRuntime">{{ t('common.refresh') }}</button>
+            <button type="button" class="btn btn-secondary btn-sm" :disabled="refreshing" @click="refreshWorkspace">{{ refreshing ? t('common.refreshing') : t('common.refresh') }}</button>
           </div>
           <div v-if="errors.runtime" role="alert" class="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">{{ errors.runtime }}</div>
           <div v-else-if="runtime" class="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -308,22 +302,55 @@
           </div>
           <div v-if="!serverConfig?.direct_view_enabled" class="mt-4 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">{{ t('admin.invocationArchive.detail.directViewDisabled') }}</div>
           <template v-else>
-            <label class="mt-4 block text-sm text-gray-700 dark:text-dark-200">
-              <span>{{ t('admin.invocationArchive.detail.revealReason') }}</span>
-              <textarea v-model="revealReason" rows="3" maxlength="256" class="input mt-1 w-full resize-y" :placeholder="t('admin.invocationArchive.detail.revealReasonPlaceholder')" />
-            </label>
-            <div class="mt-3 flex flex-wrap items-center gap-3">
-              <button type="button" class="btn btn-primary btn-sm" :disabled="loading.revealing || revealReason.trim().length < 3" @click="revealPayloads">{{ loading.revealing ? t('common.verifying') : t('admin.invocationArchive.detail.reveal') }}</button>
+            <div class="mt-4 flex flex-wrap items-center gap-3">
+              <button type="button" class="btn btn-primary btn-sm" :disabled="loading.revealing" @click="revealPayloads">{{ loading.revealing ? t('common.verifying') : t('admin.invocationArchive.detail.reveal') }}</button>
               <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.invocationArchive.detail.revealHint') }}</p>
             </div>
           </template>
           <div v-if="reveal" class="mt-5 grid gap-4 xl:grid-cols-2">
-            <article v-for="payload in revealedPayloads" :key="payload.label" class="min-w-0 rounded-xl border border-gray-200 dark:border-dark-700">
+            <article v-for="payload in payloadPanels" :key="payload.slot" class="min-w-0 rounded-xl border border-gray-200 dark:border-dark-700">
               <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-dark-700">
-                <div><h4 class="text-sm font-semibold text-gray-950 dark:text-white">{{ payload.label }}</h4><p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ payloadMeta(payload.payload) }}</p></div>
-                <button v-if="payload.payload.available" type="button" class="btn btn-secondary btn-sm" @click="copyText(payload.payload.data || '')">{{ t('common.copy') }}</button>
+                <div>
+                  <h4 class="text-sm font-semibold text-gray-950 dark:text-white">{{ payload.label }}</h4>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ payloadMeta(payload.payload) }}</p>
+                  <p v-if="payload.payload.available" class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ payloadFormatLabel(payload.presentation.format) }} · {{ payloadEncodingLabel(payload.payload.encoding, payload.presentation.charset) }}</p>
+                </div>
+                <div v-if="payload.payload.available" class="flex flex-wrap items-center gap-2">
+                  <button type="button" class="btn btn-secondary btn-sm" @click="copyText(payload.display)">{{ t('admin.invocationArchive.detail.copyCurrent') }}</button>
+                  <button v-if="payload.mode !== 'raw'" type="button" class="btn btn-ghost btn-sm" @click="copyText(payload.presentation.raw)">{{ t('admin.invocationArchive.detail.copyRaw') }}</button>
+                </div>
               </div>
-              <pre class="max-h-[28rem] overflow-auto whitespace-pre-wrap break-words bg-gray-50 p-4 text-xs leading-6 text-gray-800 dark:bg-dark-900/70 dark:text-dark-100">{{ payload.payload.available ? payload.payload.data : payloadUnavailableLabel(payload.payload.status) }}</pre>
+              <template v-if="payload.payload.available">
+                <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-gray-50/70 px-4 py-2.5 dark:border-dark-700 dark:bg-dark-900/40">
+                  <div class="flex flex-wrap items-center gap-2" role="group" :aria-label="t('admin.invocationArchive.detail.viewMode')">
+                    <button v-if="payload.presentation.transcript.length > 0" type="button" class="btn btn-sm" :class="payload.mode === 'structured' ? 'btn-primary' : 'btn-secondary'" @click="payloadViewModes[payload.slot] = 'structured'">{{ t('admin.invocationArchive.detail.structured') }}</button>
+                    <button v-if="payload.presentation.canFormat" type="button" class="btn btn-sm" :class="payload.mode === 'formatted' ? 'btn-primary' : 'btn-secondary'" @click="payloadViewModes[payload.slot] = 'formatted'">{{ t('admin.invocationArchive.detail.formatted') }}</button>
+                    <button v-if="payload.presentation.repaired" type="button" class="btn btn-sm" :class="payload.mode === 'repaired' ? 'btn-primary' : 'btn-secondary'" @click="payloadViewModes[payload.slot] = 'repaired'">{{ t('admin.invocationArchive.detail.repaired') }}</button>
+                    <button type="button" class="btn btn-sm" :class="payload.mode === 'raw' ? 'btn-primary' : 'btn-secondary'" @click="payloadViewModes[payload.slot] = 'raw'">{{ t('admin.invocationArchive.detail.raw') }}</button>
+                  </div>
+                  <label v-if="payload.presentation.canSelectCharset" class="flex items-center gap-2 text-xs text-gray-600 dark:text-dark-300">
+                    <span>{{ t('admin.invocationArchive.detail.charset') }}</span>
+                    <select v-model="payloadCharsets[payload.slot]" class="input h-8 min-w-40 py-1 text-xs">
+                      <option v-for="charset in invocationArchivePayloadCharsets" :key="charset" :value="charset">{{ payloadCharsetLabel(charset) }}</option>
+                    </select>
+                  </label>
+                </div>
+                <div v-if="payload.presentation.warnings.length" class="space-y-2 border-b border-gray-200 px-4 py-3 dark:border-dark-700">
+                  <p v-for="warning in payload.presentation.warnings" :key="warning" role="status" class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200">{{ payloadWarningLabel(warning) }}</p>
+                </div>
+                <div v-if="payload.mode === 'structured' && payload.presentation.transcript.length" class="max-h-[28rem] space-y-3 overflow-auto bg-gray-50 p-4 dark:bg-dark-900/70">
+                  <article v-for="(entry, index) in payload.presentation.transcript" :key="`${entry.role}:${entry.title || ''}:${index}`" class="border border-gray-200 bg-white p-3 dark:border-dark-700 dark:bg-dark-800/70">
+                    <div class="flex flex-wrap items-center gap-2 text-xs">
+                      <span class="rounded-full bg-primary-100 px-2 py-0.5 font-medium text-primary-700 dark:bg-primary-950/50 dark:text-primary-300">{{ entry.role }}</span>
+                      <span v-if="entry.title" class="font-mono text-gray-700 dark:text-dark-200">{{ entry.title }}</span>
+                      <span v-for="item in entry.metadata" :key="item" class="text-gray-500 dark:text-dark-400">{{ item }}</span>
+                    </div>
+                    <pre class="mt-3 whitespace-pre-wrap break-words font-mono text-xs leading-6 text-gray-800 dark:text-dark-100">{{ entry.content }}</pre>
+                  </article>
+                </div>
+                <pre v-else class="max-h-[28rem] overflow-auto whitespace-pre-wrap break-words bg-gray-50 p-4 text-xs leading-6 text-gray-800 dark:bg-dark-900/70 dark:text-dark-100">{{ payload.display }}</pre>
+              </template>
+              <pre v-else class="max-h-[28rem] overflow-auto whitespace-pre-wrap break-words bg-gray-50 p-4 text-xs leading-6 text-gray-800 dark:bg-dark-900/70 dark:text-dark-100">{{ payload.display }}</pre>
             </article>
           </div>
         </section>
@@ -332,10 +359,10 @@
           <h3 class="text-sm font-semibold text-gray-950 dark:text-white">{{ t('admin.invocationArchive.detail.accesses') }}</h3>
           <div class="mt-3 overflow-x-auto rounded-xl border border-gray-200 dark:border-dark-700/60">
             <table class="min-w-[760px] w-full text-left text-sm">
-              <thead class="bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-dark-900/70 dark:text-dark-400"><tr><th class="px-3 py-3 font-medium">{{ t('admin.invocationArchive.detail.accessTime') }}</th><th class="px-3 py-3 font-medium">{{ t('admin.invocationArchive.detail.admin') }}</th><th class="px-3 py-3 font-medium">{{ t('admin.invocationArchive.detail.accessOutcome') }}</th><th class="px-3 py-3 font-medium">{{ t('admin.invocationArchive.detail.reason') }}</th><th class="px-3 py-3 font-medium">{{ t('admin.invocationArchive.detail.client') }}</th></tr></thead>
+              <thead class="bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-dark-900/70 dark:text-dark-400"><tr><th class="px-3 py-3 font-medium">{{ t('admin.invocationArchive.detail.accessTime') }}</th><th class="px-3 py-3 font-medium">{{ t('admin.invocationArchive.detail.admin') }}</th><th class="px-3 py-3 font-medium">{{ t('admin.invocationArchive.detail.accessOutcome') }}</th><th class="px-3 py-3 font-medium">{{ t('admin.invocationArchive.detail.client') }}</th></tr></thead>
               <tbody class="divide-y divide-gray-100 bg-white dark:divide-dark-700 dark:bg-transparent">
-                <tr v-if="accessLogs.length === 0"><td colspan="5" class="px-4 py-9 text-center text-sm text-gray-500">{{ t('admin.invocationArchive.detail.noAccesses') }}</td></tr>
-                <tr v-for="access in accessLogs" v-else :key="access.id"><td class="whitespace-nowrap px-3 py-3 text-xs text-gray-600 dark:text-dark-300">{{ formatDate(access.created_at) }}</td><td class="px-3 py-3">{{ access.admin_name || '—' }}</td><td class="px-3 py-3">{{ access.outcome }}</td><td class="max-w-80 px-3 py-3 break-words">{{ access.reason || '—' }}</td><td class="px-3 py-3 text-xs text-gray-500">{{ access.client_ip || '—' }}</td></tr>
+                <tr v-if="accessLogs.length === 0"><td colspan="4" class="px-4 py-9 text-center text-sm text-gray-500">{{ t('admin.invocationArchive.detail.noAccesses') }}</td></tr>
+                <tr v-for="access in accessLogs" v-else :key="access.id"><td class="whitespace-nowrap px-3 py-3 text-xs text-gray-600 dark:text-dark-300">{{ formatDate(access.created_at) }}</td><td class="px-3 py-3">{{ access.admin_name || '—' }}</td><td class="px-3 py-3">{{ accessOutcomeLabel(access.outcome) }}</td><td class="px-3 py-3 text-xs text-gray-500">{{ access.client_ip || '—' }}</td></tr>
               </tbody>
             </table>
           </div>
@@ -357,7 +384,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -368,6 +395,13 @@ import { useAppStore } from '@/stores/app'
 import { isStepUpBlocked, isStepUpCancelled, stepUpBlockReason, useStepUp } from '@/composables/useStepUp'
 import { extractApiErrorCode, extractApiErrorMessage } from '@/utils/apiError'
 import invocationArchiveAPI from './api'
+import {
+  invocationArchivePayloadCharsets,
+  presentInvocationArchivePayload,
+  type InvocationArchivePayloadPresentation,
+  type InvocationArchivePayloadViewMode,
+  type InvocationArchivePayloadWarning,
+} from './payloadPresentation'
 import {
   emptyInvocationArchiveFilters,
   type InvocationArchiveAccessLog,
@@ -386,11 +420,13 @@ import {
 } from './types'
 
 const MEBIBYTE = 1024 * 1024
+const AUTO_REFRESH_INTERVAL_MS = 15_000
 const { t, locale } = useI18n()
 const appStore = useAppStore()
 const stepUp = useStepUp()
 
 type ArchiveTab = 'records' | 'config' | 'runtime'
+type ArchivePayloadSlot = 'request' | 'response'
 const activeTab = ref<ArchiveTab>('records')
 const tabs = computed(() => [
   { id: 'records' as const, label: t('admin.invocationArchive.tabs.records') },
@@ -415,12 +451,23 @@ const detailOpen = ref(false)
 const activeRecord = ref<InvocationArchiveRecord | null>(null)
 const accessLogs = ref<InvocationArchiveAccessLog[]>([])
 const reveal = ref<InvocationArchiveReveal | null>(null)
-const revealReason = ref('')
+const payloadViewModes = reactive<Record<ArchivePayloadSlot, InvocationArchivePayloadViewMode>>({ request: 'formatted', response: 'formatted' })
+const payloadCharsets = reactive<Record<ArchivePayloadSlot, string>>({ request: 'auto', response: 'auto' })
 const loading = reactive({ config: false, runtime: false, records: false, saving: false, subjects: false, detail: false, revealing: false, deleting: false })
 const errors = reactive({ config: '', runtime: '', records: '', subjects: '' })
+const recordsLoaded = ref(false)
+const refreshing = ref(false)
+const lastRefreshedAt = ref<Date | null>(null)
+let recordRequestSequence = 0
+let autoRefreshTimer: number | undefined
 
 const dirty = computed(() => configFingerprint(draft.value) !== configFingerprint(serverConfig.value))
 const allSelected = computed(() => records.items.length > 0 && records.items.every((record) => selectedIDs.value.includes(record.id)))
+const refreshStatus = computed(() => {
+  if (refreshing.value) return t('admin.invocationArchive.refresh.refreshing')
+  if (!lastRefreshedAt.value) return t('admin.invocationArchive.refresh.waiting')
+  return t('admin.invocationArchive.refresh.updatedAt', { time: formatRefreshTime(lastRefreshedAt.value) })
+})
 const runtimeMetrics = computed(() => {
   if (!runtime.value) return []
   return [
@@ -446,9 +493,14 @@ const detailMetadata = computed(() => {
   ]
 })
 const revealedPayloads = computed(() => reveal.value ? [
-  { label: t('admin.invocationArchive.records.request'), payload: reveal.value.request },
-  { label: t('admin.invocationArchive.records.response'), payload: reveal.value.response },
+  { slot: 'request' as const, label: t('admin.invocationArchive.records.request'), payload: reveal.value.request },
+  { slot: 'response' as const, label: t('admin.invocationArchive.records.response'), payload: reveal.value.response },
 ] : [])
+const payloadPanels = computed(() => revealedPayloads.value.map((payload) => {
+  const presentation = presentInvocationArchivePayload(payload.payload, payloadCharsets[payload.slot])
+  const mode = supportedPayloadViewMode(payloadViewModes[payload.slot], presentation)
+  return { ...payload, presentation, mode, display: payloadDisplayText(payload.payload, presentation, mode) }
+}))
 
 function cloneConfig(config: InvocationArchiveConfig | null): InvocationArchiveConfig | null {
   return config ? { ...config, rules: config.rules.map((rule) => ({ ...rule })) } : null
@@ -489,54 +541,74 @@ async function runSensitive<T>(operation: () => Promise<T>): Promise<T | undefin
   }
 }
 
-async function loadConfig() {
+async function loadConfig({ preserveDraft = false }: { preserveDraft?: boolean } = {}): Promise<boolean> {
+  const preserveDirtyDraft = preserveDraft && dirty.value
   loading.config = true
   errors.config = ''
   try {
     const config = await invocationArchiveAPI.getConfig()
     serverConfig.value = cloneConfig(config)
-    draft.value = cloneConfig(config)
+    if (!preserveDirtyDraft) draft.value = cloneConfig(config)
+    return true
   } catch (error) {
     errors.config = errorMessage(error, 'admin.invocationArchive.errors.loadConfig')
+    return false
   } finally {
     loading.config = false
   }
 }
-async function loadRuntime() {
+async function loadRuntime(): Promise<boolean> {
   loading.runtime = true
   errors.runtime = ''
   try {
     runtime.value = await invocationArchiveAPI.getRuntime()
+    return true
   } catch (error) {
     errors.runtime = errorMessage(error, 'admin.invocationArchive.errors.loadRuntime')
+    return false
   } finally {
     loading.runtime = false
   }
 }
-async function loadRecords() {
+async function loadRecords({ resetSelection = false }: { resetSelection?: boolean } = {}): Promise<boolean> {
+  const requestSequence = ++recordRequestSequence
+  const page = records.page
+  const pageSize = records.page_size
+  const filter = { ...appliedFilters.value }
   loading.records = true
   errors.records = ''
   try {
-    const result = await invocationArchiveAPI.listRecords(appliedFilters.value, records.page, records.page_size)
+    const result = await invocationArchiveAPI.listRecords(filter, page, pageSize)
+    if (requestSequence !== recordRequestSequence) return false
     Object.assign(records, result)
-    selectedIDs.value = []
+    recordsLoaded.value = true
+    const recordIDs = new Set(result.items.map((record) => record.id))
+    selectedIDs.value = resetSelection ? [] : selectedIDs.value.filter((id) => recordIDs.has(id))
+    return true
   } catch (error) {
+    if (requestSequence !== recordRequestSequence) return false
     errors.records = errorMessage(error, 'admin.invocationArchive.errors.loadRecords')
+    return false
   } finally {
-    loading.records = false
+    if (requestSequence === recordRequestSequence) loading.records = false
   }
 }
-async function loadInitial() {
-  await Promise.allSettled([loadConfig(), loadRuntime(), loadRecords()])
-}
-function openConfig() {
-  activeTab.value = 'config'
-  if (!draft.value) void loadConfig()
+async function refreshWorkspace() {
+  if (refreshing.value) return
+  refreshing.value = true
+  try {
+    const operations = [loadRuntime(), loadRecords()]
+    if (!dirty.value) operations.push(loadConfig({ preserveDraft: true }))
+    const results = await Promise.allSettled(operations)
+    if (results.some((result) => result.status === 'fulfilled' && result.value)) lastRefreshedAt.value = new Date()
+  } finally {
+    refreshing.value = false
+  }
 }
 function applyFilters() {
   appliedFilters.value = { ...filters.value }
   records.page = 1
-  void loadRecords()
+  void loadRecords({ resetSelection: true })
 }
 function resetFilters() {
   filters.value = emptyInvocationArchiveFilters()
@@ -544,12 +616,12 @@ function resetFilters() {
 }
 function changePage(page: number) {
   records.page = page
-  void loadRecords()
+  void loadRecords({ resetSelection: true })
 }
 function changePageSize(pageSize: number) {
   records.page_size = pageSize
   records.page = 1
-  void loadRecords()
+  void loadRecords({ resetSelection: true })
 }
 function toggleOne(id: number) {
   const selection = new Set(selectedIDs.value)
@@ -638,7 +710,7 @@ async function openRecord(id: number) {
   activeRecord.value = null
   accessLogs.value = []
   reveal.value = null
-  revealReason.value = ''
+  resetPayloadReview()
   try {
     const [record, accesses] = await Promise.all([invocationArchiveAPI.getRecord(id), invocationArchiveAPI.listAccessLogs(id)])
     activeRecord.value = record
@@ -655,15 +727,16 @@ function closeDetail() {
   activeRecord.value = null
   accessLogs.value = []
   reveal.value = null
-  revealReason.value = ''
+  resetPayloadReview()
 }
 async function revealPayloads() {
-  if (!activeRecord.value || revealReason.value.trim().length < 3 || loading.revealing) return
+  if (!activeRecord.value || loading.revealing) return
   loading.revealing = true
   try {
-    const result = await runSensitive(() => invocationArchiveAPI.revealRecord(activeRecord.value!.id, revealReason.value.trim()))
+    const result = await runSensitive(() => invocationArchiveAPI.revealRecord(activeRecord.value!.id))
     if (!result) return
     reveal.value = result
+    resetPayloadReview(result)
     accessLogs.value = await invocationArchiveAPI.listAccessLogs(activeRecord.value.id)
   } catch (error) {
     appStore.showError(errorMessage(error, 'admin.invocationArchive.errors.reveal'))
@@ -697,9 +770,17 @@ function formatDate(value: string): string {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? t('common.notAvailable') : new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'medium' }).format(date)
 }
+function formatRefreshTime(value: Date): string {
+  return new Intl.DateTimeFormat(locale.value, { timeStyle: 'medium' }).format(value)
+}
 function number(value: number): string { return new Intl.NumberFormat(locale.value).format(value) }
 function scopeLabel(scope: InvocationArchiveScope): string { return t(`admin.invocationArchive.scopes.${scope}`) }
 function outcomeLabel(outcome: InvocationArchiveOutcome): string { return t(`admin.invocationArchive.outcomes.${outcome}`) }
+function accessOutcomeLabel(outcome: string): string {
+  const key = `admin.invocationArchive.accessOutcomes.${outcome}`
+  const label = t(key)
+  return label === key ? outcome : label
+}
 function outcomeClass(outcome: InvocationArchiveOutcome): string {
   if (outcome === 'completed') return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
   if (outcome === 'client_error') return 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300'
@@ -724,6 +805,49 @@ function payloadUnavailableLabel(status: string): string {
   const label = t(key)
   return label === key ? status : label
 }
+function supportedPayloadViewMode(mode: InvocationArchivePayloadViewMode, presentation: InvocationArchivePayloadPresentation): InvocationArchivePayloadViewMode {
+  if (mode === 'structured' && presentation.transcript.length > 0) return mode
+  if (mode === 'formatted' && presentation.canFormat) return mode
+  if (mode === 'repaired' && presentation.repaired) return mode
+  return 'raw'
+}
+function payloadDisplayText(payload: InvocationArchivePayloadView, presentation: InvocationArchivePayloadPresentation, mode: InvocationArchivePayloadViewMode): string {
+  if (!payload.available) return payloadUnavailableLabel(payload.status)
+  if (mode === 'repaired' && presentation.repaired) return presentation.repaired
+  if (mode === 'raw') return presentation.raw
+  return presentation.formatted
+}
+function resetPayloadReview(value: InvocationArchiveReveal | null = null) {
+  for (const slot of ['request', 'response'] as const) {
+    payloadCharsets[slot] = 'auto'
+    const payload = value?.[slot]
+    if (!payload) {
+      payloadViewModes[slot] = 'formatted'
+      continue
+    }
+    const presentation = presentInvocationArchivePayload(payload)
+    payloadViewModes[slot] = presentation.transcript.length > 0 ? 'structured' : presentation.canFormat ? 'formatted' : 'raw'
+  }
+}
+function payloadFormatLabel(format: InvocationArchivePayloadPresentation['format']): string {
+  const key = `admin.invocationArchive.detail.formats.${format}`
+  const label = t(key)
+  return label === key ? format : label
+}
+function payloadEncodingLabel(encoding: string | undefined, charset: string): string {
+  const key = encoding?.toLowerCase() === 'base64' ? 'admin.invocationArchive.detail.encodings.base64' : 'admin.invocationArchive.detail.encodings.utf8'
+  return t(key, { charset })
+}
+function payloadCharsetLabel(charset: string): string {
+  const key = `admin.invocationArchive.detail.charsets.${charset.replace(/-/g, '_')}`
+  const label = t(key)
+  return label === key ? charset : label
+}
+function payloadWarningLabel(warning: InvocationArchivePayloadWarning): string {
+  const key = `admin.invocationArchive.detail.warnings.${warning}`
+  const label = t(key)
+  return label === key ? warning : label
+}
 async function copyText(value: string) {
   try {
     await navigator.clipboard.writeText(value)
@@ -733,5 +857,31 @@ async function copyText(value: string) {
   }
 }
 
-onMounted(loadInitial)
+function canAutoRefresh(): boolean {
+  return document.visibilityState === 'visible'
+    && !refreshing.value
+    && !loading.config
+    && !loading.runtime
+    && !loading.records
+    && !loading.saving
+    && !loading.detail
+    && !loading.revealing
+    && !loading.deleting
+    && !dirty.value
+}
+function handleVisibilityChange() {
+  if (canAutoRefresh()) void refreshWorkspace()
+}
+
+onMounted(() => {
+  void refreshWorkspace()
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  autoRefreshTimer = window.setInterval(() => {
+    if (canAutoRefresh()) void refreshWorkspace()
+  }, AUTO_REFRESH_INTERVAL_MS)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  if (autoRefreshTimer !== undefined) window.clearInterval(autoRefreshTimer)
+})
 </script>

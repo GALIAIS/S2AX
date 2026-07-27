@@ -395,8 +395,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		writeCtx, cancel := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
 		defer cancel()
 		err := clientConn.Write(writeCtx, coderws.MessageText, message)
-		if err == nil && downstreamTurn > 0 && hooks != nil && hooks.OnClientMessage != nil {
-			hooks.OnClientMessage(downstreamTurn, message)
+		if err == nil && downstreamTurn > 0 {
+			hooks.observeClientFrame(downstreamTurn, coderws.MessageText, message)
 		}
 		return err
 	}

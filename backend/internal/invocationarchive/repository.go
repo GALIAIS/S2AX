@@ -106,7 +106,7 @@ func protectCapturedPayload(encryptor service.SecretEncryptor, payload capturedP
 	if payload.status != "captured" {
 		return "", payload.status, nil
 	}
-	ciphertext, _, err := protectPayload(encryptor, payload.bytes)
+	ciphertext, _, err := protectPayloadEnvelope(encryptor, newPayloadEnvelope(payload.bytes, payload.frames, payload.framesTruncated))
 	if err != nil {
 		return "", "encryption_failed", err
 	}
@@ -212,42 +212,37 @@ func (s *Service) ListAccessLogs(ctx context.Context, recordID int64, limit int)
 	return items, rows.Err()
 }
 
-func (s *Service) RevealRecord(ctx context.Context, id, adminID int64, reason, clientIP, userAgent string) (*Reveal, error) {
+func (s *Service) RevealRecord(ctx context.Context, id, adminID int64, clientIP, userAgent string) (*Reveal, error) {
 	if adminID <= 0 {
 		return nil, infraerrors.Forbidden("invocation_archive_admin_required", "管理员身份无效")
-	}
-	reason = strings.TrimSpace(reason)
-	length := len([]rune(reason))
-	if length < 3 || length > 256 {
-		return nil, ErrInvalidRevealReason
 	}
 	stored, err := s.getStoredRecord(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	if !s.activeConfig().DirectViewEnabled {
-		_ = s.recordAccess(ctx, id, adminID, reason, "direct_view_disabled", clientIP, userAgent)
+		_ = s.recordAccess(ctx, id, adminID, "", "direct_view_disabled", clientIP, userAgent)
 		return nil, ErrDirectViewDisabled
 	}
 	if !time.Now().UTC().Before(stored.ExpiresAt) {
-		_ = s.recordAccess(ctx, id, adminID, reason, "expired", clientIP, userAgent)
+		_ = s.recordAccess(ctx, id, adminID, "", "expired", clientIP, userAgent)
 		return nil, ErrPayloadExpired
 	}
 	request, err := revealPayload(s.encryptor, stored.requestCiphertext, stored.RequestContentType, stored.RequestStatus, stored.RequestTotalBytes, stored.RequestCapturedBytes, stored.RequestTruncated)
 	if err != nil {
-		_ = s.recordAccess(ctx, id, adminID, reason, "decrypt_failed", clientIP, userAgent)
+		_ = s.recordAccess(ctx, id, adminID, "", "decrypt_failed", clientIP, userAgent)
 		return nil, ErrPayloadUnavailable
 	}
 	response, err := revealPayload(s.encryptor, stored.responseCiphertext, stored.ResponseContentType, stored.ResponseStatus, stored.ResponseTotalBytes, stored.ResponseCapturedBytes, stored.ResponseTruncated)
 	if err != nil {
-		_ = s.recordAccess(ctx, id, adminID, reason, "decrypt_failed", clientIP, userAgent)
+		_ = s.recordAccess(ctx, id, adminID, "", "decrypt_failed", clientIP, userAgent)
 		return nil, ErrPayloadUnavailable
 	}
 	if !request.Available && !response.Available {
-		_ = s.recordAccess(ctx, id, adminID, reason, "unavailable", clientIP, userAgent)
+		_ = s.recordAccess(ctx, id, adminID, "", "unavailable", clientIP, userAgent)
 		return nil, ErrPayloadUnavailable
 	}
-	if err := s.recordAccess(ctx, id, adminID, reason, "revealed", clientIP, userAgent); err != nil {
+	if err := s.recordAccess(ctx, id, adminID, "", "revealed", clientIP, userAgent); err != nil {
 		return nil, fmt.Errorf("record invocation archive reveal before response: %w", err)
 	}
 	return &Reveal{RecordID: id, RevealedAt: time.Now().UTC(), Request: request, Response: response}, nil

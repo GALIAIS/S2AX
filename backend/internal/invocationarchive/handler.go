@@ -96,30 +96,20 @@ func (h *AdminHandler) ListAccessLogs(c *gin.Context) {
 	response.Success(c, gin.H{"items": items})
 }
 
-type revealRequest struct {
-	Reason string `json:"reason"`
-}
-
 func (h *AdminHandler) RevealRecord(c *gin.Context) {
 	id, ok := archiveRecordID(c)
 	if !ok {
 		return
 	}
-	var request revealRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		setArchiveAudit(c, "failed", "invocation_archive_invalid_reveal_request", map[string]any{"archive_record_id": id})
-		response.ErrorFrom(c, infraerrors.BadRequest("invocation_archive_invalid_reveal_request", "调用归档查看请求无效"))
-		return
-	}
 	c.Header("Cache-Control", "no-store, no-cache, must-revalidate, private")
 	c.Header("Pragma", "no-cache")
-	reveal, err := h.service.RevealRecord(c.Request.Context(), id, archiveAdminID(c), request.Reason, middleware.SecurityClientIP(c), c.Request.UserAgent())
+	reveal, err := h.service.RevealRecord(c.Request.Context(), id, archiveAdminID(c), middleware.SecurityClientIP(c), c.Request.UserAgent())
 	if err != nil {
-		setArchiveAudit(c, "failed", archiveErrorCode(err), map[string]any{"archive_record_id": id, "reason_length": len([]rune(strings.TrimSpace(request.Reason)))})
+		setArchiveAudit(c, "failed", archiveErrorCode(err), map[string]any{"archive_record_id": id})
 		respondArchiveRecordError(c, err)
 		return
 	}
-	setArchiveAudit(c, "success", "", map[string]any{"archive_record_id": id, "reason_length": len([]rune(strings.TrimSpace(request.Reason)))})
+	setArchiveAudit(c, "success", "", map[string]any{"archive_record_id": id})
 	response.Success(c, reveal)
 }
 
@@ -242,8 +232,6 @@ func respondArchiveRecordError(c *gin.Context, err error) bool {
 		response.ErrorFrom(c, infraerrors.Conflict("invocation_archive_payload_expired", "调用归档载荷已过期"))
 	case errors.Is(err, ErrPayloadUnavailable):
 		response.ErrorFrom(c, infraerrors.Conflict("invocation_archive_payload_unavailable", "调用归档载荷不可用"))
-	case errors.Is(err, ErrInvalidRevealReason):
-		response.ErrorFrom(c, infraerrors.BadRequest("invocation_archive_reveal_reason_invalid", "查看理由需为 3-256 个字符"))
 	default:
 		response.ErrorFrom(c, err)
 	}
@@ -260,8 +248,6 @@ func archiveErrorCode(err error) string {
 		return "invocation_archive_payload_expired"
 	case errors.Is(err, ErrPayloadUnavailable):
 		return "invocation_archive_payload_unavailable"
-	case errors.Is(err, ErrInvalidRevealReason):
-		return "invocation_archive_reveal_reason_invalid"
 	default:
 		return "invocation_archive_request_failed"
 	}

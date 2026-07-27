@@ -20,9 +20,11 @@ const (
 	defaultMaxRequestBytes  = 1 << 20
 	defaultMaxResponseBytes = 4 << 20
 	minCaptureBytes         = 1 << 10
-	maxCaptureBytes         = 16 << 20
-	maxRetentionDays        = 3650
-	maxScopeRules           = 500
+	// Match the default gateway request ceiling while keeping each archive
+	// explicitly bounded so an unending stream cannot exhaust the process.
+	maxCaptureBytes  = 256 << 20
+	maxRetentionDays = 3650
+	maxScopeRules    = 500
 )
 
 type Mode string
@@ -142,14 +144,29 @@ type AccessLog struct {
 }
 
 type PayloadView struct {
-	Available     bool   `json:"available"`
-	Status        string `json:"status"`
-	ContentType   string `json:"content_type"`
-	Encoding      string `json:"encoding,omitempty"`
-	Data          string `json:"data,omitempty"`
-	TotalBytes    int64  `json:"total_bytes"`
-	CapturedBytes int64  `json:"captured_bytes"`
-	Truncated     bool   `json:"truncated"`
+	Available       bool               `json:"available"`
+	Status          string             `json:"status"`
+	ContentType     string             `json:"content_type"`
+	Encoding        string             `json:"encoding,omitempty"`
+	Data            string             `json:"data,omitempty"`
+	TotalBytes      int64              `json:"total_bytes"`
+	CapturedBytes   int64              `json:"captured_bytes"`
+	Truncated       bool               `json:"truncated"`
+	Frames          []PayloadFrameView `json:"frames,omitempty"`
+	FramesTruncated bool               `json:"frames_truncated,omitempty"`
+}
+
+// PayloadFrameView exposes a WebSocket frame after its parent archive record
+// has been decrypted. It is omitted for ordinary HTTP payloads.
+type PayloadFrameView struct {
+	Sequence      int       `json:"sequence"`
+	Kind          string    `json:"kind"`
+	OccurredAt    time.Time `json:"occurred_at"`
+	Encoding      string    `json:"encoding"`
+	Data          string    `json:"data"`
+	TotalBytes    int64     `json:"total_bytes"`
+	CapturedBytes int64     `json:"captured_bytes"`
+	Truncated     bool      `json:"truncated"`
 }
 
 type Reveal struct {
@@ -176,11 +193,10 @@ type RuntimeSnapshot struct {
 }
 
 var (
-	ErrRecordNotFound      = errors.New("invocation archive record not found")
-	ErrDirectViewDisabled  = errors.New("invocation archive direct view is disabled")
-	ErrPayloadUnavailable  = errors.New("invocation archive payload unavailable")
-	ErrPayloadExpired      = errors.New("invocation archive payload expired")
-	ErrInvalidRevealReason = errors.New("invocation archive reveal reason invalid")
+	ErrRecordNotFound     = errors.New("invocation archive record not found")
+	ErrDirectViewDisabled = errors.New("invocation archive direct view is disabled")
+	ErrPayloadUnavailable = errors.New("invocation archive payload unavailable")
+	ErrPayloadExpired     = errors.New("invocation archive payload expired")
 )
 
 func DefaultConfig() Config {
@@ -281,7 +297,7 @@ func validateConfig(cfg Config) error {
 		return infraerrors.BadRequest("invocation_archive_retention_invalid", "保留天数必须在 1-3650 天之间")
 	}
 	if !validCaptureBytes(cfg.MaxRequestBytes) || !validCaptureBytes(cfg.MaxResponseBytes) {
-		return infraerrors.BadRequest("invocation_archive_capture_limit_invalid", "归档载荷上限必须在 1 KiB 到 16 MiB 之间")
+		return infraerrors.BadRequest("invocation_archive_capture_limit_invalid", "归档载荷上限必须在 1 KiB 到 256 MiB 之间")
 	}
 	if len(cfg.Rules) > maxScopeRules {
 		return infraerrors.BadRequest("invocation_archive_rule_limit_exceeded", "归档范围规则不能超过 500 条")

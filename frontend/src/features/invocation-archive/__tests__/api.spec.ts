@@ -27,7 +27,7 @@ describe('Invocation Archive API', () => {
     await expect(invocationArchiveAPI.getConfig()).resolves.toMatchObject({ rules: [] })
   })
 
-  it('keeps metadata listing separate from the reason-bearing direct reveal endpoint', async () => {
+  it('keeps metadata listing separate from the step-up protected direct reveal endpoint', async () => {
     client.get.mockResolvedValue({ data: { items: [], page: 1, page_size: 20, total: 0 } })
     const filters = emptyInvocationArchiveFilters()
     filters.q = 'request-42'
@@ -38,10 +38,8 @@ describe('Invocation Archive API', () => {
     })
 
     client.post.mockResolvedValue({ data: { record_id: 42 } })
-    await invocationArchiveAPI.revealRecord(42, 'manual incident review')
-    expect(client.post).toHaveBeenCalledWith('/admin/invocation-archive/records/42/reveal', {
-      reason: 'manual incident review',
-    })
+    await invocationArchiveAPI.revealRecord(42)
+    expect(client.post).toHaveBeenCalledWith('/admin/invocation-archive/records/42/reveal')
   })
 
   it('uses the scoped selector and destructive record endpoints', async () => {

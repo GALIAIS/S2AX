@@ -1918,9 +1918,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					archiveSession.CaptureTurnRequest(turn, payload, originalModel)
 				}
 			},
-			OnClientMessage: func(turn int, payload []byte) {
+			OnClientFrame: func(turn int, kind string, payload []byte) {
 				if archiveSession != nil {
-					archiveSession.CaptureClientMessage(turn, payload)
+					archiveSession.CaptureClientFrame(turn, kind, payload)
 				}
 			},
 			AfterTurn: func(turn int, result *service.OpenAIForwardResult, turnErr error) {

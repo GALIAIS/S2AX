@@ -8,9 +8,24 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOpenAIWSIngressHooksObserveClientFramePreservesKind(t *testing.T) {
+	var gotTurn int
+	var gotKind string
+	var gotPayload []byte
+	hooks := &OpenAIWSIngressHooks{OnClientFrame: func(turn int, kind string, payload []byte) {
+		gotTurn, gotKind, gotPayload = turn, kind, append([]byte(nil), payload...)
+	}}
+	hooks.observeClientFrame(2, coderws.MessageBinary, []byte{0x00, 0xff})
+
+	require.Equal(t, 2, gotTurn)
+	require.Equal(t, "binary", gotKind)
+	require.Equal(t, []byte{0x00, 0xff}, gotPayload)
+}
 
 // TestIsOpenAIWSTokenEvent_TerminalEventsExcluded 覆盖 isOpenAIWSTokenEvent 的回归用例。
 // 重点验证终止事件（response.completed / response.done）不再被当作 token event，

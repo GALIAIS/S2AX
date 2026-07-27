@@ -1,17 +1,18 @@
 export default {
   invocationArchive: {
     title: 'Invocation Archive',
-    description: 'Keeps bounded encrypted copies of selected gateway calls for administrator review. It is off by default; plaintext requires step-up verification for every direct view.',
+    description: 'Keeps bounded encrypted copies of selected gateway calls for administrator review. Archiving is off by default; plaintext is available only to administrators after step-up verification.',
     tabs: { records: 'Records', config: 'Policy', runtime: 'Runtime' },
     modes: { off: 'Off', request_only: 'Request only', full: 'Request and response' },
     scopes: { user: 'User', group: 'Group', api_key: 'API Key' },
     outcomes: { completed: 'Completed', client_error: 'Client error', server_error: 'Server error', websocket_error: 'WebSocket error' },
+    accessOutcomes: { revealed: 'Viewed', direct_view_disabled: 'Policy disabled', expired: 'Expired', unavailable: 'Unavailable', decrypt_failed: 'Decryption failed' },
     capture: {
       captured: 'Encrypted capture', empty: 'Empty payload', not_read: 'Not read', omitted: 'Omitted by policy', encryption_failed: 'Encryption failed', truncated: 'Truncated',
     },
     records: {
       title: 'Archive records',
-      description: 'Only archive metadata is shown here. Viewing any request or response body requires a separate reason and step-up verification.',
+      description: 'Only archive metadata is shown here. Viewing a request or response body requires administrator step-up verification and retains access evidence.',
       search: 'Search', searchPlaceholder: 'User, API Key, group, model, or request ID', mode: 'Archive mode', outcome: 'Outcome', userId: 'User ID', groupId: 'Group ID', apiKeyId: 'API Key ID', from: 'From', to: 'To',
       time: 'Time', identity: 'Identity', route: 'Route / model', capture: 'Capture state', result: 'Result', request: 'Request', response: 'Response',
       empty: 'No matching archive records.', selectAll: 'Select all records on this page', selectRecord: 'Select archive record {id}', deleteSelected: 'Delete selected ({count})', deleteTitle: 'Permanently delete invocation archives?', deleteMessage: 'This permanently deletes {count} selected archive record(s). It cannot be undone; access-audit evidence remains retained.',
@@ -20,7 +21,7 @@ export default {
       title: 'Archive policy',
       description: 'Rule precedence is API Key, user, group, then default. An off rule explicitly excludes a subject from a broader policy.',
       version: 'Configuration v{version}', privacyNotice: 'Archiving occurs only when an enabled policy matches. Request headers, cookies, API Keys, and upstream credentials are never stored. Payloads are AES-GCM encrypted before reaching the database and automatically removed at the retention deadline.',
-      defaultMode: 'Default archive mode', retentionDays: 'Retention days', requestLimit: 'Request limit (MiB)', responseLimit: 'Response limit (MiB)', directView: 'Allow administrators to directly view encrypted payloads', directViewHint: 'When off, only metadata is available. When on, every plaintext view still requires step-up verification and writes an access log.',
+      defaultMode: 'Default archive mode', retentionDays: 'Retention days', requestLimit: 'Request limit (MiB)', responseLimit: 'Response limit (MiB)', directView: 'Allow administrators to directly view encrypted payloads', directViewHint: 'When off, only metadata is available. When on, administrators can view after step-up verification and every view retains access evidence.',
       unsaved: 'Unsaved changes', synced: 'Configuration synced',
     },
     rules: {
@@ -29,15 +30,30 @@ export default {
     runtime: {
       title: 'Archive runtime', description: 'Archive persistence runs after the gateway response. A saturated queue drops archive work and never blocks or affects the user call.', status: 'Service status', running: 'Running', stopped: 'Stopped', version: 'Config v{version}', queue: 'Async queue', queueHint: 'Current depth / capacity', persisted: 'Persisted', acceptedDropped: 'Accepted {accepted} · dropped {dropped}', purge: 'Expired records purged', failures: 'Persistence failures {count}', configError: 'Configuration load error', persistError: 'Latest persistence error',
     },
+    refresh: { waiting: 'Waiting for first sync', refreshing: 'Refreshing…', updatedAt: 'Updated {time} · auto-refreshes every 15 seconds' },
     detail: {
       title: 'Archive record #{id}', createdAt: 'Created', expiresAt: 'Expires', outcome: 'Outcome', identity: 'Identity', group: 'Group', route: 'Route', model: 'Model', requestId: 'Request ID', client: 'Client',
-      payloads: 'Encrypted payloads', payloadsHint: 'Bodies are not loaded with metadata. Plaintext exists only in this dialog memory and is cleared immediately when it closes.', directViewDisabled: 'Direct viewing is disabled by the current policy. Enable and save it in Archive policy first; enabling it also requires step-up verification.', revealReason: 'Reason for viewing', revealReasonPlaceholder: 'Enter at least 3 characters explaining this review', reveal: 'Verify and reveal payloads', revealHint: 'This view records the administrator, reason, time, and client information. Binary payloads are displayed as raw Base64.',
+      payloads: 'Encrypted payloads', payloadsHint: 'Bodies are not loaded with metadata. Plaintext exists only in this dialog memory and is cleared immediately when it closes; view and charset choices never modify the archived source.', directViewDisabled: 'Direct viewing is disabled by the current policy. Enable and save it in Archive policy first; enabling it also requires step-up verification.', reveal: 'Verify and reveal payloads', revealHint: 'This view records the administrator, time, outcome, and client information. Switch among structured, formatted, and raw payload views.',
+      viewMode: 'View mode', structured: 'Structured', formatted: 'Formatted', repaired: 'Repair preview', raw: 'Raw', charset: 'Text encoding', copyCurrent: 'Copy current view', copyRaw: 'Copy raw payload',
+      formats: { json: 'JSON', ndjson: 'JSON Lines', sse: 'SSE stream', form: 'Form fields', text: 'Text', base64: 'Base64' },
+      encodings: { utf8: 'UTF-8', base64: 'Base64 → {charset}' },
+      charsets: { auto: 'Auto (declared charset / UTF-8)', utf_8: 'UTF-8', gb18030: 'GB18030 (Simplified Chinese)', big5: 'Big5 (Traditional Chinese)', shift_jis: 'Shift_JIS (Japanese)', windows_1252: 'Windows-1252', utf_16le: 'UTF-16 LE', utf_16be: 'UTF-16 BE' },
+      warnings: {
+        replacement_character: 'The archived text already contains replacement characters (�). Its source bytes were lost before archiving and cannot be restored from this record; check the upstream tool or terminal encoding.',
+        invalid_base64: 'The archive is marked as Base64, but its body cannot be decoded. The raw text remains available for audit.',
+        charset_failed: 'The selected or declared charset could not decode this payload losslessly. Try another charset or retain the raw Base64 for investigation.',
+        binary: 'Binary control bytes were detected, so this payload is not rendered as text. View or copy the raw Base64 instead.',
+        format_limit: 'This body exceeds 2 MiB, so structured and formatted rendering were skipped to keep the page responsive; the source was not truncated or changed.',
+        transcript_limit: 'The structured view shows only the first 80 entries to keep the page responsive. Switch to formatted or raw for the complete archive.',
+        frame_metadata_limit: 'WebSocket frame-boundary metadata reached its safety limit. The captured raw payload remains intact and can be reviewed in Raw view.',
+        mojibake_candidate: 'A possible single-byte transcoding mismatch was detected. Repair preview changes local display only and never modifies the archived source.',
+      },
       accesses: 'Direct-view access log', accessTime: 'Time', admin: 'Administrator', accessOutcome: 'Outcome', reason: 'Reason', noAccesses: 'There are no direct-view access entries yet.',
     },
     messages: { saved: 'Invocation archive policy saved.', deleted: 'Deleted {count} archive record(s).' },
     errors: {
       loadConfig: 'Unable to load the invocation archive policy.', loadRuntime: 'Unable to load invocation archive runtime.', loadRecords: 'Unable to load archive records.', loadSubjects: 'Unable to search rule subjects.', loadDetail: 'Unable to load archive record details.', saveConfig: 'Unable to save the invocation archive policy.', reveal: 'Unable to reveal the archive payload.', delete: 'Unable to delete archive records.',
-      invocation_archive_rule_duplicate: 'This subject already has a rule for the selected scope.', invocation_archive_config_conflict: 'Another administrator changed the configuration. Refresh and try again.', invocation_archive_rule_subject_not_found: 'The selected subject no longer exists or has been deleted.', invocation_archive_direct_view_disabled: 'An administrator has not enabled direct invocation archive viewing.', invocation_archive_payload_expired: 'The archive payload has expired.', invocation_archive_payload_unavailable: 'The archive payload is unavailable.', invocation_archive_reveal_reason_invalid: 'The reveal reason must be 3–256 characters.',
+      invocation_archive_rule_duplicate: 'This subject already has a rule for the selected scope.', invocation_archive_config_conflict: 'Another administrator changed the configuration. Refresh and try again.', invocation_archive_rule_subject_not_found: 'The selected subject no longer exists or has been deleted.', invocation_archive_direct_view_disabled: 'An administrator has not enabled direct invocation archive viewing.', invocation_archive_payload_expired: 'The archive payload has expired.', invocation_archive_payload_unavailable: 'The archive payload is unavailable.',
     },
   },
 }

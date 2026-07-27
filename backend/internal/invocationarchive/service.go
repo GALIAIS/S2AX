@@ -28,11 +28,25 @@ const (
 )
 
 type capturedPayload struct {
-	bytes       []byte
-	contentType string
-	total       int64
-	truncated   bool
-	status      string
+	bytes           []byte
+	contentType     string
+	total           int64
+	truncated       bool
+	status          string
+	frames          []capturedFrame
+	framesTruncated bool
+}
+
+// capturedFrame describes one client-visible WebSocket frame. The body bytes
+// remain stored once in capturedPayload; Offset and CapturedBytes preserve the
+// exact frame boundaries without duplicating an often-large stream.
+type capturedFrame struct {
+	kind          string
+	occurredAt    time.Time
+	offset        int64
+	totalBytes    int64
+	capturedBytes int64
+	truncated     bool
 }
 
 type archiveCandidate struct {

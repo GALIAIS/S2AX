@@ -30,24 +30,32 @@ type boundedCapture struct {
 func newBoundedCapture(limit int) *boundedCapture { return &boundedCapture{limit: limit} }
 
 func (c *boundedCapture) Write(payload []byte) (int, error) {
+	_, _, _ = c.capture(payload)
+	return len(payload), nil
+}
+
+// capture appends the retained prefix and reports where it was placed. It lets
+// WebSocket archives preserve frame boundaries while storing body bytes once.
+func (c *boundedCapture) capture(payload []byte) (offset int64, captured int, truncated bool) {
 	if c == nil || len(payload) == 0 {
-		return len(payload), nil
+		return 0, 0, false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	offset = int64(c.buffer.Len())
 	c.total += int64(len(payload))
 	remaining := c.limit - c.buffer.Len()
 	if remaining <= 0 {
 		c.truncated = true
-		return len(payload), nil
+		return offset, 0, true
 	}
 	if remaining < len(payload) {
 		_, _ = c.buffer.Write(payload[:remaining])
 		c.truncated = true
-		return len(payload), nil
+		return offset, remaining, true
 	}
 	_, _ = c.buffer.Write(payload)
-	return len(payload), nil
+	return offset, len(payload), false
 }
 
 func (c *boundedCapture) snapshot() ([]byte, int64, bool) {
@@ -119,18 +127,32 @@ func (w *captureResponseWriter) ReadFrom(reader io.Reader) (int64, error) {
 }
 
 type payloadEnvelope struct {
-	Encoding string `json:"encoding"`
-	Data     string `json:"data"`
+	Encoding        string                 `json:"encoding"`
+	Data            string                 `json:"data"`
+	Frames          []payloadFrameEnvelope `json:"frames,omitempty"`
+	FramesTruncated bool                   `json:"frames_truncated,omitempty"`
+}
+
+type payloadFrameEnvelope struct {
+	Kind          string    `json:"kind"`
+	OccurredAt    time.Time `json:"occurred_at"`
+	Offset        int64     `json:"offset"`
+	TotalBytes    int64     `json:"total_bytes"`
+	CapturedBytes int64     `json:"captured_bytes"`
+	Truncated     bool      `json:"truncated"`
 }
 
 func protectPayload(encryptor service.SecretEncryptor, payload []byte) (string, string, error) {
 	if encryptor == nil {
 		return "", "", ErrPayloadUnavailable
 	}
-	envelope := payloadEnvelope{Encoding: "base64", Data: base64.StdEncoding.EncodeToString(payload)}
-	if utf8.Valid(payload) {
-		envelope.Encoding = "utf8"
-		envelope.Data = string(payload)
+	envelope := newPayloadEnvelope(payload, nil, false)
+	return protectPayloadEnvelope(encryptor, envelope)
+}
+
+func protectPayloadEnvelope(encryptor service.SecretEncryptor, envelope payloadEnvelope) (string, string, error) {
+	if encryptor == nil {
+		return "", "", ErrPayloadUnavailable
 	}
 	raw, err := json.Marshal(envelope)
 	if err != nil {
@@ -144,6 +166,24 @@ func protectPayload(encryptor service.SecretEncryptor, payload []byte) (string, 
 		return "", "", err
 	}
 	return ciphertext, envelope.Encoding, nil
+}
+
+func newPayloadEnvelope(payload []byte, frames []capturedFrame, framesTruncated bool) payloadEnvelope {
+	envelope := payloadEnvelope{Encoding: "base64", Data: base64.StdEncoding.EncodeToString(payload), FramesTruncated: framesTruncated}
+	if utf8.Valid(payload) {
+		envelope.Encoding = "utf8"
+		envelope.Data = string(payload)
+	}
+	if len(frames) > 0 {
+		envelope.Frames = make([]payloadFrameEnvelope, 0, len(frames))
+		for _, frame := range frames {
+			envelope.Frames = append(envelope.Frames, payloadFrameEnvelope{
+				Kind: normalizeWebSocketFrameKind(frame.kind), OccurredAt: frame.occurredAt,
+				Offset: frame.offset, TotalBytes: frame.totalBytes, CapturedBytes: frame.capturedBytes, Truncated: frame.truncated,
+			})
+		}
+	}
+	return envelope
 }
 
 func revealPayload(encryptor service.SecretEncryptor, ciphertext, contentType, status string, total, captured int64, truncated bool) (PayloadView, error) {
@@ -164,18 +204,65 @@ func revealPayload(encryptor service.SecretEncryptor, ciphertext, contentType, s
 	if err := json.Unmarshal([]byte(plain), &envelope); err != nil {
 		return view, err
 	}
-	if envelope.Encoding != "utf8" && envelope.Encoding != "base64" {
-		return view, ErrPayloadUnavailable
+	payload, err := decodePayloadEnvelope(envelope)
+	if err != nil {
+		return view, err
 	}
-	if envelope.Encoding == "base64" {
-		if _, err := base64.StdEncoding.DecodeString(envelope.Data); err != nil {
-			return view, err
-		}
+	frames, err := revealPayloadFrames(payload, envelope.Frames)
+	if err != nil {
+		return view, err
 	}
 	view.Available = true
 	view.Encoding = envelope.Encoding
 	view.Data = envelope.Data
+	view.Frames = frames
+	view.FramesTruncated = envelope.FramesTruncated
 	return view, nil
+}
+
+func decodePayloadEnvelope(envelope payloadEnvelope) ([]byte, error) {
+	switch envelope.Encoding {
+	case "utf8":
+		if !utf8.ValidString(envelope.Data) {
+			return nil, ErrPayloadUnavailable
+		}
+		return []byte(envelope.Data), nil
+	case "base64":
+		payload, err := base64.StdEncoding.DecodeString(envelope.Data)
+		if err != nil {
+			return nil, err
+		}
+		return payload, nil
+	default:
+		return nil, ErrPayloadUnavailable
+	}
+}
+
+func revealPayloadFrames(payload []byte, frames []payloadFrameEnvelope) ([]PayloadFrameView, error) {
+	if len(frames) == 0 {
+		return nil, nil
+	}
+	if len(frames) > maxWebSocketFrameMetadata {
+		return nil, ErrPayloadUnavailable
+	}
+	result := make([]PayloadFrameView, 0, len(frames))
+	for index, frame := range frames {
+		if frame.Offset < 0 || frame.CapturedBytes < 0 || frame.TotalBytes < frame.CapturedBytes || frame.Offset > int64(len(payload)) {
+			return nil, ErrPayloadUnavailable
+		}
+		end := frame.Offset + frame.CapturedBytes
+		if end < frame.Offset || end > int64(len(payload)) {
+			return nil, ErrPayloadUnavailable
+		}
+		framePayload := payload[frame.Offset:end]
+		frameEnvelope := newPayloadEnvelope(framePayload, nil, false)
+		result = append(result, PayloadFrameView{
+			Sequence: index + 1, Kind: normalizeWebSocketFrameKind(frame.Kind), OccurredAt: frame.OccurredAt,
+			Encoding: frameEnvelope.Encoding, Data: frameEnvelope.Data,
+			TotalBytes: frame.TotalBytes, CapturedBytes: frame.CapturedBytes, Truncated: frame.Truncated,
+		})
+	}
+	return result, nil
 }
 
 func (s *Service) GatewayMiddleware() gin.HandlerFunc {
@@ -274,8 +361,12 @@ func mediaType(value string) string {
 	if value == "" {
 		return ""
 	}
-	parsed, _, err := mime.ParseMediaType(value)
+	parsed, parameters, err := mime.ParseMediaType(value)
 	if err == nil {
+		charset := strings.TrimSpace(parameters["charset"])
+		if charset != "" {
+			return trimText(strings.ToLower(parsed)+"; charset="+strings.ToLower(charset), 255)
+		}
 		return trimText(strings.ToLower(parsed), 255)
 	}
 	return trimText(strings.ToLower(value), 255)
@@ -321,7 +412,54 @@ func trimText(value string, limit int) string {
 
 type websocketPending struct {
 	candidate       archiveCandidate
-	responseCapture *boundedCapture
+	responseCapture *websocketFrameCapture
+}
+
+const maxWebSocketFrameMetadata = 4096
+
+type websocketFrameCapture struct {
+	mu              sync.Mutex
+	body            *boundedCapture
+	frames          []capturedFrame
+	framesTruncated bool
+}
+
+func newWebSocketFrameCapture(limit int) *websocketFrameCapture {
+	return &websocketFrameCapture{body: newBoundedCapture(limit)}
+}
+
+func (c *websocketFrameCapture) Write(kind string, payload []byte) {
+	if c == nil || len(payload) == 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	offset, captured, truncated := c.body.capture(payload)
+	if len(c.frames) >= maxWebSocketFrameMetadata {
+		c.framesTruncated = true
+		return
+	}
+	c.frames = append(c.frames, capturedFrame{
+		kind: normalizeWebSocketFrameKind(kind), occurredAt: time.Now().UTC(), offset: offset,
+		totalBytes: int64(len(payload)), capturedBytes: int64(captured), truncated: truncated,
+	})
+}
+
+func (c *websocketFrameCapture) snapshot() ([]byte, int64, bool, []capturedFrame, bool) {
+	if c == nil {
+		return nil, 0, false, nil, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	payload, total, truncated := c.body.snapshot()
+	return payload, total, truncated, append([]capturedFrame(nil), c.frames...), c.framesTruncated
+}
+
+func normalizeWebSocketFrameKind(kind string) string {
+	if strings.EqualFold(strings.TrimSpace(kind), "binary") {
+		return "binary"
+	}
+	return "text"
 }
 
 // WebSocketSession keeps a bounded client-visible transcript per Responses WS
@@ -372,17 +510,23 @@ func (s *WebSocketSession) CaptureTurnRequest(turn int, payload []byte, model st
 	if s.mode == ModeRequestOnly {
 		candidate.response = capturedPayload{status: "omitted"}
 	}
-	s.turns[turn] = &websocketPending{candidate: candidate, responseCapture: newBoundedCapture(s.config.MaxResponseBytes)}
+	s.turns[turn] = &websocketPending{candidate: candidate, responseCapture: newWebSocketFrameCapture(s.config.MaxResponseBytes)}
 }
 
 func (s *WebSocketSession) CaptureClientMessage(turn int, payload []byte) {
+	s.CaptureClientFrame(turn, "text", payload)
+}
+
+// CaptureClientFrame records every client-visible WebSocket output frame after
+// the proxy has confirmed it was written to the caller.
+func (s *WebSocketSession) CaptureClientFrame(turn int, kind string, payload []byte) {
 	if s == nil || turn < 1 || len(payload) == 0 {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if pending := s.turns[turn]; pending != nil && s.mode == ModeFull {
-		_, _ = pending.responseCapture.Write(payload)
+		pending.responseCapture.Write(kind, payload)
 	}
 }
 
@@ -409,9 +553,9 @@ func (s *WebSocketSession) FinishTurn(turn int, result *service.OpenAIForwardRes
 		candidate.outcome = "completed"
 	}
 	if s.mode == ModeFull {
-		payload, total, truncated := pending.responseCapture.snapshot()
+		payload, total, truncated, frames, framesTruncated := pending.responseCapture.snapshot()
 		candidate.response = capturedPayload{
-			bytes: payload, contentType: "application/json", total: total, truncated: truncated,
+			bytes: payload, contentType: "application/json", total: total, truncated: truncated, frames: frames, framesTruncated: framesTruncated,
 			status: payloadStatus(payload, total, truncated),
 		}
 	}

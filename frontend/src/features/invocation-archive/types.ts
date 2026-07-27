@@ -100,7 +100,6 @@ export interface InvocationArchiveAccessLog {
   record_id: number
   admin_id?: number
   admin_name: string
-  reason: string
   outcome: string
   client_ip: string
   user_agent: string
@@ -113,6 +112,19 @@ export interface InvocationArchivePayloadView {
   content_type: string
   encoding?: 'utf8' | 'base64' | string
   data?: string
+  total_bytes: number
+  captured_bytes: number
+  truncated: boolean
+  frames?: InvocationArchivePayloadFrame[]
+  frames_truncated?: boolean
+}
+
+export interface InvocationArchivePayloadFrame {
+  sequence: number
+  kind: 'text' | 'binary' | string
+  occurred_at: string
+  encoding: 'utf8' | 'base64' | string
+  data: string
   total_bytes: number
   captured_bytes: number
   truncated: boolean

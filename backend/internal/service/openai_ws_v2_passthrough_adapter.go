@@ -1148,8 +1148,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 			},
 			AfterClientWrite: func(msgType coderws.MessageType, payload []byte, writeErr error) {
-				if writeErr == nil && msgType == coderws.MessageText && hooks != nil && hooks.OnClientMessage != nil {
-					hooks.OnClientMessage(int(archiveTurn.Load()), payload)
+				if writeErr == nil {
+					hooks.observeClientFrame(int(archiveTurn.Load()), msgType, payload)
 				}
 				if msgType == coderws.MessageText && openAIWSPassthroughIsTerminalOutput(payload) {
 					turnLifecycle.finishTerminalWrite(writeErr == nil, clientFrameConn.markTurnCompleted)

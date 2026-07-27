@@ -145,10 +145,9 @@ func TestInvocationArchiveRealPostgresHTTPFlow(t *testing.T) {
 		userID   int64
 		apiKeyID int64
 		secret   string
-		reason   string
 	}{
-		{alphaRecord, adminID, apiKeyID, "archive-alpha-secret", "integration alpha verification"},
-		{betaRecord, secondUserID, secondAPIKeyID, "archive-beta-secret", "integration beta verification"},
+		{alphaRecord, adminID, apiKeyID, "archive-alpha-secret"},
+		{betaRecord, secondUserID, secondAPIKeyID, "archive-beta-secret"},
 	} {
 		require.Equal(t, ModeFull, expected.record.Mode)
 		require.Equal(t, "captured", expected.record.RequestStatus)
@@ -158,7 +157,7 @@ func TestInvocationArchiveRealPostgresHTTPFlow(t *testing.T) {
 		require.NotNil(t, expected.record.APIKeyID)
 		require.Equal(t, expected.userID, *expected.record.UserID)
 		require.Equal(t, expected.apiKeyID, *expected.record.APIKeyID)
-		revealed, revealErr := archive.RevealRecord(ctx, expected.record.ID, adminID, expected.reason, "127.0.0.1", "archive-integration-test")
+		revealed, revealErr := archive.RevealRecord(ctx, expected.record.ID, adminID, "127.0.0.1", "archive-integration-test")
 		require.NoError(t, revealErr)
 		require.True(t, revealed.Request.Available)
 		require.True(t, revealed.Response.Available)
@@ -175,20 +174,17 @@ func TestInvocationArchiveRealPostgresHTTPFlow(t *testing.T) {
 	require.NotContains(t, requestCiphertext, "archive-alpha-secret")
 	require.NotContains(t, responseCiphertext, "archive-alpha-secret")
 
-	_, err = archive.RevealRecord(ctx, alphaRecord.ID, adminID, "", "127.0.0.1", "archive-integration-test")
-	require.ErrorIs(t, err, ErrInvalidRevealReason)
-
 	accesses, err := archive.ListAccessLogs(ctx, alphaRecord.ID, 10)
 	require.NoError(t, err)
 	require.Len(t, accesses, 1)
-	require.Equal(t, "integration alpha verification", accesses[0].Reason)
+	require.Empty(t, accesses[0].Reason)
 	require.Equal(t, "revealed", accesses[0].Outcome)
 
 	_, err = db.ExecContext(ctx, `UPDATE invocation_archive_config_versions SET config_digest='0' WHERE config_version=$1`, fullConfig.ConfigVersion)
 	require.Error(t, err, "configuration history must remain append-only")
 
 	require.EqualValues(t, 1, mustDeleteArchiveRecord(t, ctx, archive, alphaRecord.ID))
-	assertArchivedAccessEndpointSurvivesPayloadDeletion(t, ctx, archive, alphaRecord.ID, "integration alpha verification")
+	assertArchivedAccessEndpointSurvivesPayloadDeletion(t, ctx, archive, alphaRecord.ID)
 
 	requestOnlyConfig, err := archive.SaveConfig(ctx, UpdateConfigRequest{
 		ExpectedConfigVersion: fullConfig.ConfigVersion,
@@ -208,7 +204,7 @@ func TestInvocationArchiveRealPostgresHTTPFlow(t *testing.T) {
 	require.Equal(t, ModeRequestOnly, requestOnlyRecord.Mode)
 	require.Equal(t, "captured", requestOnlyRecord.RequestStatus)
 	require.Equal(t, "omitted", requestOnlyRecord.ResponseStatus)
-	revealed, err := archive.RevealRecord(ctx, requestOnlyRecord.ID, adminID, "verify request only", "127.0.0.1", "archive-integration-test")
+	revealed, err := archive.RevealRecord(ctx, requestOnlyRecord.ID, adminID, "127.0.0.1", "archive-integration-test")
 	require.NoError(t, err)
 	require.True(t, revealed.Request.Available)
 	require.False(t, revealed.Response.Available)
@@ -314,7 +310,7 @@ func mustDeleteArchiveRecord(t *testing.T, ctx context.Context, archive *Service
 	return deleted
 }
 
-func assertArchivedAccessEndpointSurvivesPayloadDeletion(t *testing.T, ctx context.Context, archive *Service, recordID int64, reason string) {
+func assertArchivedAccessEndpointSurvivesPayloadDeletion(t *testing.T, ctx context.Context, archive *Service, recordID int64) {
 	t.Helper()
 	router := gin.New()
 	router.GET("/records/:id/accesses", NewAdminHandler(archive).ListAccessLogs)
@@ -328,7 +324,7 @@ func assertArchivedAccessEndpointSurvivesPayloadDeletion(t *testing.T, ctx conte
 	body, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, response.StatusCode)
-	require.Contains(t, string(body), reason)
+	require.Contains(t, string(body), "revealed")
 }
 
 func ptr[T any](value T) *T { return &value }

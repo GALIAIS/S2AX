@@ -223,10 +223,30 @@ type OpenAIWSIngressHooks struct {
 	// OnClientMessage observes a client-visible downstream event after it was
 	// successfully written. It is observer-only and must never block forwarding.
 	OnClientMessage func(turn int, payload []byte)
+	// OnClientFrame is the frame-aware form of OnClientMessage. New observers
+	// should use it so binary frames and message boundaries are retained.
+	OnClientFrame func(turn int, kind string, payload []byte)
 	// MapRequestModel resolves the current turn's client model to the model
 	// that must be written into the upstream response.create frame.
 	MapRequestModel func(turn int, originalModel string) (string, error)
 	AfterTurn       func(turn int, result *OpenAIForwardResult, turnErr error)
+}
+
+func (h *OpenAIWSIngressHooks) observeClientFrame(turn int, messageType coderws.MessageType, payload []byte) {
+	if h == nil || turn < 1 || len(payload) == 0 {
+		return
+	}
+	kind := "binary"
+	if messageType == coderws.MessageText {
+		kind = "text"
+	}
+	if h.OnClientFrame != nil {
+		h.OnClientFrame(turn, kind, payload)
+		return
+	}
+	if h.OnClientMessage != nil {
+		h.OnClientMessage(turn, payload)
+	}
 }
 
 func (s *OpenAIGatewayService) getOpenAIWSConnPool() *openAIWSConnPool {

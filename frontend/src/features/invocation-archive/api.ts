@@ -80,8 +80,8 @@ export async function listAccessLogs(id: number): Promise<InvocationArchiveAcces
   return Array.isArray(data.items) ? data.items : []
 }
 
-export async function revealRecord(id: number, reason: string): Promise<InvocationArchiveReveal> {
-  const { data } = await apiClient.post<InvocationArchiveReveal>(`${basePath}/records/${id}/reveal`, { reason })
+export async function revealRecord(id: number): Promise<InvocationArchiveReveal> {
+  const { data } = await apiClient.post<InvocationArchiveReveal>(`${basePath}/records/${id}/reveal`)
   return data
 }
 
