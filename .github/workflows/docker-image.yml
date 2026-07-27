@@ -79,6 +79,9 @@ jobs:
       # it is pruned explicitly.
       - name: Prune superseded untagged image versions
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        # The image is already published when this best-effort GHCR cleanup
+        # reaches the Packages API, which occasionally returns a transient 5xx.
+        continue-on-error: true
         uses: actions/delete-package-versions@v5
         with:
           package-name: s2ax
