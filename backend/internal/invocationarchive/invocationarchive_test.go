@@ -2,6 +2,7 @@ package invocationarchive
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -50,6 +51,16 @@ func TestConfigRejectsOversizedRuleSet(t *testing.T) {
 	}
 	if err := validateConfig(config); err == nil {
 		t.Fatal("oversized rule set must be rejected")
+	}
+}
+
+func TestConfigPublicKeepsEmptyRulesAsArray(t *testing.T) {
+	raw, err := json.Marshal(DefaultConfig().Public())
+	if err != nil {
+		t.Fatalf("marshal public config: %v", err)
+	}
+	if !strings.Contains(string(raw), `"rules":[]`) {
+		t.Fatalf("empty rules must encode as an array, got %s", raw)
 	}
 }
 

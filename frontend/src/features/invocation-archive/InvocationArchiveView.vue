@@ -7,9 +7,12 @@
           <h1 class="mt-1 text-2xl font-semibold tracking-tight text-gray-950 dark:text-white">{{ t('admin.invocationArchive.title') }}</h1>
           <p class="mt-2 max-w-4xl text-sm text-gray-500 dark:text-dark-300">{{ t('admin.invocationArchive.description') }}</p>
         </div>
-        <button type="button" class="btn btn-secondary" :disabled="loading.runtime" @click="loadRuntime">
-          {{ loading.runtime ? t('common.refreshing') : t('common.refresh') }}
-        </button>
+        <div class="flex gap-2">
+          <button type="button" class="btn btn-secondary" :disabled="loading.config" @click="openConfig">{{ t('common.settings') }}</button>
+          <button type="button" class="btn btn-secondary" :disabled="loading.runtime" @click="loadRuntime">
+            {{ loading.runtime ? t('common.refreshing') : t('common.refresh') }}
+          </button>
+        </div>
       </header>
 
       <div v-if="errors.config && !draft" role="alert" class="mb-6 rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
@@ -525,6 +528,10 @@ async function loadRecords() {
 }
 async function loadInitial() {
   await Promise.allSettled([loadConfig(), loadRuntime(), loadRecords()])
+}
+function openConfig() {
+  activeTab.value = 'config'
+  if (!draft.value) void loadConfig()
 }
 function applyFilters() {
   appliedFilters.value = { ...filters.value }

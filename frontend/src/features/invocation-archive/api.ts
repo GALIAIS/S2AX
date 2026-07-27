@@ -14,14 +14,18 @@ import type {
 
 const basePath = '/admin/invocation-archive'
 
+function normalizeConfig(data: InvocationArchiveConfig): InvocationArchiveConfig {
+  return { ...data, rules: Array.isArray(data.rules) ? data.rules : [] }
+}
+
 export async function getConfig(): Promise<InvocationArchiveConfig> {
   const { data } = await apiClient.get<InvocationArchiveConfig>(`${basePath}/config`)
-  return data
+  return normalizeConfig(data)
 }
 
 export async function updateConfig(payload: InvocationArchiveUpdateRequest): Promise<InvocationArchiveConfig> {
   const { data } = await apiClient.put<InvocationArchiveConfig>(`${basePath}/config`, payload)
-  return data
+  return normalizeConfig(data)
 }
 
 export async function getRuntime(): Promise<InvocationArchiveRuntime> {
@@ -37,7 +41,7 @@ export async function listSubjects(
   const { data } = await apiClient.get<{ items: InvocationArchiveSubject[] }>(`${basePath}/subjects`, {
     params: { scope, q: query, limit },
   })
-  return data.items
+  return Array.isArray(data.items) ? data.items : []
 }
 
 function toRFC3339(value: string): string | undefined {
@@ -63,7 +67,7 @@ export async function listRecords(
   if (from) params.from = from
   if (to) params.to = to
   const { data } = await apiClient.get<InvocationArchiveRecordPage>(`${basePath}/records`, { params })
-  return data
+  return { ...data, items: Array.isArray(data.items) ? data.items : [] }
 }
 
 export async function getRecord(id: number): Promise<InvocationArchiveRecord> {
@@ -73,7 +77,7 @@ export async function getRecord(id: number): Promise<InvocationArchiveRecord> {
 
 export async function listAccessLogs(id: number): Promise<InvocationArchiveAccessLog[]> {
   const { data } = await apiClient.get<{ items: InvocationArchiveAccessLog[] }>(`${basePath}/records/${id}/accesses`)
-  return data.items
+  return Array.isArray(data.items) ? data.items : []
 }
 
 export async function revealRecord(id: number, reason: string): Promise<InvocationArchiveReveal> {

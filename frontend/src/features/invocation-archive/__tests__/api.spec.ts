@@ -9,6 +9,24 @@ import invocationArchiveAPI from '../api'
 describe('Invocation Archive API', () => {
   beforeEach(() => Object.values(client).forEach((mock) => mock.mockReset()))
 
+  it('normalizes legacy null collection fields before the archive view consumes them', async () => {
+    client.get.mockResolvedValue({
+      data: {
+        config_version: 1,
+        default_mode: 'off',
+        retention_days: 7,
+        max_request_bytes: 1048576,
+        max_response_bytes: 4194304,
+        direct_view_enabled: false,
+        rules: null,
+        updated_at: '',
+        updated_by: 0,
+      },
+    })
+
+    await expect(invocationArchiveAPI.getConfig()).resolves.toMatchObject({ rules: [] })
+  })
+
   it('keeps metadata listing separate from the reason-bearing direct reveal endpoint', async () => {
     client.get.mockResolvedValue({ data: { items: [], page: 1, page_size: 20, total: 0 } })
     const filters = emptyInvocationArchiveFilters()

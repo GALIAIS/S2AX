@@ -323,7 +323,7 @@ func configFromUpdate(current Config, req UpdateConfigRequest, actorID int64, no
 }
 
 func cloneConfig(cfg Config) Config {
-	cfg.Rules = append([]ScopeRule(nil), cfg.Rules...)
+	cfg.Rules = append([]ScopeRule{}, cfg.Rules...)
 	return cfg
 }
 
