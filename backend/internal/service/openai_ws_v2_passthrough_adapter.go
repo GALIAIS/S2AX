@@ -959,6 +959,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		)
 	}
 	upstreamFirstMessageSent = true
+	var archiveTurn atomic.Int64
+	archiveTurn.Store(1)
+	if hooks != nil && hooks.OnTurnRequest != nil {
+		hooks.OnTurnRequest(1, firstClientMessage, openAIWSPassthroughRequestModelForFrame(firstClientMessage))
+	}
 
 	readNextClientFrame := func(readCtx context.Context, conn openaiwsv2.FrameConn) (coderws.MessageType, []byte, error) {
 		for {
@@ -967,6 +972,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				return msgType, payload, readErr
 			}
 			if msgType == coderws.MessageText && strings.TrimSpace(gjson.GetBytes(payload, "type").String()) == "response.create" {
+				turn := int(completedTurns.Load()) + 1
+				archiveTurn.Store(int64(turn))
+				if hooks != nil && hooks.OnTurnRequest != nil {
+					hooks.OnTurnRequest(turn, payload, openAIWSPassthroughRequestModelForFrame(payload))
+				}
 				return msgType, payload, nil
 			}
 			if writeErr := upstreamFrameConn.WriteFrame(readCtx, msgType, payload); writeErr != nil {
@@ -1040,6 +1050,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 			},
 			AfterClientWrite: func(msgType coderws.MessageType, payload []byte, writeErr error) {
+				if writeErr == nil && msgType == coderws.MessageText && hooks != nil && hooks.OnClientMessage != nil {
+					hooks.OnClientMessage(int(archiveTurn.Load()), payload)
+				}
 				if msgType == coderws.MessageText && openAIWSPassthroughIsTerminalOutput(payload) {
 					turnLifecycle.finishTerminalWrite(writeErr == nil, clientFrameConn.markTurnCompleted)
 				}

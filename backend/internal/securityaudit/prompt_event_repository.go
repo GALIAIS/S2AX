@@ -103,7 +103,7 @@ func (r *PostgreSQLRepository) ListEvents(ctx context.Context, filter EventFilte
 }
 
 func (r *PostgreSQLRepository) GetEvent(ctx context.Context, id int64) (*Event, error) {
-	event, err := scanEvent(r.db.QueryRowContext(ctx, `SELECT `+eventDetailColumns("e")+` FROM prompt_audit_events e WHERE e.id=$1`, id), true)
+	event, err := scanEvent(r.db.QueryRowContext(ctx, `SELECT `+eventColumns("e")+` FROM prompt_audit_events e WHERE e.id=$1`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrEventNotFound
 	}
@@ -316,19 +316,17 @@ func eventColumns(alias string) string {
 		%[1]s.provider,%[1]s.endpoint,%[1]s.protocol,%[1]s.model,%[1]s.prompt_hash,%[1]s.redacted_preview,
 		%[1]s.stage,%[1]s.decision,%[1]s.risk_level,%[1]s.action,%[1]s.categories,%[1]s.matched_scanners,
 		%[1]s.scanner_scores,%[1]s.scanner_evidence,%[1]s.scanner_backend,%[1]s.scanner_version,
-		%[1]s.guard_endpoint_id,%[1]s.policy_id,%[1]s.policy_version,%[1]s.config_version,
-		%[1]s.chunk_total,%[1]s.latency_ms,%[1]s.created_at`, alias)
+		%[1]s.guard_endpoint_id,%[1]s.detector_adapter,%[1]s.provider_request_id,%[1]s.finish_reason,
+		%[1]s.model_digest,%[1]s.policy_id,%[1]s.policy_version,%[1]s.config_version,
+		%[1]s.chunk_total,%[1]s.latency_ms,%[1]s.evidence_status,%[1]s.evidence_expires_at,
+		(%[1]s.evidence_ciphertext <> ''),%[1]s.evaluation_status,%[1]s.failure_mode,
+		%[1]s.failure_reason,%[1]s.created_at`, alias)
 }
 
-// eventDetailColumns adds the full prompt, which can be large, so it is only
-// loaded for single-event detail reads and never for list pages.
-func eventDetailColumns(alias string) string {
-	return eventColumns(alias) + fmt.Sprintf(",%[1]s.full_prompt", alias)
-}
-
-func scanEvent(row rowScanner, withFullPrompt ...bool) (*Event, error) {
+func scanEvent(row rowScanner) (*Event, error) {
 	event := &Event{}
 	var userID, apiKeyID, groupID sql.NullInt64
+	var evidenceExpiresAt sql.NullTime
 	var categories, matched, scores, evidence []byte
 	dest := []any{&event.ID, &event.JobID, &event.Snapshot.RequestID, &userID,
 		&event.Snapshot.UsernameSnapshot, &event.Snapshot.UserEmailSnapshot, &apiKeyID,
@@ -336,11 +334,11 @@ func scanEvent(row rowScanner, withFullPrompt ...bool) (*Event, error) {
 		&event.Snapshot.Provider, &event.Snapshot.Endpoint, &event.Snapshot.Protocol, &event.Snapshot.Model,
 		&event.Snapshot.PromptHash, &event.Snapshot.RedactedPreview, &event.Snapshot.Stage, &event.Decision,
 		&event.RiskLevel, &event.Action, &categories, &matched, &scores, &evidence, &event.ScannerBackend,
-		&event.ScannerVersion, &event.GuardEndpointID, &event.PolicyID, &event.PolicyVersion,
-		&event.ConfigVersion, &event.ChunkTotal, &event.LatencyMS, &event.CreatedAt}
-	if len(withFullPrompt) > 0 && withFullPrompt[0] {
-		dest = append(dest, &event.Snapshot.FullPrompt)
-	}
+		&event.ScannerVersion, &event.GuardEndpointID, &event.DetectorAdapter, &event.ProviderRequestID,
+		&event.FinishReason, &event.ModelDigest, &event.PolicyID, &event.PolicyVersion,
+		&event.ConfigVersion, &event.ChunkTotal, &event.LatencyMS, &event.EvidenceStatus,
+		&evidenceExpiresAt, &event.EvidenceAvailable, &event.EvaluationStatus, &event.FailureMode,
+		&event.FailureReason, &event.CreatedAt}
 	err := row.Scan(dest...)
 	if err != nil {
 		return nil, err
@@ -348,6 +346,10 @@ func scanEvent(row rowScanner, withFullPrompt ...bool) (*Event, error) {
 	event.Snapshot.UserID = nullableInt64Value(userID)
 	event.Snapshot.APIKeyID = nullableInt64Value(apiKeyID)
 	event.Snapshot.GroupID = nullableInt64Ptr(groupID)
+	if evidenceExpiresAt.Valid {
+		value := evidenceExpiresAt.Time
+		event.EvidenceExpiresAt = &value
+	}
 	_ = json.Unmarshal(categories, &event.Categories)
 	_ = json.Unmarshal(matched, &event.MatchedScanners)
 	_ = json.Unmarshal(scores, &event.ScannerScores)
@@ -357,6 +359,103 @@ func scanEvent(row rowScanner, withFullPrompt ...bool) (*Event, error) {
 		ScannerEvidence: event.ScannerEvidence}
 	event.IssueSummaries = BuildIssueSummaries(result)
 	return event, nil
+}
+
+func (r *PostgreSQLRepository) ListLegacyPlaintextEvidence(ctx context.Context, limit int) ([]legacyEvidence, error) {
+	if limit < 1 || limit > 1000 {
+		limit = evidenceMigrationBatch
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, full_prompt
+		FROM prompt_audit_events
+		WHERE full_prompt <> ''
+		ORDER BY id
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	items := make([]legacyEvidence, 0, limit)
+	for rows.Next() {
+		var item legacyEvidence
+		if err := rows.Scan(&item.EventID, &item.FullPrompt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *PostgreSQLRepository) ReplaceLegacyPlaintextEvidence(
+	ctx context.Context,
+	eventID int64,
+	ciphertext string,
+	status EvidenceStatus,
+	expiresAt *time.Time,
+) error {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE prompt_audit_events
+		SET full_prompt='', evidence_ciphertext=$2, evidence_status=$3, evidence_expires_at=$4
+		WHERE id=$1 AND full_prompt <> ''`,
+		eventID, ciphertext, evidenceStatusOrDefault(status), expiresAt)
+	return requireOneRow(result, err, ErrEventNotFound)
+}
+
+func (r *PostgreSQLRepository) PurgeExpiredEvidence(ctx context.Context, now time.Time, limit int) (int64, error) {
+	if limit < 1 || limit > 1000 {
+		limit = evidenceMigrationBatch
+	}
+	result, err := r.db.ExecContext(ctx, `
+		WITH expired AS (
+			SELECT id
+			FROM prompt_audit_events
+			WHERE evidence_ciphertext <> '' AND evidence_expires_at <= $1
+			ORDER BY evidence_expires_at, id
+			LIMIT $2
+			FOR UPDATE SKIP LOCKED
+		)
+		UPDATE prompt_audit_events e
+		SET evidence_ciphertext='', evidence_status='expired'
+		FROM expired
+		WHERE e.id=expired.id`, now.UTC(), limit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+func (r *PostgreSQLRepository) GetEventEvidence(ctx context.Context, eventID int64) (string, EvidenceStatus, *time.Time, error) {
+	var ciphertext string
+	var status EvidenceStatus
+	var expiresAt sql.NullTime
+	err := r.db.QueryRowContext(ctx, `
+		SELECT evidence_ciphertext, evidence_status, evidence_expires_at
+		FROM prompt_audit_events
+		WHERE id=$1`, eventID).Scan(&ciphertext, &status, &expiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", nil, ErrEventNotFound
+	}
+	if err != nil {
+		return "", "", nil, err
+	}
+	var expiry *time.Time
+	if expiresAt.Valid {
+		value := expiresAt.Time
+		expiry = &value
+	}
+	return ciphertext, status, expiry, nil
+}
+
+func (r *PostgreSQLRepository) RecordEvidenceAccess(
+	ctx context.Context,
+	eventID, adminID int64,
+	reason, outcome string,
+) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO prompt_audit_evidence_access_logs(event_id,admin_id,reason,outcome)
+		VALUES ($1,$2,$3,$4)`,
+		eventID, nullableID(adminID), TrimRunes(strings.TrimSpace(reason), 256), outcome)
+	return err
 }
 
 func scanReturnedJobIDs(rows *sql.Rows) ([]int64, error) {

@@ -31,6 +31,15 @@ func aesTestCfg(keyHex string) *config.Config {
 	}
 }
 
+func aesRotationTestCfg(current string, previous ...string) *config.Config {
+	return &config.Config{
+		Totp: config.TotpConfig{
+			EncryptionKey:          current,
+			PreviousEncryptionKeys: previous,
+		},
+	}
+}
+
 // aesEncryptor 创建一个持有合法 32 字节密钥的加密器，测试失败时立即终止。
 func aesEncryptor(t *testing.T) *AESEncryptor {
 	t.Helper()
@@ -84,6 +93,50 @@ func TestNewAESEncryptor_MissingOrInvalidConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := NewAESEncryptor(aesTestCfg(tt.keyHex))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantContain)
+		})
+	}
+}
+
+func TestNewAESEncryptor_RejectsInvalidPreviousKeyring(t *testing.T) {
+	current := aesHexKey(32, 0x01)
+	tests := []struct {
+		name        string
+		previous    []string
+		wantContain string
+	}{
+		{
+			name:        "invalid_previous_key",
+			previous:    []string{"not-hex"},
+			wantContain: "previous encryption key #1",
+		},
+		{
+			name:        "duplicates_current_key",
+			previous:    []string{current},
+			wantContain: "duplicate",
+		},
+		{
+			name:        "duplicates_previous_key",
+			previous:    []string{aesHexKey(32, 0x02), aesHexKey(32, 0x02)},
+			wantContain: "duplicate",
+		},
+		{
+			name: "too_many_previous_keys",
+			previous: []string{
+				aesHexKey(32, 0x02),
+				aesHexKey(32, 0x03),
+				aesHexKey(32, 0x04),
+				aesHexKey(32, 0x05),
+				aesHexKey(32, 0x06),
+			},
+			wantContain: "at most 4",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewAESEncryptor(aesRotationTestCfg(current, tt.previous...))
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantContain)
 		})
@@ -216,4 +269,31 @@ func TestAESEncryptor_CrossInstance_DifferentKey_CannotDecrypt(t *testing.T) {
 
 	_, err = enc2.Decrypt(ct)
 	require.Error(t, err, "不同密钥的实例不应能解密对方的密文")
+}
+
+func TestAESEncryptor_KeyRotationReadsOldAndWritesNew(t *testing.T) {
+	oldKey := aesHexKey(32, 0x11)
+	newKey := aesHexKey(32, 0x22)
+
+	oldEncryptor, err := NewAESEncryptor(aesTestCfg(oldKey))
+	require.NoError(t, err)
+	rotatedEncryptor, err := NewAESEncryptor(aesRotationTestCfg(newKey, oldKey))
+	require.NoError(t, err)
+	newOnlyEncryptor, err := NewAESEncryptor(aesTestCfg(newKey))
+	require.NoError(t, err)
+
+	oldCiphertext, err := oldEncryptor.Encrypt("legacy evidence")
+	require.NoError(t, err)
+	got, err := rotatedEncryptor.Decrypt(oldCiphertext)
+	require.NoError(t, err)
+	require.Equal(t, "legacy evidence", got)
+
+	newCiphertext, err := rotatedEncryptor.Encrypt("new evidence")
+	require.NoError(t, err)
+	got, err = newOnlyEncryptor.Decrypt(newCiphertext)
+	require.NoError(t, err)
+	require.Equal(t, "new evidence", got)
+
+	_, err = oldEncryptor.Decrypt(newCiphertext)
+	require.Error(t, err, "轮换后的新密文不得继续使用旧主密钥")
 }

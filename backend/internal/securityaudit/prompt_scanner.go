@@ -32,7 +32,7 @@ func AggregateResults(results []*NormalizedResult, latency time.Duration) (*Norm
 	}
 	aggregated := &NormalizedResult{
 		Decision: EventPass, RiskLevel: RiskLow, Action: ActionAllow,
-		ScannerBackend: "qwen3guard-openai", Categories: []string{}, MatchedScanners: []string{},
+		Categories: []string{}, MatchedScanners: []string{},
 		ScannerScores: map[string]float64{}, ScannerEvidence: map[string]string{}, ChunkTotal: len(results),
 		LatencyMS: int(latency.Milliseconds()),
 	}
@@ -48,16 +48,29 @@ func AggregateResults(results []*NormalizedResult, latency time.Duration) (*Norm
 			aggregated.RiskLevel = result.RiskLevel
 			aggregated.Action = result.Action
 			aggregated.Safety = result.Safety
+			aggregated.ScannerBackend = result.ScannerBackend
 			aggregated.GuardEndpointID = result.GuardEndpointID
 			aggregated.ScannerVersion = result.ScannerVersion
+			aggregated.DetectorAdapter = result.DetectorAdapter
+			aggregated.ProviderRequestID = result.ProviderRequestID
+			aggregated.FinishReason = result.FinishReason
+			aggregated.ModelDigest = result.ModelDigest
 			aggregated.PolicyID = result.PolicyID
 			aggregated.PolicyVersion = result.PolicyVersion
+			aggregated.EvaluationStatus = result.EvaluationStatus
 		}
 		if aggregated.GuardEndpointID == "" {
+			aggregated.Safety = result.Safety
+			aggregated.ScannerBackend = result.ScannerBackend
 			aggregated.GuardEndpointID = result.GuardEndpointID
 			aggregated.ScannerVersion = result.ScannerVersion
+			aggregated.DetectorAdapter = result.DetectorAdapter
+			aggregated.ProviderRequestID = result.ProviderRequestID
+			aggregated.FinishReason = result.FinishReason
+			aggregated.ModelDigest = result.ModelDigest
 			aggregated.PolicyID = result.PolicyID
 			aggregated.PolicyVersion = result.PolicyVersion
+			aggregated.EvaluationStatus = result.EvaluationStatus
 		}
 		for _, category := range result.Categories {
 			categories[category] = struct{}{}

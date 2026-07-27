@@ -112,6 +112,65 @@ func TestEnsureBootstrapSecretsKeepsMatchingConfiguredTOTPKeyEnabled(t *testing.
 	require.True(t, cfg.Totp.EncryptionKeyConfigured)
 }
 
+func TestEnsureBootstrapSecretsRotatesPersistedTOTPKeyWithExplicitPreviousKey(t *testing.T) {
+	client := newSecuritySecretTestClient(t)
+	oldKey := strings.Repeat("12", 32)
+	newKey := strings.Repeat("34", 32)
+	_, err := client.SecuritySecret.Create().
+		SetKey(securitySecretKeyTOTP).
+		SetValue(oldKey).
+		Save(context.Background())
+	require.NoError(t, err)
+	cfg := &config.Config{
+		Totp: config.TotpConfig{
+			EncryptionKey:           newKey,
+			PreviousEncryptionKeys:  []string{oldKey},
+			EncryptionKeyConfigured: true,
+		},
+	}
+
+	err = ensureBootstrapSecrets(context.Background(), client, cfg)
+	require.NoError(t, err)
+	require.Equal(t, newKey, cfg.Totp.EncryptionKey)
+	require.Equal(t, []string{oldKey}, cfg.Totp.PreviousEncryptionKeys)
+	require.True(t, cfg.Totp.EncryptionKeyConfigured)
+
+	stored, err := client.SecuritySecret.Query().
+		Where(securitysecret.KeyEQ(securitySecretKeyTOTP)).
+		Only(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, newKey, stored.Value)
+}
+
+func TestEnsureBootstrapSecretsRejectsPreviousTOTPKeyWithoutCurrentKey(t *testing.T) {
+	client := newSecuritySecretTestClient(t)
+	cfg := &config.Config{
+		Totp: config.TotpConfig{
+			PreviousEncryptionKeys: []string{strings.Repeat("12", 32)},
+		},
+	}
+
+	err := ensureBootstrapSecrets(context.Background(), client, cfg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "requires an explicit")
+}
+
+func TestEnsureBootstrapSecretsRejectsInvalidTOTPKeyring(t *testing.T) {
+	client := newSecuritySecretTestClient(t)
+	current := strings.Repeat("12", 32)
+	cfg := &config.Config{
+		Totp: config.TotpConfig{
+			EncryptionKey:           current,
+			PreviousEncryptionKeys:  []string{current},
+			EncryptionKeyConfigured: true,
+		},
+	}
+
+	err := ensureBootstrapSecrets(context.Background(), client, cfg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "duplicate")
+}
+
 func TestEnsureBootstrapSecretsLoadExistingJWTSecret(t *testing.T) {
 	client := newSecuritySecretTestClient(t)
 	_, err := client.SecuritySecret.Create().SetKey(securitySecretKeyJWT).SetValue("existing-jwt-secret-32bytes-long!!!!").Save(context.Background())

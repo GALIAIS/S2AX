@@ -112,6 +112,27 @@ export default {
     markReadHint: '点击"已读"标记此公告'
   },
 
+  securityNotifications: {
+    title: '安全提醒',
+    newCount: '有 {count} 条未读安全提醒',
+    allCaughtUp: '没有未读安全提醒',
+    filterLabel: '安全提醒筛选',
+    all: '全部',
+    unread: '未读',
+    markRead: '已读',
+    markAllRead: '全部已读',
+    allMarkedRead: '所有安全提醒已标记为已读',
+    dismiss: '忽略',
+    empty: '暂无安全提醒',
+    emptyDescription: '当前没有需要您处理的安全审计提醒。',
+    severity: {
+      low: '低',
+      medium: '中',
+      high: '高',
+      critical: '严重'
+    }
+  },
+
   // User Subscriptions Page
   userSubscriptions: {
     title: '我的订阅',

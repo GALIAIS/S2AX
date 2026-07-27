@@ -58,10 +58,11 @@ func TestSnapshotFullPromptKeepsUnredactedText(t *testing.T) {
 	body := `{"messages":[{"role":"user","content":"PROMPT_CANARY_ABC123 email@example.com sk-secretvalue123"}]}`
 	snapshot, err := ExtractPromptSnapshot(Request{Protocol: "openai_chat_completions", Body: []byte(body)})
 	require.NoError(t, err)
-	// The full prompt is stored verbatim for admin review, unlike the preview.
+	// Extraction keeps the source text only long enough for scanning and
+	// encryption; the redacted persistence snapshot must remove it.
 	require.Contains(t, snapshot.FullPrompt, "PROMPT_CANARY_ABC123 email@example.com sk-secretvalue123")
 	require.NotContains(t, snapshot.RedactedPreview, "PROMPT_CANARY_ABC123")
-	require.Equal(t, snapshot.FullPrompt, snapshot.Redacted().FullPrompt)
+	require.Empty(t, snapshot.Redacted().FullPrompt)
 }
 
 func TestBuildFullPromptStripsNULAndTruncates(t *testing.T) {

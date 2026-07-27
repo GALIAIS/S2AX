@@ -77,14 +77,46 @@ func (r *contentModerationTestSettingRepo) Delete(ctx context.Context, key strin
 }
 
 type contentModerationTestRepo struct {
-	mu   sync.Mutex
-	logs []ContentModerationLog
+	mu        sync.Mutex
+	logs      []ContentModerationLog
+	createErr error
+}
+
+type contentModerationUnifiedEnforcementTestRepo struct {
+	*contentModerationTestRepo
+	calls  int
+	plan   ContentModerationEnforcementPlan
+	result ContentModerationEnforcementResult
+}
+
+func (r *contentModerationUnifiedEnforcementTestRepo) CreateFlaggedLogWithEnforcement(
+	ctx context.Context,
+	log *ContentModerationLog,
+	since time.Time,
+	excludeCyberPolicy bool,
+	plan ContentModerationEnforcementPlan,
+) (ContentModerationEnforcementResult, error) {
+	r.calls++
+	r.plan = plan
+	if log != nil {
+		log.ViolationCount = plan.PauseThreshold
+	}
+	if err := r.CreateLog(ctx, log); err != nil {
+		return ContentModerationEnforcementResult{}, err
+	}
+	return r.result, nil
 }
 
 func (r *contentModerationTestRepo) CreateLog(ctx context.Context, log *ContentModerationLog) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.createErr != nil {
+		return r.createErr
+	}
 	if log != nil {
+		if log.ID <= 0 {
+			log.ID = int64(len(r.logs) + 1)
+		}
 		r.logs = append(r.logs, *log)
 	}
 	return nil
@@ -118,6 +150,25 @@ func (r *contentModerationTestRepo) CleanupExpiredLogs(ctx context.Context, hitB
 }
 
 func (r *contentModerationTestRepo) UpdateLogEmailSent(ctx context.Context, id int64, sent bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := range r.logs {
+		if r.logs[i].ID == id {
+			r.logs[i].EmailSent = sent
+		}
+	}
+	return nil
+}
+
+func (r *contentModerationTestRepo) UpdateLogOutcomes(ctx context.Context, id int64, autoBanned, emailSent bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := range r.logs {
+		if r.logs[i].ID == id {
+			r.logs[i].AutoBanned = autoBanned
+			r.logs[i].EmailSent = emailSent
+		}
+	}
 	return nil
 }
 
@@ -1644,6 +1695,77 @@ func TestContentModerationAutoBanDisablesRegularUserAtThreshold(t *testing.T) {
 	require.Len(t, userRepo.updated, 1)
 	require.Equal(t, StatusDisabled, userRepo.user.Status)
 	require.Equal(t, []int64{userID}, invalidator.userIDs)
+}
+
+func TestContentModerationUnifiedEnforcementDefersAccountMutationToActionWorker(t *testing.T) {
+	cfg := defaultContentModerationConfig()
+	cfg.AutoBanEnabled = true
+	cfg.BanThreshold = 2
+	cfg.ViolationWindowHours = 24
+	cfg.EmailOnHit = true
+
+	userID := int64(1001)
+	baseRepo := &contentModerationTestRepo{}
+	repo := &contentModerationUnifiedEnforcementTestRepo{
+		contentModerationTestRepo: baseRepo,
+		result: ContentModerationEnforcementResult{
+			ManagedByUnifiedActions: true,
+			PauseScheduled:          true,
+		},
+	}
+	userRepo := &contentModerationTestUserRepo{user: &User{ID: userID, Role: RoleUser, Status: StatusActive}}
+	invalidator := &contentModerationTestAuthCacheInvalidator{}
+	svc := NewContentModerationService(nil, repo, nil, nil, userRepo, invalidator, nil)
+
+	svc.persistContentModerationLog(
+		context.Background(),
+		cfg,
+		newContentModerationFlaggedLog(userID),
+		"",
+		false,
+		true,
+	)
+
+	require.Equal(t, 1, repo.calls)
+	require.True(t, repo.plan.AutoPauseEnabled)
+	require.Equal(t, 2, repo.plan.PauseThreshold)
+	require.True(t, repo.plan.NotifyUser)
+	require.True(t, repo.plan.NotifyAdmin)
+	logs := requireContentModerationLogCount(t, baseRepo, 1)
+	require.Equal(t, 2, logs[0].ViolationCount)
+	require.False(t, logs[0].AutoBanned, "the action worker records the final pause outcome")
+	require.Equal(t, StatusActive, userRepo.user.Status, "the request path must not mutate account state")
+	require.Empty(t, userRepo.updated)
+	require.Empty(t, invalidator.userIDs)
+}
+
+func TestContentModerationPersistenceFailurePreventsAllSideEffects(t *testing.T) {
+	cfg := defaultContentModerationConfig()
+	cfg.AutoBanEnabled = true
+	cfg.BanThreshold = 1
+	cfg.EmailOnHit = true
+
+	userID := int64(1001)
+	repo := &contentModerationTestRepo{createErr: fmt.Errorf("database unavailable")}
+	hashCache := &contentModerationTestHashCache{}
+	userRepo := &contentModerationTestUserRepo{user: &User{ID: userID, Role: RoleUser, Status: StatusActive}}
+	invalidator := &contentModerationTestAuthCacheInvalidator{}
+	svc := NewContentModerationService(nil, repo, hashCache, nil, userRepo, invalidator, nil)
+
+	svc.persistContentModerationLog(
+		context.Background(),
+		cfg,
+		newContentModerationFlaggedLog(userID),
+		"sensitive prompt",
+		true,
+		true,
+	)
+
+	require.Empty(t, repo.snapshotLogs())
+	require.Empty(t, hashCache.snapshotRecorded(), "hash side effect must wait for durable audit evidence")
+	require.Equal(t, StatusActive, userRepo.user.Status, "user state must not change without an audit record")
+	require.Empty(t, userRepo.updated)
+	require.Empty(t, invalidator.userIDs)
 }
 
 func TestContentModerationAdminBelowBanThresholdRecordsViolationOnly(t *testing.T) {

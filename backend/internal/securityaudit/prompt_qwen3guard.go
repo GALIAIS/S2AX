@@ -1,14 +1,11 @@
 package securityaudit
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -200,70 +197,20 @@ type OpenAICompatibleScanner struct {
 func NewOpenAICompatibleScanner() *OpenAICompatibleScanner { return &OpenAICompatibleScanner{} }
 
 func (s *OpenAICompatibleScanner) Scan(ctx context.Context, endpoint ActiveEndpoint, chunk string, enabledScanners []string) (*NormalizedResult, error) {
-	client, err := s.clientFor(endpoint)
-	if err != nil {
-		return nil, &GuardError{Code: ErrorCodeUnavailable, Cause: err}
+	switch normalizeDetectorAdapter(endpoint.Adapter) {
+	case DetectorAdapterQwen3Guard:
+		return s.scanQwen3Guard(ctx, endpoint, chunk, enabledScanners)
+	case DetectorAdapterModerations:
+		return s.scanModerations(ctx, endpoint, chunk, enabledScanners)
+	case DetectorAdapterStrictJSONChat:
+		return s.scanStrictJSONChat(ctx, endpoint, chunk, enabledScanners)
+	default:
+		return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: errors.New("unsupported prompt detector adapter")}
 	}
-	requestURL, err := ChatCompletionsURL(endpoint.BaseURL)
-	if err != nil {
-		return nil, &GuardError{Code: ErrorCodeUnavailable, Cause: err}
-	}
-	payload := map[string]any{
-		"model":       endpoint.Model,
-		"messages":    []map[string]string{{"role": "user", "content": chunk}},
-		"temperature": 0,
-		"max_tokens":  64,
-		"seed":        42,
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: err}
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, bytes.NewReader(body))
-	if err != nil {
-		return nil, &GuardError{Code: ErrorCodeUnavailable, Cause: err}
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if endpoint.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+endpoint.Token)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		timeout := errors.Is(err, context.DeadlineExceeded)
-		var netErr net.Error
-		if errors.As(err, &netErr) && netErr.Timeout() {
-			timeout = true
-		}
-		return nil, &GuardError{Code: ErrorCodeUnavailable, Retryable: true, Timeout: timeout, Cause: err}
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		retryable := resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500
-		return nil, &GuardError{Code: ErrorCodeUnavailable, HTTPStatus: resp.StatusCode, Retryable: retryable}
-	}
-	limited := io.LimitReader(resp.Body, maxGuardResponseBytes+1)
-	responseBody, err := io.ReadAll(limited)
-	if err != nil {
-		return nil, &GuardError{Code: ErrorCodeUnavailable, Retryable: true, Cause: err}
-	}
-	if int64(len(responseBody)) > maxGuardResponseBytes {
-		return nil, &GuardError{Code: ErrorCodeInvalidResponse}
-	}
-	content, err := extractOpenAIContent(responseBody)
-	if err != nil {
-		return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: err}
-	}
-	result, err := ParseQwen3Guard(content, enabledScanners)
-	if err != nil {
-		return nil, err
-	}
-	result.GuardEndpointID = endpoint.ID
-	result.ScannerVersion = endpoint.Model
-	return result, nil
 }
 
 func (s *OpenAICompatibleScanner) clientFor(endpoint ActiveEndpoint) (*http.Client, error) {
-	key := fmt.Sprintf("%s|%s|%d", endpoint.ID, endpoint.BaseURL, endpoint.TimeoutMS)
+	key := fmt.Sprintf("%s|%s|%s|%d", endpoint.ID, endpoint.BaseURL, NormalizeNetworkScope(endpoint.NetworkScope, endpoint.BaseURL), endpoint.TimeoutMS)
 	if cached, ok := s.clients.Load(key); ok {
 		client, valid := cached.(*http.Client)
 		if !valid {

@@ -17,8 +17,13 @@ type PromptAdminService interface {
 	SaveConfig(context.Context, UpdateConfigRequest, int64) (PublicConfig, error)
 	Probe(context.Context, ProbeRequest) ProbeResult
 	Runtime(context.Context) RuntimeSnapshot
+	ListJobs(context.Context, JobFilter, int, int) (*JobPage, error)
+	RetryJob(context.Context, int64, int64, string) (*Job, error)
+	QuarantineJob(context.Context, int64, int64, string) (*Job, error)
+	DiscardJob(context.Context, int64, int64, string) (*Job, error)
 	ListEvents(context.Context, EventFilter, int, int) (*EventPage, error)
 	GetEvent(context.Context, int64) (*Event, error)
+	RevealEventEvidence(context.Context, int64, int64, string) (*EvidenceReveal, error)
 	DeleteEvent(context.Context, int64) (*DeleteResult, error)
 	DeleteEventsByIDs(context.Context, []int64) (*DeleteResult, error)
 	PreviewDelete(context.Context, EventFilter, int64) (*DeletePreview, error)
@@ -73,6 +78,111 @@ func (h *PromptAdminHandler) GetRuntime(c *gin.Context) {
 	response.Success(c, h.service.Runtime(c.Request.Context()))
 }
 
+func (h *PromptAdminHandler) ListJobs(c *gin.Context) {
+	page, err := positiveIntQuery(c, "page", 1, 0)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	pageSize, err := positiveIntQuery(c, "page_size", 20, 100)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	filter, err := jobFilterFromQuery(c)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	result, err := h.service.ListJobs(c.Request.Context(), filter, page, pageSize)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+type jobOperationRequest struct {
+	Reason string `json:"reason"`
+}
+
+func (h *PromptAdminHandler) RetryJob(c *gin.Context) {
+	h.transitionJob(c, "retry")
+}
+
+func (h *PromptAdminHandler) QuarantineJob(c *gin.Context) {
+	h.transitionJob(c, "quarantine")
+}
+
+func (h *PromptAdminHandler) DiscardJob(c *gin.Context) {
+	h.transitionJob(c, "discard")
+}
+
+func (h *PromptAdminHandler) transitionJob(c *gin.Context, operation string) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		setPromptAdminAudit(c, "failed", "prompt_audit_invalid_job_id", nil)
+		response.ErrorFrom(c, infraerrors.BadRequest("prompt_audit_invalid_job_id", "审计任务 ID 无效"))
+		return
+	}
+	var request jobOperationRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		setPromptAdminAudit(c, "failed", "prompt_audit_job_reason_invalid", map[string]any{"job_id": id, "operation": operation})
+		response.ErrorFrom(c, infraerrors.BadRequest("prompt_audit_job_reason_invalid", "必须填写 3-256 字的操作理由"))
+		return
+	}
+	request.Reason = strings.TrimSpace(request.Reason)
+	reasonLength := len([]rune(request.Reason))
+	if reasonLength < 3 || reasonLength > 256 {
+		setPromptAdminAudit(c, "failed", "prompt_audit_job_reason_invalid", map[string]any{
+			"job_id": id, "operation": operation, "reason_length": reasonLength,
+		})
+		response.ErrorFrom(c, infraerrors.BadRequest("prompt_audit_job_reason_invalid", "必须填写 3-256 字的操作理由"))
+		return
+	}
+	actorID := adminID(c)
+	var job *Job
+	switch operation {
+	case "retry":
+		job, err = h.service.RetryJob(c.Request.Context(), id, actorID, request.Reason)
+	case "quarantine":
+		job, err = h.service.QuarantineJob(c.Request.Context(), id, actorID, request.Reason)
+	case "discard":
+		job, err = h.service.DiscardJob(c.Request.Context(), id, actorID, request.Reason)
+	default:
+		err = ErrJobTransitionConflict
+	}
+	fields := map[string]any{
+		"job_id": id, "operation": operation, "reason_length": reasonLength,
+	}
+	switch {
+	case errors.Is(err, ErrJobNotFound):
+		setPromptAdminAudit(c, "failed", "prompt_audit_job_not_found", fields)
+		response.ErrorFrom(c, infraerrors.NotFound("prompt_audit_job_not_found", "审计任务不存在"))
+		return
+	case errors.Is(err, ErrJobPayloadUnavailable):
+		setPromptAdminAudit(c, "failed", "prompt_audit_job_payload_unavailable", fields)
+		response.ErrorFrom(c, infraerrors.Conflict("prompt_audit_job_payload_unavailable", "临时审核载荷已过期，无法重试"))
+		return
+	case errors.Is(err, ErrJobTransitionConflict):
+		setPromptAdminAudit(c, "failed", "prompt_audit_job_transition_conflict", fields)
+		response.ErrorFrom(c, infraerrors.Conflict("prompt_audit_job_transition_conflict", "任务状态已变化，请刷新后重试"))
+		return
+	case errors.Is(err, ErrEvidenceReasonInvalid):
+		setPromptAdminAudit(c, "failed", "prompt_audit_job_reason_invalid", fields)
+		response.ErrorFrom(c, infraerrors.BadRequest("prompt_audit_job_reason_invalid", "必须填写 3-256 字的操作理由"))
+		return
+	case err != nil:
+		setPromptAdminAudit(c, "failed", "prompt_audit_job_operation_failed", fields)
+		response.ErrorFrom(c, err)
+		return
+	}
+	fields["from_status"] = ""
+	fields["to_status"] = job.Status
+	setPromptAdminAudit(c, "success", "", fields)
+	response.Success(c, job)
+}
+
 func (h *PromptAdminHandler) ListEvents(c *gin.Context) {
 	page, err := positiveIntQuery(c, "page", 1, 0)
 	if err != nil {
@@ -113,6 +223,60 @@ func (h *PromptAdminHandler) GetEvent(c *gin.Context) {
 		return
 	}
 	response.Success(c, event)
+}
+
+type evidenceRevealRequest struct {
+	Reason string `json:"reason"`
+}
+
+func (h *PromptAdminHandler) RevealEventEvidence(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		setPromptAdminAudit(c, "failed", "prompt_audit_invalid_event_id", nil)
+		response.ErrorFrom(c, infraerrors.BadRequest("prompt_audit_invalid_event_id", "事件 ID 无效"))
+		return
+	}
+	var request evidenceRevealRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		setPromptAdminAudit(c, "failed", "prompt_audit_evidence_reason_invalid", map[string]any{"event_id": id})
+		response.ErrorFrom(c, infraerrors.BadRequest("prompt_audit_evidence_reason_invalid", "必须填写 3-256 字的查看理由"))
+		return
+	}
+	request.Reason = strings.TrimSpace(request.Reason)
+	reasonLength := len([]rune(request.Reason))
+	if reasonLength < 3 || reasonLength > 256 {
+		setPromptAdminAudit(c, "failed", "prompt_audit_evidence_reason_invalid", map[string]any{"event_id": id, "reason_length": reasonLength})
+		response.ErrorFrom(c, infraerrors.BadRequest("prompt_audit_evidence_reason_invalid", "必须填写 3-256 字的查看理由"))
+		return
+	}
+	result, err := h.service.RevealEventEvidence(c.Request.Context(), id, adminID(c), request.Reason)
+	fields := map[string]any{"event_id": id, "reason_length": reasonLength}
+	switch {
+	case errors.Is(err, ErrEventNotFound):
+		setPromptAdminAudit(c, "failed", "prompt_audit_event_not_found", fields)
+		response.ErrorFrom(c, infraerrors.NotFound("prompt_audit_event_not_found", "提示词审计事件不存在"))
+		return
+	case errors.Is(err, ErrEvidenceReasonInvalid):
+		setPromptAdminAudit(c, "failed", "prompt_audit_evidence_reason_invalid", fields)
+		response.ErrorFrom(c, infraerrors.BadRequest("prompt_audit_evidence_reason_invalid", "必须填写 3-256 字的查看理由"))
+		return
+	case errors.Is(err, ErrEvidenceExpired):
+		setPromptAdminAudit(c, "failed", "prompt_audit_evidence_expired", fields)
+		response.ErrorFrom(c, infraerrors.Conflict("prompt_audit_evidence_expired", "审计原文已到期销毁"))
+		return
+	case errors.Is(err, ErrEvidenceUnavailable):
+		setPromptAdminAudit(c, "failed", "prompt_audit_evidence_unavailable", fields)
+		response.ErrorFrom(c, infraerrors.Conflict("prompt_audit_evidence_unavailable", "本事件没有可查看的审计原文"))
+		return
+	case err != nil:
+		setPromptAdminAudit(c, "failed", "prompt_audit_evidence_reveal_failed", fields)
+		response.ErrorFrom(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.Header("Pragma", "no-cache")
+	setPromptAdminAudit(c, "success", "", fields)
+	response.Success(c, result)
 }
 
 func (h *PromptAdminHandler) DeleteEvent(c *gin.Context) {
@@ -276,6 +440,28 @@ func eventFilterFromQuery(c *gin.Context) (EventFilter, error) {
 		if filter.EndAt == nil {
 			return EventFilter{}, infraerrors.BadRequest("prompt_audit_invalid_time", "结束时间无效")
 		}
+	}
+	return filter, nil
+}
+
+func jobFilterFromQuery(c *gin.Context) (JobFilter, error) {
+	filter := JobFilter{
+		Status: c.Query("status"), ErrorCode: c.Query("error_code"), Keyword: c.Query("keyword"),
+	}
+	if value := strings.TrimSpace(c.Query("start_at")); value != "" {
+		filter.StartAt = parseTimeQuery(value)
+		if filter.StartAt == nil {
+			return JobFilter{}, infraerrors.BadRequest("prompt_audit_invalid_time", "开始时间无效")
+		}
+	}
+	if value := strings.TrimSpace(c.Query("end_at")); value != "" {
+		filter.EndAt = parseTimeQuery(value)
+		if filter.EndAt == nil {
+			return JobFilter{}, infraerrors.BadRequest("prompt_audit_invalid_time", "结束时间无效")
+		}
+	}
+	if status := strings.TrimSpace(filter.Status); status != "" && !validJobAdminStatus(status) {
+		return JobFilter{}, infraerrors.BadRequest("prompt_audit_invalid_job_status", "审计任务状态无效")
 	}
 	return filter, nil
 }

@@ -114,6 +114,27 @@ export default {
     markReadHint: 'Click "Mark as read" to mark this announcement'
   },
 
+  securityNotifications: {
+    title: 'Security alerts',
+    newCount: '{count} unread security alert | {count} unread security alerts',
+    allCaughtUp: 'No unread security alerts',
+    filterLabel: 'Security alert filter',
+    all: 'All',
+    unread: 'Unread',
+    markRead: 'Mark read',
+    markAllRead: 'Mark all read',
+    allMarkedRead: 'All security alerts marked as read',
+    dismiss: 'Dismiss',
+    empty: 'No security alerts',
+    emptyDescription: 'There are no security audit alerts requiring your attention.',
+    severity: {
+      low: 'Low',
+      medium: 'Medium',
+      high: 'High',
+      critical: 'Critical'
+    }
+  },
+
   // User Subscriptions Page
   userSubscriptions: {
     title: 'My Subscriptions',

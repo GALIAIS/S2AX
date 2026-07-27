@@ -45,6 +45,7 @@ const (
 	EventPass     EventDecision = "pass"
 	EventFlag     EventDecision = "flag"
 	EventCritical EventDecision = "critical"
+	EventDegraded EventDecision = "degraded"
 )
 
 type RiskLevel string
@@ -105,16 +106,20 @@ type PromptSnapshot struct {
 	Model              string `json:"model"`
 	PromptHash         string `json:"prompt_hash"`
 	RedactedPreview    string `json:"redacted_preview"`
-	FullPrompt         string `json:"full_prompt"`
+	FullPrompt         string `json:"-"`
 	PromptLength       int    `json:"prompt_length"`
 	MessageCount       int    `json:"message_count"`
 	Stage              string `json:"stage"`
 
-	ScanText string `json:"-"`
+	ScanText           string         `json:"-"`
+	EvidenceCiphertext string         `json:"-"`
+	EvidenceStatus     EvidenceStatus `json:"-"`
+	EvidenceExpiresAt  *time.Time     `json:"-"`
 }
 
 func (s PromptSnapshot) Redacted() PromptSnapshot {
 	s.ScanText = ""
+	s.FullPrompt = ""
 	return s
 }
 
@@ -130,16 +135,24 @@ type NormalizedResult struct {
 	ScannerBackend    string             `json:"scanner_backend"`
 	ScannerVersion    string             `json:"scanner_version"`
 	GuardEndpointID   string             `json:"guard_endpoint_id"`
+	DetectorAdapter   string             `json:"detector_adapter"`
+	ProviderRequestID string             `json:"provider_request_id,omitempty"`
+	FinishReason      string             `json:"finish_reason,omitempty"`
+	ModelDigest       string             `json:"model_digest,omitempty"`
 	PolicyID          string             `json:"policy_id"`
 	PolicyVersion     int                `json:"policy_version"`
 	ChunkTotal        int                `json:"chunk_total"`
 	LatencyMS         int                `json:"latency_ms"`
 	UnknownCategories []string           `json:"unknown_categories,omitempty"`
+	EvaluationStatus  string             `json:"evaluation_status,omitempty"`
+	FailureMode       FailureMode        `json:"failure_mode,omitempty"`
+	FailureReason     string             `json:"failure_reason,omitempty"`
 }
 
 type PromptDecision struct {
 	Kind           DecisionKind      `json:"kind"`
 	ErrorCode      string            `json:"error_code,omitempty"`
+	FailureMode    FailureMode       `json:"failure_mode,omitempty"`
 	Result         *NormalizedResult `json:"result,omitempty"`
 	AllowNextStage bool              `json:"allow_next_stage"`
 }
@@ -218,13 +231,15 @@ type AuditMetricsSnapshot struct {
 }
 
 type QueueStats struct {
-	Staging    int64 `json:"staging"`
-	Queued     int64 `json:"queued"`
-	Processing int64 `json:"processing"`
-	Retry      int64 `json:"retry"`
-	Done       int64 `json:"done"`
-	Failed     int64 `json:"failed"`
-	Active     int64 `json:"active"`
+	Staging     int64 `json:"staging"`
+	Queued      int64 `json:"queued"`
+	Processing  int64 `json:"processing"`
+	Retry       int64 `json:"retry"`
+	Done        int64 `json:"done"`
+	Failed      int64 `json:"failed"`
+	Quarantined int64 `json:"quarantined"`
+	Discarded   int64 `json:"discarded"`
+	Active      int64 `json:"active"`
 }
 
 type RuntimeSnapshot struct {

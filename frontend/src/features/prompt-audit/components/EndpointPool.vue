@@ -50,12 +50,14 @@
                 <span class="h-1.5 w-1.5 shrink-0 rounded-full" :class="endpoint.enabled ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-dark-500'" aria-hidden="true" />
               </div>
               <p class="mt-0.5 truncate font-mono text-[11px] text-gray-500 dark:text-dark-400" :title="endpoint.base_url">{{ endpoint.base_url }}</p>
+              <p class="mt-1 text-[11px] font-medium text-gray-500 dark:text-dark-400">{{ t(`admin.promptAudit.pool.networkScopes.${endpoint.network_scope}`) }}</p>
             </div>
           </div>
 
           <div class="min-w-0 xl:block">
             <p class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400 xl:hidden">{{ t('admin.promptAudit.pool.model') }}</p>
             <p class="truncate text-sm font-medium text-gray-700 dark:text-dark-200" :title="endpoint.model">{{ endpoint.model }}</p>
+            <p class="mt-1 text-[11px] text-gray-500 dark:text-dark-400">{{ t(`admin.promptAudit.pool.adapters.${endpoint.adapter}`) }}</p>
           </div>
 
           <div>
@@ -103,8 +105,24 @@
           <input v-model="editing.id" class="input w-full" required :disabled="editingIndex >= 0" :aria-label="t('admin.promptAudit.pool.id')" />
         </label>
         <label class="space-y-1 text-sm text-gray-700 dark:text-dark-200 sm:col-span-2">
+          <span>{{ t('admin.promptAudit.pool.adapter') }}</span>
+          <Select
+            v-model="editing.adapter"
+            :options="adapterOptions"
+            :searchable="false"
+            :aria-label="t('admin.promptAudit.pool.adapter')"
+            @update:model-value="syncAdapterModel"
+          />
+          <span class="block text-xs text-gray-500 dark:text-dark-400">{{ t(`admin.promptAudit.pool.adapterHints.${editing.adapter}`) }}</span>
+        </label>
+        <label class="space-y-1 text-sm text-gray-700 dark:text-dark-200 sm:col-span-2">
           <span>{{ t('admin.promptAudit.pool.baseUrl') }}</span>
-          <input v-model="editing.base_url" class="input w-full" required inputmode="url" :aria-label="t('admin.promptAudit.pool.baseUrl')" />
+          <input v-model="editing.base_url" class="input w-full" required inputmode="url" :aria-label="t('admin.promptAudit.pool.baseUrl')" @change="syncInferredNetworkScope" />
+        </label>
+        <label class="space-y-1 text-sm text-gray-700 dark:text-dark-200 sm:col-span-2">
+          <span>{{ t('admin.promptAudit.pool.networkScope') }}</span>
+          <Select v-model="editing.network_scope" :options="networkScopeOptions" :searchable="false" :aria-label="t('admin.promptAudit.pool.networkScope')" />
+          <span class="block text-xs text-gray-500 dark:text-dark-400">{{ t(`admin.promptAudit.pool.networkScopeHints.${editing.network_scope}`) }}</span>
         </label>
         <label class="space-y-1 text-sm text-gray-700 dark:text-dark-200 sm:col-span-2">
           <span>{{ t('admin.promptAudit.pool.apiKey') }}</span>
@@ -139,11 +157,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
-import type { PromptAuditEndpointDraft, PromptProbeResult } from '../types'
-import { cloneData, createDefaultEndpoint } from '../viewModel'
+import Select from '@/components/common/Select.vue'
+import type { SelectOption } from '@/types'
+import type { PromptAuditDetectorAdapter, PromptAuditEndpointDraft, PromptProbeResult } from '../types'
+import { cloneData, createDefaultEndpoint, defaultModelForAdapter, inferNetworkScope } from '../viewModel'
 
 const props = defineProps<{
   endpoints: PromptAuditEndpointDraft[]
@@ -157,6 +177,12 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const editing = ref<PromptAuditEndpointDraft | null>(null)
 const editingIndex = ref(-1)
+const adapterOptions = computed<SelectOption[]>(() => (
+  ['qwen3guard_chat', 'openai_moderations', 'strict_json_chat'] as PromptAuditDetectorAdapter[]
+).map((value) => ({ value, label: t(`admin.promptAudit.pool.adapters.${value}`) })))
+const networkScopeOptions = computed<SelectOption[]>(() => (
+  ['public_https', 'trusted_network', 'loopback'] as const
+).map((value) => ({ value, label: t(`admin.promptAudit.pool.networkScopes.${value}`) })))
 
 function openCreate() {
   editingIndex.value = -1
@@ -169,6 +195,13 @@ function openEdit(endpoint: PromptAuditEndpointDraft) {
 function closeEditor() {
   editing.value = null
   editingIndex.value = -1
+}
+function syncInferredNetworkScope() {
+  if (editing.value) editing.value.network_scope = inferNetworkScope(editing.value.base_url)
+}
+function syncAdapterModel(value: unknown) {
+  if (!editing.value) return
+  editing.value.model = defaultModelForAdapter(value as PromptAuditDetectorAdapter)
 }
 function saveEditor() {
   if (!editing.value?.id.trim() || !editing.value.name.trim() || !editing.value.base_url.trim()) return

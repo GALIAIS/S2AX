@@ -1,12 +1,15 @@
 import type {
   PromptAuditConfig,
+  PromptAuditDetectorAdapter,
   PromptAuditDraft,
   PromptAuditEndpointDraft,
+  PromptAuditNetworkScope,
   PromptAuditUpdateRequest,
   PromptEventFilters,
 } from './types'
 
 export const DEFAULT_GUARD_MODEL = 'sileader/qwen3guard:0.6b'
+export const DEFAULT_MODERATION_MODEL = 'omni-moderation-latest'
 
 export const SCANNER_CATALOG = [
   { id: 'violent', label: 'Violent' },
@@ -30,10 +33,13 @@ export function cloneData<T>(value: T): T {
 export function configToDraft(config: PromptAuditConfig): PromptAuditDraft {
   return {
     ...cloneData(config),
+    failure_mode: config.failure_mode || 'block_and_record',
     group_ids: [...(config.group_ids ?? [])],
     scanners: [...(config.scanners ?? [])],
     endpoints: (config.endpoints ?? []).map((endpoint) => ({
       ...endpoint,
+      adapter: endpoint.adapter || 'qwen3guard_chat',
+      network_scope: endpoint.network_scope || inferNetworkScope(endpoint.base_url),
       token: '',
       clear_token: false,
     })),
@@ -45,7 +51,9 @@ export function createDefaultEndpoint(index = 1): PromptAuditEndpointDraft {
     id: `guard-${Date.now()}-${index}`,
     name: `Guard ${index}`,
     protocol: 'openai_compatible',
+    adapter: 'qwen3guard_chat',
     base_url: 'http://127.0.0.1:8000',
+    network_scope: 'loopback',
     model: DEFAULT_GUARD_MODEL,
     timeout_ms: 3000,
     input_limit: 4000,
@@ -63,6 +71,7 @@ export function buildUpdateRequest(draft: PromptAuditDraft): PromptAuditUpdateRe
     enabled: draft.enabled,
     blocking_enabled: draft.enabled && draft.blocking_enabled,
     store_pass_events: draft.store_pass_events,
+    failure_mode: draft.failure_mode || 'block_and_record',
     strategy: 'priority',
     worker_count: Number(draft.worker_count),
     queue_capacity: Number(draft.queue_capacity),
@@ -73,8 +82,10 @@ export function buildUpdateRequest(draft: PromptAuditDraft): PromptAuditUpdateRe
       id: endpoint.id.trim(),
       name: endpoint.name.trim(),
       protocol: 'openai_compatible',
+      adapter: endpoint.adapter,
       base_url: endpoint.base_url.trim(),
-      model: endpoint.model.trim() || DEFAULT_GUARD_MODEL,
+      network_scope: endpoint.network_scope,
+      model: endpoint.model.trim() || defaultModelForAdapter(endpoint.adapter),
       token: endpoint.token.trim() || undefined,
       clear_token: endpoint.clear_token,
       timeout_ms: Number(endpoint.timeout_ms),
@@ -82,6 +93,25 @@ export function buildUpdateRequest(draft: PromptAuditDraft): PromptAuditUpdateRe
       enabled: endpoint.enabled,
     })),
   }
+}
+
+export function defaultModelForAdapter(adapter: PromptAuditDetectorAdapter): string {
+  return adapter === 'openai_moderations' ? DEFAULT_MODERATION_MODEL : DEFAULT_GUARD_MODEL
+}
+
+export function inferNetworkScope(baseURL: string): PromptAuditNetworkScope {
+  try {
+    const parsed = new URL(baseURL)
+    const host = parsed.hostname.toLowerCase().replace(/\.$/, '')
+    if (host === 'localhost' || host.endsWith('.localhost') || host === '127.0.0.1' || host === '::1' || host.startsWith('127.')) {
+      return 'loopback'
+    }
+    if (parsed.protocol === 'http:') return 'trusted_network'
+  } catch {
+    // The backend performs authoritative validation; use the restrictive
+    // public default while the administrator is still editing an invalid URL.
+  }
+  return 'public_https'
 }
 
 export function draftFingerprint(draft: PromptAuditDraft | null): string {

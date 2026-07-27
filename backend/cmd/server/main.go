@@ -162,6 +162,13 @@ func runMainServer() {
 			log.Printf("Prompt Audit started in degraded state: %v", err)
 		}
 	}
+	if app.InvocationArchive != nil {
+		if err := app.InvocationArchive.Start(context.Background()); err != nil {
+			// Archiving is opt-in and defaults to off. A failed config read must
+			// never delay or reject a customer's gateway request.
+			log.Printf("Invocation Archive started in disabled state: %v", err)
+		}
+	}
 
 	// 启动服务器
 	go func() {

@@ -780,6 +780,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/account-allocations', label: t('nav.accountAllocations'), icon: UsersIcon, hideInSimpleMode: true },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
+    { path: '/admin/invocation-archive', label: t('nav.invocationArchive'), icon: ShieldIcon, hideInSimpleMode: true },
     {
       path: '/admin/security-audit',
       label: t('nav.securityAudit'),

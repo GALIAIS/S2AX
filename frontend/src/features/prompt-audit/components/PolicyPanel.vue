@@ -62,6 +62,16 @@
           <span>{{ t('admin.promptAudit.policy.queueCapacity') }}</span>
           <input :value="draft.queue_capacity" type="number" min="1" max="100000" class="input mt-1.5 w-full" :aria-label="t('admin.promptAudit.policy.queueCapacity')" @input="patch({ queue_capacity: Number(($event.target as HTMLInputElement).value) })" />
         </label>
+        <label class="block text-sm text-gray-700 dark:text-dark-200">
+          <span>{{ t('admin.promptAudit.policy.failureMode') }}</span>
+          <select :value="draft.failure_mode" class="input mt-1.5 w-full" :aria-label="t('admin.promptAudit.policy.failureMode')" @change="patch({ failure_mode: ($event.target as HTMLSelectElement).value as PromptAuditDraft['failure_mode'] })">
+            <option value="block_and_record">{{ t('admin.promptAudit.policy.failureModes.block_and_record') }}</option>
+            <option value="fallback_local">{{ t('admin.promptAudit.policy.failureModes.fallback_local') }}</option>
+            <option value="allow_and_record">{{ t('admin.promptAudit.policy.failureModes.allow_and_record') }}</option>
+            <option value="degraded_observe">{{ t('admin.promptAudit.policy.failureModes.degraded_observe') }}</option>
+          </select>
+          <span class="mt-1 block text-xs text-gray-500 dark:text-dark-400">{{ t(`admin.promptAudit.policy.failureModeHints.${draft.failure_mode}`) }}</span>
+        </label>
         <div class="rounded-lg bg-gray-50 px-4 py-3 text-sm text-gray-600 dark:bg-dark-900/50 dark:text-dark-300">
           <p class="font-medium text-gray-800 dark:text-dark-100">{{ t('admin.promptAudit.policy.strategy') }}</p>
           <p class="mt-1">priority · {{ t('admin.promptAudit.policy.strategyHint') }}</p>

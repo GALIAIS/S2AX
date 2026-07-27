@@ -25,6 +25,7 @@
       <div class="flex min-w-0 items-center gap-0.5 sm:gap-3">
         <!-- Announcement Bell -->
         <AnnouncementBell v-if="user" />
+        <SecurityNotificationBell v-if="user" />
 
         <!-- Docs Link -->
         <a
@@ -301,6 +302,7 @@ import { useAdminSettingsStore } from '@/stores/adminSettings'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMini.vue'
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
+import SecurityNotificationBell from '@/components/common/SecurityNotificationBell.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { sanitizeUrl } from '@/utils/url'
 import { PROJECT_URL } from '@/config/project'

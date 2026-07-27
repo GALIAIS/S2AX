@@ -32,6 +32,20 @@ export interface NotifyEmailEntry {
   verified: boolean
 }
 
+export type SecurityNotificationStatus = 'unread' | 'read' | 'dismissed'
+export type SecurityNotificationSeverity = 'low' | 'medium' | 'high' | 'critical' | string
+
+export interface UserSecurityAuditNotification {
+  id: number
+  notification_id: string
+  severity: SecurityNotificationSeverity
+  title: string
+  body: string
+  status: SecurityNotificationStatus
+  read_at?: string | null
+  created_at: string
+}
+
 // ==================== User & Auth Types ====================
 
 export type UserAuthProvider = 'email' | 'linuxdo' | 'oidc' | 'wechat' | 'github' | 'google' | 'dingtalk'

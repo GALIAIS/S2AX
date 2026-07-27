@@ -2,6 +2,7 @@ package handler
 
 import (
 	"github.com/Wei-Shaw/sub2api/internal/handler/admin"
+	"github.com/Wei-Shaw/sub2api/internal/invocationarchive"
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 )
 
@@ -38,6 +39,7 @@ type AdminHandlers struct {
 	ChannelMonitorTemplate     *admin.ChannelMonitorRequestTemplateHandler
 	ContentModeration          *admin.ContentModerationHandler
 	PromptAudit                *securityaudit.PromptAdminHandler
+	InvocationArchive          *invocationarchive.AdminHandler
 	Payment                    *admin.PaymentHandler
 	VirtualCurrency            *admin.VirtualCurrencyHandler
 	VirtualCurrencyIntegration *admin.VirtualCurrencyIntegrationHandler

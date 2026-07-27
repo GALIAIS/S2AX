@@ -46,6 +46,21 @@ func TestHTTPClientUsesDirectStandardDialer(t *testing.T) {
 	require.NotNil(t, transport.DialContext)
 }
 
+func TestEndpointNetworkScopesEnforceDestinationBoundaries(t *testing.T) {
+	require.Equal(t, NetworkScopeLoopback, InferNetworkScope("http://127.0.0.1:8080"))
+	require.Equal(t, NetworkScopeTrusted, InferNetworkScope("http://10.0.0.8:8080"))
+	require.Equal(t, NetworkScopePublicHTTPS, InferNetworkScope("https://guard.example.com"))
+
+	require.NoError(t, ValidateEndpointNetworkPolicy("https://8.8.8.8", NetworkScopePublicHTTPS))
+	require.Error(t, ValidateEndpointNetworkPolicy("http://8.8.8.8", NetworkScopePublicHTTPS))
+	require.Error(t, ValidateEndpointNetworkPolicy("https://10.0.0.8", NetworkScopePublicHTTPS))
+	require.NoError(t, ValidateEndpointNetworkPolicy("http://10.0.0.8:8080", NetworkScopeTrusted))
+	require.Error(t, ValidateEndpointNetworkPolicy("http://127.0.0.1:8080", NetworkScopeTrusted))
+	require.NoError(t, ValidateEndpointNetworkPolicy("http://127.0.0.1:8080", NetworkScopeLoopback))
+	require.Error(t, ValidateEndpointNetworkPolicy("http://169.254.169.254", NetworkScopeTrusted))
+	require.Error(t, ValidateEndpointNetworkPolicy("https://192.0.2.1", NetworkScopePublicHTTPS))
+}
+
 func TestOpenAICompatibleScannerRequestContract(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/v1/chat/completions", r.URL.Path)
@@ -66,16 +81,30 @@ func TestOpenAICompatibleScannerRequestContract(t *testing.T) {
 	require.Equal(t, EventPass, result.Decision)
 }
 
-func TestOpenAICompatibleScannerFollowsRedirectAndRejectsOversize(t *testing.T) {
+func TestOpenAICompatibleScannerRestrictsRedirectsAndRejectsOversize(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/chat/completions" {
+			http.Redirect(w, r, "/safe-result", http.StatusTemporaryRedirect)
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Safety: Safe\nCategories: None"}}]}`))
+	}))
+	defer server.Close()
+	result, err := NewOpenAICompatibleScanner().Scan(context.Background(), ActiveEndpoint{ID: "redirect", BaseURL: server.URL, Model: DefaultGuardModel, TimeoutMS: 1000}, "hello", AllScannerIDs)
+	require.NoError(t, err)
+	require.Equal(t, EventPass, result.Decision)
+
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Safety: Safe\nCategories: None"}}]}`))
 	}))
 	defer target.Close()
-	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, target.URL, http.StatusFound) }))
-	defer redirect.Close()
-	result, err := NewOpenAICompatibleScanner().Scan(context.Background(), ActiveEndpoint{ID: "redirect", BaseURL: redirect.URL, Model: DefaultGuardModel, TimeoutMS: 1000}, "hello", AllScannerIDs)
-	require.NoError(t, err)
-	require.Equal(t, EventPass, result.Decision)
+	crossOrigin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer crossOrigin.Close()
+	_, err = NewOpenAICompatibleScanner().Scan(context.Background(), ActiveEndpoint{ID: "cross-origin", BaseURL: crossOrigin.URL, Model: DefaultGuardModel, TimeoutMS: 1000}, "hello", AllScannerIDs)
+	require.Error(t, err)
+
 	oversize := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(strings.Repeat("x", int(maxGuardResponseBytes)+1)))
 	}))

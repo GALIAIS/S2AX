@@ -241,4 +241,18 @@ func TestPromptAuditConfigCASSecretRoundTripInvalidationAndTTL(t *testing.T) {
 	active, ok := degraded.Active()
 	require.True(t, ok)
 	require.Equal(t, int64(5), active.ConfigVersion)
+
+	historical, found, err := degraded.ActiveVersion(context.Background(), 2)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, int64(2), historical.ConfigVersion)
+	require.Equal(t, 1, historical.WorkerCount)
+	require.Len(t, historical.Endpoints, 1)
+	require.Equal(t, canary, historical.Endpoints[0].Token)
+
+	var versionCount int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM prompt_audit_config_versions`).Scan(&versionCount))
+	require.Equal(t, 5, versionCount)
+	_, err = db.Exec(`UPDATE prompt_audit_config_versions SET config_digest=$1 WHERE config_version=2`, strings.Repeat("0", 64))
+	require.Error(t, err)
 }

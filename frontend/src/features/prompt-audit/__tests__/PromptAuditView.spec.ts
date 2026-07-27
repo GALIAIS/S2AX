@@ -7,7 +7,8 @@ import PromptAuditView from '../PromptAuditView.vue'
 
 const mocks = vi.hoisted(() => ({
   getConfig: vi.fn(), updateConfig: vi.fn(), probeEndpoint: vi.fn(), getRuntime: vi.fn(), listEvents: vi.fn(),
-  getEvent: vi.fn(), deleteEvent: vi.fn(), batchDeleteEvents: vi.fn(), previewDelete: vi.fn(), deleteEventsByFilter: vi.fn(), listGroups: vi.fn(),
+  listJobs: vi.fn(), transitionJob: vi.fn(),
+  getEvent: vi.fn(), revealEventEvidence: vi.fn(), deleteEvent: vi.fn(), batchDeleteEvents: vi.fn(), previewDelete: vi.fn(), deleteEventsByFilter: vi.fn(), listGroups: vi.fn(),
   showSuccess: vi.fn(), showError: vi.fn(),
 }))
 
@@ -19,15 +20,15 @@ vi.mock('vue-i18n', async () => {
 })
 
 const baseConfig = (): PromptAuditConfig => ({
-  enabled: true, blocking_enabled: false, store_pass_events: false, effective_mode: 'async_audit', strategy: 'priority',
+  enabled: true, blocking_enabled: false, store_pass_events: false, failure_mode: 'block_and_record', effective_mode: 'async_audit', strategy: 'priority',
   worker_count: 4, queue_capacity: 100, scanners: SCANNER_CATALOG.map((item) => item.id), all_groups: true, group_ids: [],
-  endpoints: [{ id: 'guard-1', name: 'Guard One', protocol: 'openai_compatible', base_url: 'http://127.0.0.1:8000', model: 'guard-model', timeout_ms: 3000, input_limit: 4000, enabled: true, has_token: true, token_status: 'configured' }],
+  endpoints: [{ id: 'guard-1', name: 'Guard One', protocol: 'openai_compatible', base_url: 'http://127.0.0.1:8000', network_scope: 'loopback', model: 'guard-model', timeout_ms: 3000, input_limit: 4000, enabled: true, has_token: true, token_status: 'configured' }],
   config_version: 7, updated_at: '2026-07-16T00:00:00Z', updated_by: 1, change_summary: '{}',
 })
 const runtime = (): PromptAuditRuntime => ({
   process_status: 'running', effective_mode: 'async_audit', expected_config_version: 7, active_config_version: 7,
   worker_total: 4, worker_active: 1, queue_capacity: 100,
-  queue: { staging: 0, queued: 0, processing: 1, retry: 0, done: 5, failed: 0, active: 1 },
+  queue: { staging: 0, queued: 0, processing: 1, retry: 0, done: 5, failed: 0, quarantined: 0, discarded: 0, active: 1 },
   processed_total: 5, failed_total: 0, enqueued_total: 5, dropped_total: 0, database_status: 'ok', redis_status: 'ok', endpoints: {},
   guard_metrics: { total: 1, allowed: 1, flagged: 0, blocked: 0, unavailable: 0, invalid: 0, timeouts: 0, failovers: 0, bulkhead_full: 0, record_failed: 0 },
 })
@@ -51,10 +52,12 @@ const FilterDeleteStub = defineComponent({
   emits: ['close', 'preview', 'confirm', 'criteria-change'],
   template: '<div v-if="show" data-test="filter-delete-dialog"><button data-test="dialog-preview" @click="$emit(\'preview\', { ...initialFilters, start_at: \'2026-07-15T00:00\', end_at: \'2026-07-16T00:00\' })">run</button><button data-test="dialog-confirm" @click="$emit(\'confirm\', { ...initialFilters, start_at: \'2026-07-15T00:00\', end_at: \'2026-07-16T00:00\' })">confirm</button><span data-test="dialog-preview-state">{{ preview ? preview.matched_count : \'none\' }}</span></div>',
 })
+const SecurityAuditWorkbenchStub = defineComponent({ template: '<div data-test="security-audit-workbench-stub" />' })
+const PromptJobWorkspaceStub = defineComponent({ template: '<div data-test="prompt-job-workspace-stub" />' })
 
 function mountView() {
   return mount(PromptAuditView, {
-    global: { stubs: { AppLayout: AppLayoutStub, RuntimeOverview: RuntimeStub, EndpointPool: EndpointStub, PolicyPanel: PolicyStub, EventWorkspace: EventsStub, EventDetailDialog: DetailStub, FilterDeleteDialog: FilterDeleteStub, ConfirmDialog: ConfirmStub } },
+    global: { stubs: { AppLayout: AppLayoutStub, RuntimeOverview: RuntimeStub, EndpointPool: EndpointStub, PolicyPanel: PolicyStub, EventWorkspace: EventsStub, EventDetailDialog: DetailStub, FilterDeleteDialog: FilterDeleteStub, ConfirmDialog: ConfirmStub, PromptJobWorkspace: PromptJobWorkspaceStub, SecurityAuditWorkbench: SecurityAuditWorkbenchStub } },
   })
 }
 
@@ -65,6 +68,7 @@ describe('PromptAuditView', () => {
     mocks.getRuntime.mockResolvedValue(runtime())
     mocks.listGroups.mockResolvedValue([])
     mocks.listEvents.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
+    mocks.listJobs.mockResolvedValue({ items: [], failure_reasons: [], total: 0, page: 1, page_size: 20, pages: 0 })
     mocks.updateConfig.mockImplementation(async () => ({ ...baseConfig(), config_version: 8 }))
     mocks.probeEndpoint.mockResolvedValue({ ok: true, status: 'healthy', message: 'ok', latency_ms: 2, http_status: 200, retryable: false, checked_at: '2026-07-16T00:00:00Z', token_applied: true })
     mocks.previewDelete.mockResolvedValue({ matched_count: 2, filter_summary: {}, snapshot_max_id: 10, filter_hash: 'a'.repeat(64), confirmation_token: 'opaque-confirmation', expires_at: '2026-07-16T00:05:00Z' })
@@ -91,6 +95,8 @@ describe('PromptAuditView', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-test="tab-events"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('[data-test="tab-control"]').attributes('aria-selected')).toBe('false')
+    expect(wrapper.get('[data-test="tab-jobs"]').attributes('aria-selected')).toBe('false')
     expect(wrapper.get('[data-test="tab-config"]').attributes('aria-selected')).toBe('false')
     expect(wrapper.get('[data-test="tab-panel-events"]').attributes('style') || '').not.toContain('display: none')
     expect(wrapper.get('[data-test="tab-panel-config"]').attributes('style') || '').toContain('display: none')
@@ -99,6 +105,22 @@ describe('PromptAuditView', () => {
     expect(wrapper.find('[data-test="pass-events-disabled-notice"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="tab-events"]').text()).toContain('admin.promptAudit.tabs.events')
     expect(wrapper.get('[data-test="tab-config"]').text()).toContain('admin.promptAudit.tabs.config')
+    expect(wrapper.get('[data-test="tab-control"]').text()).toContain('admin.promptAudit.tabs.control')
+    expect(wrapper.get('[data-test="tab-jobs"]').text()).toContain('admin.promptAudit.tabs.jobs')
+
+    await wrapper.get('[data-test="tab-jobs"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="tab-jobs"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('[data-test="tab-panel-jobs"]').attributes('style') || '').not.toContain('display: none')
+    expect(wrapper.find('[data-test="prompt-job-workspace-stub"]').exists()).toBe(true)
+
+    await wrapper.get('[data-test="tab-control"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="tab-control"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('[data-test="tab-panel-control"]').attributes('style') || '').not.toContain('display: none')
+    expect(wrapper.get('[data-test="tab-panel-events"]').attributes('style') || '').toContain('display: none')
+    expect(wrapper.find('[data-test="security-audit-workbench-stub"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="save-config"]').exists()).toBe(false)
 
     await wrapper.get('[data-test="tab-config"]').trigger('click')
     await flushPromises()

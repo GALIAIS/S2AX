@@ -12,6 +12,10 @@ type Enqueuer struct {
 	metrics Metrics
 }
 
+type AdmissionFailureRecorder interface {
+	RecordAdmissionFailure(context.Context, Request, int64, string) error
+}
+
 func NewEnqueuer(config ConfigStore, repo JobRepository, payload PayloadStore, metrics ...Metrics) *Enqueuer {
 	var metric Metrics
 	if len(metrics) > 0 {
@@ -37,6 +41,7 @@ func (e *Enqueuer) Enqueue(ctx context.Context, req Request) error {
 	}
 	if len(cfg.EnabledEndpoints()) == 0 {
 		e.recordDropped()
+		e.recordAdmissionFailure(ctx, req, cfg.ConfigVersion, "no_enabled_endpoint")
 		LogWarn(EventEnqueueDropped, mergeLogFields(baseFields, map[string]any{"status": "dropped", "error_code": "no_enabled_endpoint"}))
 		return nil
 	}
@@ -47,6 +52,7 @@ func (e *Enqueuer) Enqueue(ctx context.Context, req Request) error {
 	}
 	if err != nil {
 		e.recordDropped()
+		e.recordAdmissionFailure(ctx, req, cfg.ConfigVersion, "snapshot_invalid")
 		LogWarn(EventEnqueueDropped, mergeLogFields(baseFields, map[string]any{"status": "dropped", "error_code": "snapshot_invalid"}))
 		return nil
 	}
@@ -63,6 +69,7 @@ func (e *Enqueuer) Enqueue(ctx context.Context, req Request) error {
 			"queue_capacity": cfg.QueueCapacity, "status": "dropped", "error_code": code,
 		}))
 		e.recordDropped()
+		e.recordAdmissionFailure(ctx, req, cfg.ConfigVersion, code)
 		return err
 	}
 	if err := e.payload.Set(ctx, job.ID, snapshot.ScanText, DefaultPayloadTTL); err != nil {
@@ -71,6 +78,7 @@ func (e *Enqueuer) Enqueue(ctx context.Context, req Request) error {
 			"job_id": job.ID, "status": "dropped", "error_code": "payload_store_failed",
 		}))
 		e.recordDropped()
+		e.recordAdmissionFailure(ctx, req, cfg.ConfigVersion, "payload_store_failed")
 		return err
 	}
 	if err := e.repo.PublishQueued(ctx, job.ID); err != nil {
@@ -80,6 +88,7 @@ func (e *Enqueuer) Enqueue(ctx context.Context, req Request) error {
 			"job_id": job.ID, "status": "dropped", "error_code": "queue_publish_failed",
 		}))
 		e.recordDropped()
+		e.recordAdmissionFailure(ctx, req, cfg.ConfigVersion, "queue_publish_failed")
 		return err
 	}
 	LogInfo(EventJobEnqueued, mergeLogFields(baseFields, map[string]any{
@@ -90,6 +99,18 @@ func (e *Enqueuer) Enqueue(ctx context.Context, req Request) error {
 		e.metrics.IncEnqueued()
 	}
 	return nil
+}
+
+func (e *Enqueuer) recordAdmissionFailure(ctx context.Context, req Request, configVersion int64, reason string) {
+	recorder, ok := e.repo.(AdmissionFailureRecorder)
+	if !ok {
+		return
+	}
+	if err := recorder.RecordAdmissionFailure(ctx, req, configVersion, reason); err != nil {
+		LogWarn(EventResultRecordFailed, mergeLogFields(requestLogFields(req), map[string]any{
+			"status": "failed", "error_code": "admission_failure_record_failed",
+		}))
+	}
 }
 
 func (e *Enqueuer) recordDropped() {

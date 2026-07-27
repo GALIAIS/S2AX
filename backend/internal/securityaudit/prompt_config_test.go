@@ -19,6 +19,7 @@ func TestDefaultConfigIsOff(t *testing.T) {
 	storage, err := ParseStorageConfig("")
 	require.NoError(t, err)
 	require.False(t, storage.Enabled)
+	require.Equal(t, FailureBlockAndRecord, storage.FailureMode)
 	active, err := ActiveFromStorage(storage, true, prefixEncryptor{})
 	require.NoError(t, err)
 	require.Equal(t, ModeOff, active.EffectiveMode())
@@ -27,6 +28,15 @@ func TestDefaultConfigIsOff(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(publicJSON), `"group_ids":[]`)
 	require.Contains(t, string(publicJSON), `"endpoints":[]`)
+}
+
+func TestConfigValidatesFailureModeAndPersistsLegacyDefault(t *testing.T) {
+	storage, err := ParseStorageConfig(`{"enabled":false,"strategy":"priority","worker_count":1,"queue_capacity":10,"scanners":["pii"],"all_groups":true}`)
+	require.NoError(t, err)
+	require.Equal(t, FailureBlockAndRecord, storage.FailureMode)
+
+	storage.FailureMode = FailureMode("unsafe_unknown")
+	require.Error(t, validateStorageConfig(storage))
 }
 
 func TestConfigRejectsBlockingWithoutAudit(t *testing.T) {

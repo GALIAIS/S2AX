@@ -46,6 +46,15 @@ func RegisterUserRoutes(
 			accountAllocations.GET("", h.AccountAllocation.ListMine)
 		}
 
+		if h.Admin != nil && h.Admin.PromptAudit != nil {
+			securityNotifications := authenticated.Group("/security-audit/notifications")
+			{
+				securityNotifications.GET("", h.Admin.PromptAudit.ListMySecurityAuditNotifications)
+				securityNotifications.POST("/read-all", h.Admin.PromptAudit.MarkAllMySecurityAuditNotificationsRead)
+				securityNotifications.POST("/:id/status", h.Admin.PromptAudit.UpdateMySecurityAuditNotificationStatus)
+			}
+		}
+
 		// 用户接口
 		user := authenticated.Group("/user")
 		{

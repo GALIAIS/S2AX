@@ -23,6 +23,7 @@
           <option value="pass">{{ t('admin.promptAudit.decisions.pass') }}</option>
           <option value="flag">{{ t('admin.promptAudit.decisions.flag') }}</option>
           <option value="critical">{{ t('admin.promptAudit.decisions.critical') }}</option>
+          <option value="degraded">{{ t('admin.promptAudit.decisions.degraded') }}</option>
         </select>
       </label>
       <label class="text-xs text-gray-600 dark:text-dark-200">

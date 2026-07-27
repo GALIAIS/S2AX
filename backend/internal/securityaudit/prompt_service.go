@@ -22,14 +22,16 @@ type PromptService struct {
 	scanner   *OpenAICompatibleScanner
 	metrics   *AtomicMetrics
 	clock     Clock
+	actions   *EnforcementWorker
 
-	lifecycleMu  sync.Mutex
-	cancel       context.CancelFunc
-	background   context.Context
-	enqueueWG    sync.WaitGroup
-	enqueueSlots chan struct{}
-	probeMu      sync.RWMutex
-	probes       map[string]ProbeResult
+	lifecycleMu   sync.Mutex
+	cancel        context.CancelFunc
+	background    context.Context
+	enqueueWG     sync.WaitGroup
+	maintenanceWG sync.WaitGroup
+	enqueueSlots  chan struct{}
+	probeMu       sync.RWMutex
+	probes        map[string]ProbeResult
 }
 
 func NewPromptService(
@@ -40,11 +42,12 @@ func NewPromptService(
 	metrics *AtomicMetrics,
 ) *PromptService {
 	enqueuer := NewEnqueuer(config, repo, payload, metrics)
-	evaluator := NewGuardEvaluator(scanner, repo, metrics)
+	evaluator := NewGuardEvaluator(scanner, repo, metrics, config)
 	runner := NewRunner(config, repo, payload, scanner, metrics)
 	return &PromptService{
 		config: config, repo: repo, payload: payload, scanner: scanner, metrics: metrics,
 		enqueuer: enqueuer, evaluator: evaluator, runner: runner, clock: realClock{},
+		actions:      NewEnforcementWorker(repo),
 		enqueueSlots: make(chan struct{}, 128), probes: map[string]ProbeResult{},
 	}
 }
@@ -62,6 +65,8 @@ func (s *PromptService) Start(ctx context.Context) error {
 	s.background, s.cancel = background, cancel
 	s.lifecycleMu.Unlock()
 	configErr := s.config.Start(background)
+	s.startEvidenceMaintenance(background)
+	s.actions.Start(background)
 	workerErr := s.runner.Start(background)
 	return errors.Join(configErr, workerErr)
 }
@@ -81,10 +86,22 @@ func (s *PromptService) Shutdown(ctx context.Context) error {
 	if s.runner != nil {
 		workerErr = s.runner.Shutdown(ctx)
 	}
+	if s.actions != nil {
+		workerErr = errors.Join(workerErr, s.actions.Shutdown(ctx))
+	}
 	done := make(chan struct{})
 	go func() { s.enqueueWG.Wait(); close(done) }()
 	select {
 	case <-done:
+	case <-ctx.Done():
+		if workerErr == nil {
+			workerErr = ctx.Err()
+		}
+	}
+	maintenanceDone := make(chan struct{})
+	go func() { s.maintenanceWG.Wait(); close(maintenanceDone) }()
+	select {
+	case <-maintenanceDone:
 	case <-ctx.Done():
 		if workerErr == nil {
 			workerErr = ctx.Err()
@@ -118,6 +135,7 @@ func (s *PromptService) Enqueue(_ context.Context, req Request) error {
 			s.metrics.IncDropped()
 		}
 		LogWarn(EventEnqueueDropped, map[string]any{"request_id": req.RequestID, "status": "dropped", "error_code": "local_enqueue_busy"})
+		s.recordAdmissionFailureAsync(req.Clone(), 0, "local_enqueue_busy")
 		return nil
 	}
 	s.lifecycleMu.Lock()
@@ -144,6 +162,7 @@ func (s *PromptService) Evaluate(ctx context.Context, req Request) (*PromptDecis
 		return nil, &GuardError{Code: ErrorCodeUnavailable}
 	}
 	if s.config.BlockingActivationDegraded() {
+		s.recordAdmissionFailureAsync(req.Clone(), 0, "blocking_config_unavailable")
 		return nil, &GuardError{Code: ErrorCodeUnavailable}
 	}
 	cfg, ok := s.config.Active()
@@ -163,7 +182,66 @@ func (s *PromptService) Evaluate(ctx context.Context, req Request) (*PromptDecis
 	if err != nil {
 		return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: err}
 	}
-	return s.evaluator.Evaluate(ctx, cfg, snapshot)
+	decision, err := s.evaluator.Evaluate(ctx, cfg, snapshot)
+	if err == nil {
+		return decision, nil
+	}
+	mode := normalizeFailureMode(cfg.FailureMode)
+	s.recordBlockingFailure(ctx, snapshot, cfg.ConfigVersion, mode, guardErrorCode(err))
+	if mode == FailureAllowAndRecord || mode == FailureFallbackLocal || mode == FailureObserve {
+		return &PromptDecision{
+			Kind: DecisionAllow, ErrorCode: guardErrorCode(err), FailureMode: mode,
+			AllowNextStage: true,
+		}, nil
+	}
+	return nil, err
+}
+
+func (s *PromptService) recordBlockingFailure(
+	ctx context.Context,
+	snapshot PromptSnapshot,
+	configVersion int64,
+	mode FailureMode,
+	reason string,
+) {
+	if s == nil || s.repo == nil {
+		return
+	}
+	protected, _ := protectPromptEvidence(snapshot, &NormalizedResult{Decision: EventDegraded}, s.config, s.clock.Now())
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	if _, err := s.repo.RecordBlockingFailure(recordCtx, protected, configVersion, mode, reason); err != nil {
+		if s.metrics != nil {
+			s.metrics.IncRecordFailed()
+		}
+		LogWarn(EventResultRecordFailed, mergeLogFields(snapshotLogFields(snapshot), map[string]any{
+			"status": "failed", "error_code": "degraded_decision_record_failed",
+		}))
+	}
+}
+
+func (s *PromptService) recordAdmissionFailureAsync(req Request, configVersion int64, reason string) {
+	if s == nil || s.repo == nil {
+		return
+	}
+	s.lifecycleMu.Lock()
+	background := s.background
+	s.lifecycleMu.Unlock()
+	if background == nil {
+		return
+	}
+	if configVersion < 1 {
+		if cfg, ok := s.config.Active(); ok {
+			configVersion = cfg.ConfigVersion
+		}
+	}
+	s.enqueueWG.Add(1)
+	go func() {
+		defer s.enqueueWG.Done()
+		recordCtx, cancel := context.WithTimeout(background, time.Second)
+		defer cancel()
+		_ = s.repo.RecordAdmissionFailure(recordCtx, req, configVersion, reason)
+	}()
 }
 
 func (s *PromptService) GetConfig() PublicConfig { return s.config.Public() }
@@ -186,7 +264,7 @@ func (s *PromptService) Runtime(ctx context.Context) RuntimeSnapshot {
 		WorkerTotal: workerTotal, QueueCapacity: queueCapacity, DatabaseStatus: "ok", RedisStatus: "ok",
 		Endpoints: s.probeSnapshot(), GuardMetrics: s.metrics.Snapshot(),
 	}
-	if s.repo != nil {
+	if s.repo != nil && s.repo.db != nil {
 		stats, err := s.repo.QueueStats(ctx)
 		if err != nil {
 			runtime.DatabaseStatus = "error"
@@ -223,6 +301,154 @@ func (s *PromptService) Runtime(ctx context.Context) RuntimeSnapshot {
 		}
 	}
 	return runtime
+}
+
+func (s *PromptService) ListJobs(
+	ctx context.Context,
+	filter JobFilter,
+	page int,
+	pageSize int,
+) (*JobPage, error) {
+	if s == nil || s.repo == nil {
+		return nil, errors.New("prompt audit service unavailable")
+	}
+	result, err := s.repo.ListJobs(ctx, filter, page, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	jobIDs := make([]int64, 0, len(result.Items))
+	payloadJobIDs := make([]int64, 0, len(result.Items))
+	for _, item := range result.Items {
+		if item == nil || item.Job == nil {
+			continue
+		}
+		jobIDs = append(jobIDs, item.Job.ID)
+		if item.Job.Status == "failed" || item.Job.Status == "quarantined" {
+			item.PayloadState = payloadStateUnknown
+			payloadJobIDs = append(payloadJobIDs, item.Job.ID)
+		}
+	}
+	if operations, operationErr := s.repo.ListJobOperations(ctx, jobIDs); operationErr == nil {
+		for _, item := range result.Items {
+			if item != nil && item.Job != nil {
+				item.Operations = operations[item.Job.ID]
+			}
+		}
+	} else {
+		return nil, operationErr
+	}
+	if len(payloadJobIDs) == 0 || s.payload == nil {
+		return result, nil
+	}
+	ttls, ttlErr := s.payload.TTLs(ctx, payloadJobIDs)
+	if ttlErr != nil {
+		return result, nil
+	}
+	for _, item := range result.Items {
+		if item == nil || item.Job == nil {
+			continue
+		}
+		ttl, exists := ttls[item.Job.ID]
+		if !exists || ttl <= 0 {
+			item.PayloadState = payloadStateExpired
+			continue
+		}
+		item.PayloadState = payloadStateAvailable
+		item.PayloadTTLSeconds = int64(ttl / time.Second)
+		if item.PayloadTTLSeconds < 1 {
+			item.PayloadTTLSeconds = 1
+		}
+	}
+	return result, nil
+}
+
+func (s *PromptService) RetryJob(
+	ctx context.Context,
+	jobID int64,
+	actorID int64,
+	reason string,
+) (*Job, error) {
+	if s == nil || s.repo == nil || s.payload == nil {
+		return nil, errors.New("prompt audit service unavailable")
+	}
+	ttls, err := s.payload.TTLs(ctx, []int64{jobID})
+	if err != nil {
+		return nil, err
+	}
+	ttl := ttls[jobID]
+	if ttl < 10*time.Second {
+		return nil, ErrJobPayloadUnavailable
+	}
+	job, err := s.repo.TransitionJob(ctx, jobID, "retry", actorID, reason, true)
+	if err != nil {
+		return nil, err
+	}
+	LogWarn(EventJobEnqueued, map[string]any{
+		"job_id": jobID, "user_id": actorID, "status": "operator_retry",
+		"payload_ttl_seconds": int64(ttl / time.Second),
+	})
+	return job, nil
+}
+
+func (s *PromptService) QuarantineJob(
+	ctx context.Context,
+	jobID int64,
+	actorID int64,
+	reason string,
+) (*Job, error) {
+	if s == nil || s.repo == nil {
+		return nil, errors.New("prompt audit service unavailable")
+	}
+	payloadAvailable := false
+	if s.payload != nil {
+		if ttls, err := s.payload.TTLs(ctx, []int64{jobID}); err == nil {
+			payloadAvailable = ttls[jobID] > 0
+		}
+	}
+	job, err := s.repo.TransitionJob(ctx, jobID, "quarantine", actorID, reason, payloadAvailable)
+	if err != nil {
+		return nil, err
+	}
+	LogWarn(EventProcessFailed, map[string]any{
+		"job_id": jobID, "user_id": actorID, "status": "operator_quarantined",
+		"payload_available": payloadAvailable,
+	})
+	return job, nil
+}
+
+func (s *PromptService) DiscardJob(
+	ctx context.Context,
+	jobID int64,
+	actorID int64,
+	reason string,
+) (*Job, error) {
+	if s == nil || s.repo == nil || s.payload == nil {
+		return nil, errors.New("prompt audit service unavailable")
+	}
+	payloadAvailable := false
+	if ttls, err := s.payload.TTLs(ctx, []int64{jobID}); err != nil {
+		return nil, err
+	} else {
+		payloadAvailable = ttls[jobID] > 0
+	}
+	job, err := s.repo.TransitionJob(ctx, jobID, "discard", actorID, reason, payloadAvailable)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.payload.Delete(ctx, jobID); err != nil {
+		// The database state is already terminal and the payload still has its
+		// original bounded TTL. Surface the cleanup degradation in logs without
+		// making the successful state transition look rolled back.
+		LogWarn(EventProcessFailed, map[string]any{
+			"job_id": jobID, "user_id": actorID, "status": "payload_delete_deferred",
+			"error_code": "payload_delete_failed",
+		})
+	}
+	LogWarn(EventProcessFailed, map[string]any{
+		"job_id": jobID, "user_id": actorID, "status": "operator_discarded",
+		"payload_was_available": payloadAvailable,
+	})
+	return job, nil
 }
 
 type ProbeRequest struct {
@@ -346,7 +572,7 @@ func (s *PromptService) resolveProbeEndpoint(input UpdateEndpoint) (ActiveEndpoi
 		limit = DefaultInputLimit
 	}
 	storage := storageConfig{Enabled: false, Strategy: "priority", WorkerCount: DefaultWorkerCount, QueueCapacity: DefaultQueueCapacity, Scanners: append([]string(nil), AllScannerIDs...), AllGroups: true,
-		Endpoints: []StorageEndpoint{{ID: strings.TrimSpace(input.ID), Name: strings.TrimSpace(input.Name), Protocol: "openai_compatible", BaseURL: baseURL, Model: model, TimeoutMS: timeout, InputLimit: limit}}}
+		Endpoints: []StorageEndpoint{{ID: strings.TrimSpace(input.ID), Name: strings.TrimSpace(input.Name), Protocol: "openai_compatible", BaseURL: baseURL, NetworkScope: NormalizeNetworkScope(input.NetworkScope, baseURL), Model: model, TimeoutMS: timeout, InputLimit: limit}}}
 	if storage.Endpoints[0].ID == "" {
 		storage.Endpoints[0].ID = "probe"
 	}
@@ -356,7 +582,7 @@ func (s *PromptService) resolveProbeEndpoint(input UpdateEndpoint) (ActiveEndpoi
 	if err := validateStorageConfig(storage); err != nil {
 		return ActiveEndpoint{}, false, err
 	}
-	return ActiveEndpoint{ID: storage.Endpoints[0].ID, Name: storage.Endpoints[0].Name, Protocol: "openai_compatible", BaseURL: baseURL, Model: model, Token: token, TimeoutMS: timeout, InputLimit: limit, Enabled: true}, token != "", nil
+	return ActiveEndpoint{ID: storage.Endpoints[0].ID, Name: storage.Endpoints[0].Name, Protocol: "openai_compatible", BaseURL: baseURL, NetworkScope: storage.Endpoints[0].NetworkScope, Model: model, Token: token, TimeoutMS: timeout, InputLimit: limit, Enabled: true}, token != "", nil
 }
 
 func (s *PromptService) finishProbe(id string, started time.Time, result ProbeResult) ProbeResult {
@@ -370,6 +596,24 @@ func (s *PromptService) finishProbe(id string, started time.Time, result ProbeRe
 	s.probeMu.Lock()
 	s.probes[id] = result
 	s.probeMu.Unlock()
+	if s.repo != nil {
+		endpoint := ActiveEndpoint{ID: id, NetworkScope: NetworkScopePublicHTTPS}
+		if cfg, ok := s.config.Active(); ok {
+			for _, candidate := range cfg.Endpoints {
+				if candidate.ID == id {
+					endpoint = candidate
+					break
+				}
+			}
+		}
+		persistCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		if err := s.repo.UpsertEndpointHealth(persistCtx, endpoint, result); err != nil {
+			LogWarn("prompt_audit.endpoint_health_persist_failed", map[string]any{
+				"guard_endpoint_id": id, "error_code": "endpoint_health_persist_failed",
+			})
+		}
+		cancel()
+	}
 	return result
 }
 

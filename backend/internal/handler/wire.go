@@ -3,6 +3,7 @@ package handler
 import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler/admin"
+	"github.com/Wei-Shaw/sub2api/internal/invocationarchive"
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -42,6 +43,7 @@ func ProvideAdminHandlers(
 	channelMonitorTemplateHandler *admin.ChannelMonitorRequestTemplateHandler,
 	contentModerationHandler *admin.ContentModerationHandler,
 	promptAuditHandler *securityaudit.PromptAdminHandler,
+	invocationArchiveHandler *invocationarchive.AdminHandler,
 	paymentHandler *admin.PaymentHandler,
 	virtualCurrencyHandler *admin.VirtualCurrencyHandler,
 	virtualCurrencyIntegrationHandler *admin.VirtualCurrencyIntegrationHandler,
@@ -85,6 +87,7 @@ func ProvideAdminHandlers(
 		ChannelMonitorTemplate:     channelMonitorTemplateHandler,
 		ContentModeration:          contentModerationHandler,
 		PromptAudit:                promptAuditHandler,
+		InvocationArchive:          invocationArchiveHandler,
 		Payment:                    paymentHandler,
 		VirtualCurrency:            virtualCurrencyHandler,
 		VirtualCurrencyIntegration: virtualCurrencyIntegrationHandler,
@@ -133,6 +136,7 @@ func ProvideOpenAIGatewayHandler(
 	contentModerationService *service.ContentModerationService,
 	opsService *service.OpsService,
 	grokQuotaService *service.GrokQuotaService,
+	invocationArchive *invocationarchive.Service,
 	cfg *config.Config,
 	coordinator *securityaudit.Coordinator,
 ) *OpenAIGatewayHandler {
@@ -140,6 +144,7 @@ func ProvideOpenAIGatewayHandler(
 		usageRecordWorkerPool, errorPassthroughService, contentModerationService, opsService, cfg)
 	h.securityAuditCoordinator = coordinator
 	h.grokMediaEligibilityProber = grokQuotaService
+	h.SetInvocationArchive(invocationArchive)
 	return h
 }
 

@@ -23,44 +23,54 @@ var (
 )
 
 type Job struct {
-	ID                  int64
-	Snapshot            PromptSnapshot
-	ExecutionMode       Mode
-	ConfigVersion       int64
-	Status              string
-	Attempts            int
-	MaxAttempts         int
-	ClaimVersion        int64
-	NextAttemptAt       time.Time
-	ProcessingStartedAt *time.Time
-	ProcessedAt         *time.Time
-	LastErrorCode       string
-	LastErrorMessage    string
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
+	ID                  int64          `json:"id"`
+	Snapshot            PromptSnapshot `json:"snapshot"`
+	ExecutionMode       Mode           `json:"execution_mode"`
+	ConfigVersion       int64          `json:"config_version"`
+	Status              string         `json:"status"`
+	Attempts            int            `json:"attempts"`
+	MaxAttempts         int            `json:"max_attempts"`
+	ClaimVersion        int64          `json:"claim_version"`
+	NextAttemptAt       time.Time      `json:"next_attempt_at"`
+	ProcessingStartedAt *time.Time     `json:"processing_started_at,omitempty"`
+	ProcessedAt         *time.Time     `json:"processed_at,omitempty"`
+	LastErrorCode       string         `json:"last_error_code,omitempty"`
+	LastErrorMessage    string         `json:"last_error_message,omitempty"`
+	CreatedAt           time.Time      `json:"created_at"`
+	UpdatedAt           time.Time      `json:"updated_at"`
 }
 
 type Event struct {
-	ID              int64              `json:"id"`
-	JobID           int64              `json:"job_id"`
-	Snapshot        PromptSnapshot     `json:"snapshot"`
-	Decision        EventDecision      `json:"decision"`
-	RiskLevel       RiskLevel          `json:"risk_level"`
-	Action          Action             `json:"action"`
-	Categories      []string           `json:"categories"`
-	MatchedScanners []string           `json:"matched_scanners"`
-	ScannerScores   map[string]float64 `json:"scanner_scores"`
-	ScannerEvidence map[string]string  `json:"scanner_evidence"`
-	ScannerBackend  string             `json:"scanner_backend"`
-	ScannerVersion  string             `json:"scanner_version"`
-	GuardEndpointID string             `json:"guard_endpoint_id"`
-	PolicyID        string             `json:"policy_id"`
-	PolicyVersion   int                `json:"policy_version"`
-	ConfigVersion   int64              `json:"config_version"`
-	ChunkTotal      int                `json:"chunk_total"`
-	LatencyMS       int                `json:"latency_ms"`
-	IssueSummaries  []IssueSummary     `json:"issue_summaries"`
-	CreatedAt       time.Time          `json:"created_at"`
+	ID                int64              `json:"id"`
+	JobID             int64              `json:"job_id"`
+	Snapshot          PromptSnapshot     `json:"snapshot"`
+	Decision          EventDecision      `json:"decision"`
+	RiskLevel         RiskLevel          `json:"risk_level"`
+	Action            Action             `json:"action"`
+	Categories        []string           `json:"categories"`
+	MatchedScanners   []string           `json:"matched_scanners"`
+	ScannerScores     map[string]float64 `json:"scanner_scores"`
+	ScannerEvidence   map[string]string  `json:"scanner_evidence"`
+	ScannerBackend    string             `json:"scanner_backend"`
+	ScannerVersion    string             `json:"scanner_version"`
+	GuardEndpointID   string             `json:"guard_endpoint_id"`
+	DetectorAdapter   string             `json:"detector_adapter"`
+	ProviderRequestID string             `json:"provider_request_id,omitempty"`
+	FinishReason      string             `json:"finish_reason,omitempty"`
+	ModelDigest       string             `json:"model_digest,omitempty"`
+	PolicyID          string             `json:"policy_id"`
+	PolicyVersion     int                `json:"policy_version"`
+	ConfigVersion     int64              `json:"config_version"`
+	ChunkTotal        int                `json:"chunk_total"`
+	LatencyMS         int                `json:"latency_ms"`
+	IssueSummaries    []IssueSummary     `json:"issue_summaries"`
+	EvidenceAvailable bool               `json:"evidence_available"`
+	EvidenceStatus    EvidenceStatus     `json:"evidence_status"`
+	EvidenceExpiresAt *time.Time         `json:"evidence_expires_at,omitempty"`
+	EvaluationStatus  string             `json:"evaluation_status"`
+	FailureMode       FailureMode        `json:"failure_mode,omitempty"`
+	FailureReason     string             `json:"failure_reason,omitempty"`
+	CreatedAt         time.Time          `json:"created_at"`
 }
 
 type JobRepository interface {
@@ -272,6 +282,10 @@ func (r *PostgreSQLRepository) QueueStats(ctx context.Context) (QueueStats, erro
 			stats.Done = count
 		case "failed":
 			stats.Failed = count
+		case "quarantined":
+			stats.Quarantined = count
+		case "discarded":
+			stats.Discarded = count
 		}
 	}
 	stats.Active = stats.Staging + stats.Queued + stats.Processing + stats.Retry
@@ -302,6 +316,83 @@ func (r *PostgreSQLRepository) RecordBlocking(ctx context.Context, snapshot Prom
 		return nil, err
 	}
 	return event, nil
+}
+
+func (r *PostgreSQLRepository) RecordBlockingFailure(
+	ctx context.Context,
+	snapshot PromptSnapshot,
+	configVersion int64,
+	mode FailureMode,
+	reason string,
+) (*Event, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("prompt audit database unavailable")
+	}
+	mode = normalizeFailureMode(mode)
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = ErrorCodeUnavailable
+	}
+	result := &NormalizedResult{
+		Decision: EventDegraded, RiskLevel: RiskLow, Action: ActionWarn,
+		Categories: []string{"audit_degraded"}, MatchedScanners: []string{},
+		ScannerScores: map[string]float64{}, ScannerEvidence: map[string]string{},
+		ScannerBackend: "prompt-audit-runtime", ScannerVersion: "1",
+		PolicyID: "prompt-audit-config", PolicyVersion: int(configVersion),
+		EvaluationStatus: "degraded", FailureMode: mode, FailureReason: reason,
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	job, err := insertJob(ctx, tx, snapshot.Redacted(), ModeBlocking, configVersion, "failed", 1)
+	if err != nil {
+		return nil, err
+	}
+	event, err := insertEvent(ctx, tx, job.ID, snapshot.Redacted(), configVersion, result)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE prompt_audit_jobs
+		SET last_error_code=$2,last_error_message='',updated_at=NOW()
+		WHERE id=$1`, job.ID, reason); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return event, nil
+}
+
+func (r *PostgreSQLRepository) RecordAdmissionFailure(
+	ctx context.Context,
+	req Request,
+	configVersion int64,
+	reason string,
+) error {
+	if r == nil || r.db == nil {
+		return errors.New("prompt audit database unavailable")
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "unknown"
+	}
+	groupID := int64(0)
+	if req.GroupID != nil && *req.GroupID > 0 {
+		groupID = *req.GroupID
+	}
+	if configVersion < 1 {
+		configVersion = 1
+	}
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO prompt_audit_admission_counters(bucket_at,failure_reason,config_version,group_id,count)
+		VALUES (date_trunc('minute',NOW()),$1,$2,$3,1)
+		ON CONFLICT (bucket_at,failure_reason,config_version,group_id)
+		DO UPDATE SET count=prompt_audit_admission_counters.count+1,updated_at=NOW()`,
+		TrimRunes(reason, 64), configVersion, groupID)
+	return err
 }
 
 // shouldStorePromptAuditEvent keeps store_pass_events scoped to safe results.
@@ -348,19 +439,46 @@ func insertEvent(ctx context.Context, queryer sqlQueryer, jobID int64, snapshot 
 			job_id,request_id,user_id,username_snapshot,user_email_snapshot,api_key_id,api_key_name_snapshot,
 			group_id,group_name,provider,endpoint,protocol,model,prompt_hash,redacted_preview,stage,
 			decision,risk_level,action,categories,matched_scanners,scanner_scores,scanner_evidence,
-			scanner_backend,scanner_version,guard_endpoint_id,policy_id,policy_version,config_version,chunk_total,latency_ms,
-			full_prompt
+			scanner_backend,scanner_version,guard_endpoint_id,detector_adapter,provider_request_id,finish_reason,model_digest,
+			policy_id,policy_version,config_version,chunk_total,latency_ms,
+			full_prompt,evidence_ciphertext,evidence_status,evidence_expires_at,
+			evaluation_status,failure_mode,failure_reason
 		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
-			$20::jsonb,$21::jsonb,$22::jsonb,$23::jsonb,$24,$25,$26,$27,$28,$29,$30,$31,$32)
-		RETURNING `+eventDetailColumns("prompt_audit_events"),
+			$20::jsonb,$21::jsonb,$22::jsonb,$23::jsonb,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,'',$36,$37,$38,$39,$40,$41)
+		RETURNING `+eventColumns("prompt_audit_events"),
 		jobID, snapshot.RequestID, nullableID(snapshot.UserID), snapshot.UsernameSnapshot, snapshot.UserEmailSnapshot,
 		nullableID(snapshot.APIKeyID), snapshot.APIKeyNameSnapshot, snapshot.GroupID, snapshot.GroupName,
 		snapshot.Provider, snapshot.Endpoint, snapshot.Protocol, snapshot.Model, snapshot.PromptHash,
 		snapshot.RedactedPreview, normalizeStage(snapshot.Stage), string(result.Decision), string(result.RiskLevel),
 		string(result.Action), categories, matched, scores, evidenceJSON, result.ScannerBackend, result.ScannerVersion,
-		result.GuardEndpointID, result.PolicyID, result.PolicyVersion, configVersion, result.ChunkTotal, result.LatencyMS,
-		snapshot.FullPrompt)
-	return scanEvent(row, true)
+		result.GuardEndpointID, normalizeDetectorAdapter(result.DetectorAdapter), result.ProviderRequestID,
+		result.FinishReason, result.ModelDigest, result.PolicyID, result.PolicyVersion, configVersion,
+		result.ChunkTotal, result.LatencyMS,
+		snapshot.EvidenceCiphertext, evidenceStatusOrDefault(snapshot.EvidenceStatus), snapshot.EvidenceExpiresAt,
+		evaluationStatusOrDefault(result.EvaluationStatus), result.FailureMode, strings.TrimSpace(result.FailureReason))
+	event, err := scanEvent(row)
+	if err != nil {
+		return nil, err
+	}
+	if err := insertUnifiedPromptDecision(ctx, queryer, event, snapshot.Redacted(), result); err != nil {
+		return nil, err
+	}
+	return event, nil
+}
+
+func evidenceStatusOrDefault(status EvidenceStatus) EvidenceStatus {
+	if status == "" {
+		return EvidenceNotStored
+	}
+	return status
+}
+
+func evaluationStatusOrDefault(status string) string {
+	status = strings.TrimSpace(status)
+	if status == "" {
+		return "complete"
+	}
+	return status
 }
 
 type rowScanner interface{ Scan(...any) error }

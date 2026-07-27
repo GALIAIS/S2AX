@@ -216,7 +216,13 @@ type OpenAIWSIngressHooks struct {
 	ReasoningEffortMappings []ReasoningEffortMapping
 	BeforeTurn              func(turn int) error
 	BeforeRequest           func(turn int, payload []byte, originalModel string) error
-	AfterTurn               func(turn int, result *OpenAIForwardResult, turnErr error)
+	// OnTurnRequest observes the canonical payload accepted for an upstream turn.
+	// It is observer-only and must never block forwarding.
+	OnTurnRequest func(turn int, payload []byte, originalModel string)
+	// OnClientMessage observes a client-visible downstream event after it was
+	// successfully written. It is observer-only and must never block forwarding.
+	OnClientMessage func(turn int, payload []byte)
+	AfterTurn       func(turn int, result *OpenAIForwardResult, turnErr error)
 }
 
 func (s *OpenAIGatewayService) getOpenAIWSConnPool() *openAIWSConnPool {

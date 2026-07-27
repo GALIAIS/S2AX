@@ -58,6 +58,36 @@ func (s *RedisPayloadStore) Ping(ctx context.Context) error {
 	return s.client.Ping(ctx).Err()
 }
 
+func (s *RedisPayloadStore) TTLs(ctx context.Context, jobIDs []int64) (map[int64]time.Duration, error) {
+	result := make(map[int64]time.Duration, len(jobIDs))
+	if len(jobIDs) == 0 {
+		return result, nil
+	}
+	if s == nil || s.client == nil {
+		return nil, fmt.Errorf("prompt audit payload store unavailable")
+	}
+	commands := make(map[int64]*redis.DurationCmd, len(jobIDs))
+	_, err := s.client.Pipelined(ctx, func(pipe redis.Pipeliner) error {
+		for _, jobID := range jobIDs {
+			if jobID > 0 {
+				commands[jobID] = pipe.TTL(ctx, payloadKey(jobID))
+			}
+		}
+		return nil
+	})
+	if err != nil && err != redis.Nil {
+		return nil, err
+	}
+	for jobID, command := range commands {
+		ttl, commandErr := command.Result()
+		if commandErr != nil && commandErr != redis.Nil {
+			return nil, commandErr
+		}
+		result[jobID] = ttl
+	}
+	return result, nil
+}
+
 func payloadKey(jobID int64) string {
 	return PayloadKeyPrefix + strconv.FormatInt(jobID, 10)
 }

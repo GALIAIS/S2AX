@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	"errors"
@@ -71,8 +72,13 @@ func ensureJWTBootstrapSecret(ctx context.Context, client *ent.Client, cfg *conf
 func ensureTOTPBootstrapSecret(ctx context.Context, client *ent.Client, cfg *config.Config) error {
 	candidate := strings.TrimSpace(cfg.Totp.EncryptionKey)
 	wasConfigured := cfg.Totp.EncryptionKeyConfigured
+	previous := normalizeEncryptionKeyList(cfg.Totp.PreviousEncryptionKeys)
+	cfg.Totp.PreviousEncryptionKeys = previous
 
 	if candidate == "" {
+		if len(previous) > 0 {
+			return fmt.Errorf("totp.previous_encryption_keys requires an explicit totp.encryption_key")
+		}
 		secret, created, err := getOrCreateGeneratedSecuritySecret(ctx, client, securitySecretKeyTOTP, 32)
 		if err != nil {
 			return fmt.Errorf("ensure totp encryption key: %w", err)
@@ -91,6 +97,9 @@ func ensureTOTPBootstrapSecret(ctx context.Context, client *ent.Client, cfg *con
 	if err := validateAES256HexSecret(candidate); err != nil {
 		return fmt.Errorf("invalid configured totp encryption key: %w", err)
 	}
+	if err := validateTOTPEncryptionKeyring(candidate, previous); err != nil {
+		return err
+	}
 	storedSecret, err := createSecuritySecretIfAbsent(ctx, client, securitySecretKeyTOTP, candidate)
 	if err != nil {
 		return fmt.Errorf("persist totp encryption key: %w", err)
@@ -98,14 +107,88 @@ func ensureTOTPBootstrapSecret(ctx context.Context, client *ent.Client, cfg *con
 	if err := validateAES256HexSecret(storedSecret); err != nil {
 		return fmt.Errorf("invalid persisted totp encryption key: %w", err)
 	}
-	if storedSecret != candidate {
+	if !equalAES256HexSecrets(storedSecret, candidate) && containsAES256HexSecret(previous, storedSecret) {
+		rotatedSecret, rotateErr := rotatePersistedTOTPEncryptionKey(ctx, client, storedSecret, candidate)
+		if rotateErr != nil {
+			return fmt.Errorf("rotate totp encryption key: %w", rotateErr)
+		}
+		storedSecret = rotatedSecret
+		log.Println("TOTP encryption key rotated; configured previous keys remain available for decrypting existing protected data.")
+	}
+	if !equalAES256HexSecrets(storedSecret, candidate) {
 		log.Println("Warning: configured TOTP encryption key mismatches persisted value; using persisted key for cross-instance consistency.")
 	}
 	cfg.Totp.EncryptionKey = storedSecret
 	// Keep the existing safety rule: TOTP may only be enabled when the active
 	// persisted key exactly matches a key supplied by configuration.
-	cfg.Totp.EncryptionKeyConfigured = wasConfigured && storedSecret == candidate
+	cfg.Totp.EncryptionKeyConfigured = wasConfigured && equalAES256HexSecrets(storedSecret, candidate)
 	return nil
+}
+
+func validateTOTPEncryptionKeyring(current string, previous []string) error {
+	currentKey, err := decodeAES256Key(strings.TrimSpace(current), "totp encryption key")
+	if err != nil {
+		return err
+	}
+	if _, err := decodePreviousEncryptionKeys(previous, currentKey); err != nil {
+		return err
+	}
+	return nil
+}
+
+func normalizeEncryptionKeyList(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			normalized = append(normalized, value)
+		}
+	}
+	return normalized
+}
+
+func containsAES256HexSecret(values []string, target string) bool {
+	for _, value := range values {
+		if equalAES256HexSecrets(value, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func equalAES256HexSecrets(left, right string) bool {
+	leftBytes, leftErr := hex.DecodeString(strings.TrimSpace(left))
+	rightBytes, rightErr := hex.DecodeString(strings.TrimSpace(right))
+	return leftErr == nil && rightErr == nil && len(leftBytes) == 32 && len(rightBytes) == 32 &&
+		subtle.ConstantTimeCompare(leftBytes, rightBytes) == 1
+}
+
+func rotatePersistedTOTPEncryptionKey(ctx context.Context, client *ent.Client, expected, next string) (string, error) {
+	updated, err := client.SecuritySecret.Update().
+		Where(
+			securitysecret.KeyEQ(securitySecretKeyTOTP),
+			securitysecret.ValueEQ(expected),
+		).
+		SetValue(next).
+		Save(ctx)
+	if err != nil {
+		return "", err
+	}
+	if updated == 1 {
+		return next, nil
+	}
+
+	latest, err := querySecuritySecretWithRetry(ctx, client, securitySecretKeyTOTP)
+	if err != nil {
+		return "", err
+	}
+	if equalAES256HexSecrets(latest.Value, next) {
+		return latest.Value, nil
+	}
+	return "", fmt.Errorf("persisted key changed concurrently; refusing ambiguous rotation")
 }
 
 func validateAES256HexSecret(value string) error {

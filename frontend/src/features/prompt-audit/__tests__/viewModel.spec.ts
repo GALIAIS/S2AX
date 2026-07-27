@@ -14,6 +14,7 @@ const config = (): PromptAuditConfig => ({
   enabled: true,
   blocking_enabled: false,
   store_pass_events: false,
+  failure_mode: 'block_and_record',
   effective_mode: 'async_audit',
   strategy: 'priority',
   worker_count: 4,
@@ -22,7 +23,7 @@ const config = (): PromptAuditConfig => ({
   all_groups: true,
   group_ids: [],
   endpoints: [{
-    id: 'guard-1', name: 'Guard One', protocol: 'openai_compatible', base_url: 'http://127.0.0.1:8000',
+    id: 'guard-1', name: 'Guard One', protocol: 'openai_compatible', base_url: 'http://127.0.0.1:8000', network_scope: 'loopback',
     model: 'sileader/qwen3guard:0.6b', timeout_ms: 3000, input_limit: 4000, enabled: true,
     has_token: true, token_status: 'configured',
   }],

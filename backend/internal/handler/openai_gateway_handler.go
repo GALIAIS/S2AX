@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/invocationarchive"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -35,12 +36,21 @@ type OpenAIGatewayHandler struct {
 	errorPassthroughService    *service.ErrorPassthroughService
 	contentModerationService   *service.ContentModerationService
 	securityAuditCoordinator   *securityaudit.Coordinator
+	invocationArchive          *invocationarchive.Service
 	grokMediaEligibilityProber grokMediaEligibilityProber
 	opsService                 *service.OpsService
 	concurrencyHelper          *ConcurrencyHelper
 	imageLimiter               *imageConcurrencyLimiter
 	maxAccountSwitches         int
 	cfg                        *config.Config
+}
+
+// SetInvocationArchive attaches the optional gateway archive without changing
+// the constructor used by focused handler tests.
+func (h *OpenAIGatewayHandler) SetInvocationArchive(archive *invocationarchive.Service) {
+	if h != nil {
+		h.invocationArchive = archive
+	}
 }
 
 type grokMediaEligibilityProber interface {
@@ -1547,6 +1557,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 
 	// 解析渠道级模型映射
 	channelMappingWS, _ := h.gatewayService.ResolveChannelMappingAndRestrict(ctx, apiKey.GroupID, reqModel)
+	var archiveSession *invocationarchive.WebSocketSession
+	if h.invocationArchive != nil {
+		archiveSession = h.invocationArchive.BeginWebSocketSession(c, apiKey, firstMessage, reqModel)
+	}
 
 	var currentUserRelease func()
 	var currentAccountRelease func()
@@ -1826,7 +1840,20 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				currentAccountRelease = wrapReleaseOnDone(ctx, accountReleaseFunc)
 				return nil
 			},
+			OnTurnRequest: func(turn int, payload []byte, originalModel string) {
+				if archiveSession != nil {
+					archiveSession.CaptureTurnRequest(turn, payload, originalModel)
+				}
+			},
+			OnClientMessage: func(turn int, payload []byte) {
+				if archiveSession != nil {
+					archiveSession.CaptureClientMessage(turn, payload)
+				}
+			},
 			AfterTurn: func(turn int, result *service.OpenAIForwardResult, turnErr error) {
+				if archiveSession != nil {
+					defer archiveSession.FinishTurn(turn, result, turnErr)
+				}
 				// F1: cyber 标记按 turn 生命周期清理——defer 保证任意早返回路径都执行；
 				// CyberBlocked 必须在 submit 前同步预捕获（task 闭包由 worker 池异步执行，
 				// 届时 defer 已清除标记）。

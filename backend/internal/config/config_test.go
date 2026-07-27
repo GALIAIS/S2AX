@@ -311,6 +311,35 @@ func TestLoadForBootstrapAllowsMissingJWTSecret(t *testing.T) {
 	}
 }
 
+func TestLoadTOTPPreviousEncryptionKeysFromEnvironment(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	current := strings.Repeat("11", 32)
+	previousOne := strings.Repeat("22", 32)
+	previousTwo := strings.Repeat("33", 32)
+	t.Setenv("TOTP_ENCRYPTION_KEY", current)
+	t.Setenv("TOTP_PREVIOUS_ENCRYPTION_KEYS", " "+previousOne+",, "+previousTwo+" ")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, current, cfg.Totp.EncryptionKey)
+	require.Equal(t, []string{previousOne, previousTwo}, cfg.Totp.PreviousEncryptionKeys)
+}
+
+func TestLoadTOTPPreviousEncryptionKeysFromYAML(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	configDir := t.TempDir()
+	current := strings.Repeat("11", 32)
+	previous := strings.Repeat("22", 32)
+	yaml := "totp:\n  encryption_key: \"" + current + "\"\n  previous_encryption_keys:\n    - \" " + previous + " \"\n"
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(yaml), 0o600))
+	t.Setenv("DATA_DIR", configDir)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, current, cfg.Totp.EncryptionKey)
+	require.Equal(t, []string{previous}, cfg.Totp.PreviousEncryptionKeys)
+}
+
 func TestNormalizeRunMode(t *testing.T) {
 	tests := []struct {
 		input    string

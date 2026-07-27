@@ -47,6 +47,8 @@
               retry: runtime.queue.retry,
               done: runtime.queue.done,
               failed: runtime.queue.failed,
+              quarantined: runtime.queue.quarantined,
+              discarded: runtime.queue.discarded,
             }) }}
             <span class="mx-1.5 text-gray-300 dark:text-dark-600">·</span>
             {{ t('admin.promptAudit.runtime.deliveryTotals', { enqueued: runtime.enqueued_total, dropped: runtime.dropped_total, processed: runtime.processed_total, failed: runtime.failed_total }) }}

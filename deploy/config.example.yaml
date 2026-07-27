@@ -1045,6 +1045,11 @@ totp:
   # 双因素认证登录）。
   # Generate with / 生成命令: openssl rand -hex 32
   encryption_key: ""
+  # Read-only compatibility keys used during controlled key rotation.
+  # 轮换期间仅用于解密旧数据的历史密钥；最多 4 把，新数据不会使用这些密钥加密。
+  # Remove a key only after all protected data encrypted by it has been rewritten
+  # or its retention period has ended.
+  previous_encryption_keys: []
 
 # =============================================================================
 # LinuxDo Connect OAuth Login (SSO)

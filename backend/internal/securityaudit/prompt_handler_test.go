@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	servermiddleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -21,8 +22,13 @@ type fakePromptAdminService struct {
 	save         func(context.Context, UpdateConfigRequest, int64) (PublicConfig, error)
 	probe        func(context.Context, ProbeRequest) ProbeResult
 	runtime      RuntimeSnapshot
+	listJobs     func(context.Context, JobFilter, int, int) (*JobPage, error)
+	retryJob     func(context.Context, int64, int64, string) (*Job, error)
+	quarantine   func(context.Context, int64, int64, string) (*Job, error)
+	discard      func(context.Context, int64, int64, string) (*Job, error)
 	list         func(context.Context, EventFilter, int, int) (*EventPage, error)
 	get          func(context.Context, int64) (*Event, error)
+	reveal       func(context.Context, int64, int64, string) (*EvidenceReveal, error)
 	deleteOne    func(context.Context, int64) (*DeleteResult, error)
 	deleteIDs    func(context.Context, []int64) (*DeleteResult, error)
 	preview      func(context.Context, EventFilter, int64) (*DeletePreview, error)
@@ -43,6 +49,30 @@ func (s *fakePromptAdminService) Probe(ctx context.Context, req ProbeRequest) Pr
 	return s.probe(ctx, req)
 }
 func (s *fakePromptAdminService) Runtime(context.Context) RuntimeSnapshot { return s.runtime }
+func (s *fakePromptAdminService) ListJobs(ctx context.Context, filter JobFilter, page, pageSize int) (*JobPage, error) {
+	if s.listJobs == nil {
+		return &JobPage{}, nil
+	}
+	return s.listJobs(ctx, filter, page, pageSize)
+}
+func (s *fakePromptAdminService) RetryJob(ctx context.Context, id, actorID int64, reason string) (*Job, error) {
+	if s.retryJob == nil {
+		return nil, ErrJobNotFound
+	}
+	return s.retryJob(ctx, id, actorID, reason)
+}
+func (s *fakePromptAdminService) QuarantineJob(ctx context.Context, id, actorID int64, reason string) (*Job, error) {
+	if s.quarantine == nil {
+		return nil, ErrJobNotFound
+	}
+	return s.quarantine(ctx, id, actorID, reason)
+}
+func (s *fakePromptAdminService) DiscardJob(ctx context.Context, id, actorID int64, reason string) (*Job, error) {
+	if s.discard == nil {
+		return nil, ErrJobNotFound
+	}
+	return s.discard(ctx, id, actorID, reason)
+}
 func (s *fakePromptAdminService) ListEvents(ctx context.Context, filter EventFilter, page, pageSize int) (*EventPage, error) {
 	if s.list == nil {
 		return &EventPage{}, nil
@@ -54,6 +84,12 @@ func (s *fakePromptAdminService) GetEvent(ctx context.Context, id int64) (*Event
 		return nil, ErrEventNotFound
 	}
 	return s.get(ctx, id)
+}
+func (s *fakePromptAdminService) RevealEventEvidence(ctx context.Context, eventID, actorID int64, reason string) (*EvidenceReveal, error) {
+	if s.reveal == nil {
+		return nil, ErrEvidenceUnavailable
+	}
+	return s.reveal(ctx, eventID, actorID, reason)
 }
 func (s *fakePromptAdminService) DeleteEvent(ctx context.Context, id int64) (*DeleteResult, error) {
 	if s.deleteOne == nil {
@@ -94,8 +130,13 @@ func promptAdminRouter(service PromptAdminService) *gin.Engine {
 	group.PUT("/config", handler.UpdateConfig)
 	group.POST("/endpoints/probe", handler.ProbeEndpoint)
 	group.GET("/runtime", handler.GetRuntime)
+	group.GET("/jobs", handler.ListJobs)
+	group.POST("/jobs/:id/retry", handler.RetryJob)
+	group.POST("/jobs/:id/quarantine", handler.QuarantineJob)
+	group.POST("/jobs/:id/discard", handler.DiscardJob)
 	group.GET("/events", handler.ListEvents)
 	group.GET("/events/:id", handler.GetEvent)
+	group.POST("/events/:id/evidence/reveal", handler.RevealEventEvidence)
 	group.DELETE("/events/:id", handler.DeleteEvent)
 	group.POST("/events/batch-delete", handler.BatchDelete)
 	group.POST("/events/delete-preview", handler.DeletePreview)
@@ -202,6 +243,43 @@ func TestPromptAdminRejectsInvalidEventIDsTimesAndPagination(t *testing.T) {
 	}
 }
 
+func TestPromptAdminJobOperationsRequireReasonMapErrorsAndBindActor(t *testing.T) {
+	t.Run("list validation", func(t *testing.T) {
+		router := promptAdminRouter(&fakePromptAdminService{})
+		response := promptAdminRequest(t, router, http.MethodGet, "/admin/prompt-audit/jobs?status=invalid", nil)
+		require.Equal(t, http.StatusBadRequest, response.Code)
+		require.Contains(t, response.Body.String(), "prompt_audit_invalid_job_status")
+	})
+
+	t.Run("reason required", func(t *testing.T) {
+		router := promptAdminRouter(&fakePromptAdminService{})
+		response := promptAdminRequest(t, router, http.MethodPost, "/admin/prompt-audit/jobs/8/retry", map[string]any{"reason": "x"})
+		require.Equal(t, http.StatusBadRequest, response.Code)
+		require.Contains(t, response.Body.String(), "prompt_audit_job_reason_invalid")
+	})
+
+	t.Run("payload expired", func(t *testing.T) {
+		service := &fakePromptAdminService{retryJob: func(context.Context, int64, int64, string) (*Job, error) {
+			return nil, ErrJobPayloadUnavailable
+		}}
+		response := promptAdminRequest(t, promptAdminRouter(service), http.MethodPost, "/admin/prompt-audit/jobs/8/retry", map[string]any{"reason": "operator retry"})
+		require.Equal(t, http.StatusConflict, response.Code)
+		require.Contains(t, response.Body.String(), "prompt_audit_job_payload_unavailable")
+	})
+
+	t.Run("quarantine success", func(t *testing.T) {
+		service := &fakePromptAdminService{quarantine: func(_ context.Context, id, actorID int64, reason string) (*Job, error) {
+			require.Equal(t, int64(8), id)
+			require.Equal(t, int64(42), actorID)
+			require.Equal(t, "incident review", reason)
+			return &Job{ID: id, Status: "quarantined"}, nil
+		}}
+		response := promptAdminRequest(t, promptAdminRouter(service), http.MethodPost, "/admin/prompt-audit/jobs/8/quarantine", map[string]any{"reason": "incident review"})
+		require.Equal(t, http.StatusOK, response.Code)
+		require.Contains(t, response.Body.String(), `"status":"quarantined"`)
+	})
+}
+
 func validHandlerUpdateRequest(token string) UpdateConfigRequest {
 	return UpdateConfigRequest{
 		ExpectedConfigVersion: 7,
@@ -229,4 +307,25 @@ func TestPromptAdminDeleteConfirmationErrorsStayGeneric(t *testing.T) {
 	require.Contains(t, response.Body.String(), "prompt_audit_delete_confirmation_invalid")
 	require.NotContains(t, response.Body.String(), "sensitive-token")
 	require.NotContains(t, response.Body.String(), "secret-confirmation")
+}
+
+func TestPromptAdminEvidenceRevealRequiresReasonAndNeverCachesPlaintext(t *testing.T) {
+	const canary = "PROMPT_EVIDENCE_CANARY"
+	service := &fakePromptAdminService{reveal: func(_ context.Context, eventID, actorID int64, reason string) (*EvidenceReveal, error) {
+		require.Equal(t, int64(9), eventID)
+		require.Equal(t, int64(42), actorID)
+		require.Equal(t, "incident review", reason)
+		return &EvidenceReveal{EventID: eventID, FullPrompt: canary, RevealedAt: time.Now().UTC()}, nil
+	}}
+	router := promptAdminRouter(service)
+
+	invalid := promptAdminRequest(t, router, http.MethodPost, "/admin/prompt-audit/events/9/evidence/reveal", map[string]any{"reason": "x"})
+	require.Equal(t, http.StatusBadRequest, invalid.Code)
+	require.NotContains(t, invalid.Body.String(), canary)
+
+	success := promptAdminRequest(t, router, http.MethodPost, "/admin/prompt-audit/events/9/evidence/reveal", map[string]any{"reason": "incident review"})
+	require.Equal(t, http.StatusOK, success.Code)
+	require.Equal(t, "no-store", success.Header().Get("Cache-Control"))
+	require.Equal(t, "no-cache", success.Header().Get("Pragma"))
+	require.Contains(t, success.Body.String(), canary)
 }

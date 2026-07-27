@@ -218,6 +218,7 @@ export default {
     securityAudit: '安全审计',
     contentModeration: '内容审核',
     promptAudit: '提示词审计',
+    invocationArchive: '调用归档',
     auditLogs: '操作日志',
   },
 

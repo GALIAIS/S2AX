@@ -700,6 +700,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/invocation-archive',
+    name: 'AdminInvocationArchive',
+    component: () => import('@/features/invocation-archive/InvocationArchiveView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Invocation Archive',
+      titleKey: 'admin.invocationArchive.title',
+      descriptionKey: 'admin.invocationArchive.description'
+    }
+  },
+  {
     path: '/admin/usage',
     name: 'AdminUsage',
     component: () => import('@/views/admin/UsageView.vue'),

@@ -36,6 +36,13 @@ func (r *cyberOrderingTestRepo) UpdateLogEmailSent(ctx context.Context, id int64
 	return nil
 }
 
+func (r *cyberOrderingTestRepo) UpdateLogOutcomes(ctx context.Context, id int64, autoBanned, emailSent bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, "update_outcomes")
+	return nil
+}
+
 func (r *cyberOrderingTestRepo) ListLogs(ctx context.Context, filter ContentModerationLogFilter) ([]ContentModerationLog, *pagination.PaginationResult, error) {
 	return nil, nil, nil
 }

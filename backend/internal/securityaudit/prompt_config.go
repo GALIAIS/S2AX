@@ -25,6 +25,16 @@ const (
 	MinInputLimit        = 128
 	MaxInputLimit        = 100000
 	DefaultPayloadTTL    = 30 * time.Minute
+	DefaultFailureMode   = FailureBlockAndRecord
+)
+
+type FailureMode string
+
+const (
+	FailureAllowAndRecord FailureMode = "allow_and_record"
+	FailureBlockAndRecord FailureMode = "block_and_record"
+	FailureFallbackLocal  FailureMode = "fallback_local"
+	FailureObserve        FailureMode = "degraded_observe"
 )
 
 type SecretEncryptor interface {
@@ -38,6 +48,7 @@ type ConfigStore interface {
 	Start(ctx context.Context) error
 	Shutdown(ctx context.Context) error
 	Active() (ActiveConfig, bool)
+	ActiveVersion(ctx context.Context, version int64) (ActiveConfig, bool, error)
 	EffectiveMode() Mode
 	// BlockingActivationDegraded is true when storage intent requires blocking
 	// but no usable blocking snapshot is active (cold start or failed reload).
@@ -52,21 +63,24 @@ type ConfigStore interface {
 }
 
 type StorageEndpoint struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	Protocol        string `json:"protocol"`
-	BaseURL         string `json:"base_url"`
-	Model           string `json:"model"`
-	TokenCiphertext string `json:"token_ciphertext,omitempty"`
-	TimeoutMS       int    `json:"timeout_ms"`
-	InputLimit      int    `json:"input_limit"`
-	Enabled         bool   `json:"enabled"`
+	ID              string       `json:"id"`
+	Name            string       `json:"name"`
+	Protocol        string       `json:"protocol"`
+	Adapter         string       `json:"adapter"`
+	BaseURL         string       `json:"base_url"`
+	NetworkScope    NetworkScope `json:"network_scope"`
+	Model           string       `json:"model"`
+	TokenCiphertext string       `json:"token_ciphertext,omitempty"`
+	TimeoutMS       int          `json:"timeout_ms"`
+	InputLimit      int          `json:"input_limit"`
+	Enabled         bool         `json:"enabled"`
 }
 
 type storageConfig struct {
 	Enabled         bool              `json:"enabled"`
 	BlockingEnabled bool              `json:"blocking_enabled"`
 	StorePassEvents bool              `json:"store_pass_events"`
+	FailureMode     FailureMode       `json:"failure_mode"`
 	Strategy        string            `json:"strategy"`
 	WorkerCount     int               `json:"worker_count"`
 	QueueCapacity   int               `json:"queue_capacity"`
@@ -81,15 +95,17 @@ type storageConfig struct {
 }
 
 type ActiveEndpoint struct {
-	ID         string
-	Name       string
-	Protocol   string
-	BaseURL    string
-	Model      string
-	Token      string
-	TimeoutMS  int
-	InputLimit int
-	Enabled    bool
+	ID           string
+	Name         string
+	Protocol     string
+	Adapter      string
+	BaseURL      string
+	NetworkScope NetworkScope
+	Model        string
+	Token        string
+	TimeoutMS    int
+	InputLimit   int
+	Enabled      bool
 }
 
 type ActiveConfig struct {
@@ -97,6 +113,7 @@ type ActiveConfig struct {
 	Enabled            bool
 	BlockingEnabled    bool
 	StorePassEvents    bool
+	FailureMode        FailureMode
 	Strategy           string
 	WorkerCount        int
 	QueueCapacity      int
@@ -111,22 +128,25 @@ type ActiveConfig struct {
 }
 
 type PublicEndpoint struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Protocol    string `json:"protocol"`
-	BaseURL     string `json:"base_url"`
-	Model       string `json:"model"`
-	TimeoutMS   int    `json:"timeout_ms"`
-	InputLimit  int    `json:"input_limit"`
-	Enabled     bool   `json:"enabled"`
-	HasToken    bool   `json:"has_token"`
-	TokenStatus string `json:"token_status"`
+	ID           string       `json:"id"`
+	Name         string       `json:"name"`
+	Protocol     string       `json:"protocol"`
+	Adapter      string       `json:"adapter"`
+	BaseURL      string       `json:"base_url"`
+	NetworkScope NetworkScope `json:"network_scope"`
+	Model        string       `json:"model"`
+	TimeoutMS    int          `json:"timeout_ms"`
+	InputLimit   int          `json:"input_limit"`
+	Enabled      bool         `json:"enabled"`
+	HasToken     bool         `json:"has_token"`
+	TokenStatus  string       `json:"token_status"`
 }
 
 type PublicConfig struct {
 	Enabled         bool             `json:"enabled"`
 	BlockingEnabled bool             `json:"blocking_enabled"`
 	StorePassEvents bool             `json:"store_pass_events"`
+	FailureMode     FailureMode      `json:"failure_mode"`
 	EffectiveMode   Mode             `json:"effective_mode"`
 	Strategy        string           `json:"strategy"`
 	WorkerCount     int              `json:"worker_count"`
@@ -142,16 +162,18 @@ type PublicConfig struct {
 }
 
 type UpdateEndpoint struct {
-	ID         string `json:"id" binding:"required"`
-	Name       string `json:"name" binding:"required"`
-	Protocol   string `json:"protocol"`
-	BaseURL    string `json:"base_url" binding:"required"`
-	Model      string `json:"model"`
-	Token      string `json:"token,omitempty"`
-	ClearToken bool   `json:"clear_token"`
-	TimeoutMS  int    `json:"timeout_ms"`
-	InputLimit int    `json:"input_limit"`
-	Enabled    bool   `json:"enabled"`
+	ID           string       `json:"id" binding:"required"`
+	Name         string       `json:"name" binding:"required"`
+	Protocol     string       `json:"protocol"`
+	Adapter      string       `json:"adapter"`
+	BaseURL      string       `json:"base_url" binding:"required"`
+	NetworkScope NetworkScope `json:"network_scope"`
+	Model        string       `json:"model"`
+	Token        string       `json:"token,omitempty"`
+	ClearToken   bool         `json:"clear_token"`
+	TimeoutMS    int          `json:"timeout_ms"`
+	InputLimit   int          `json:"input_limit"`
+	Enabled      bool         `json:"enabled"`
 }
 
 type UpdateConfigRequest struct {
@@ -159,6 +181,7 @@ type UpdateConfigRequest struct {
 	Enabled               bool             `json:"enabled"`
 	BlockingEnabled       bool             `json:"blocking_enabled"`
 	StorePassEvents       bool             `json:"store_pass_events"`
+	FailureMode           FailureMode      `json:"failure_mode"`
 	Strategy              string           `json:"strategy"`
 	WorkerCount           int              `json:"worker_count"`
 	QueueCapacity         int              `json:"queue_capacity"`
@@ -173,6 +196,7 @@ func DefaultStorageConfig() storageConfig {
 		Enabled:         false,
 		BlockingEnabled: false,
 		StorePassEvents: false,
+		FailureMode:     DefaultFailureMode,
 		Strategy:        "priority",
 		WorkerCount:     DefaultWorkerCount,
 		QueueCapacity:   DefaultQueueCapacity,
@@ -209,6 +233,7 @@ func normalizeStorageConfig(cfg *storageConfig) {
 	if strings.TrimSpace(cfg.Strategy) == "" {
 		cfg.Strategy = "priority"
 	}
+	cfg.FailureMode = normalizeFailureMode(cfg.FailureMode)
 	if cfg.WorkerCount == 0 {
 		cfg.WorkerCount = DefaultWorkerCount
 	}
@@ -230,10 +255,12 @@ func normalizeStorageConfig(cfg *storageConfig) {
 		if ep.Protocol == "" {
 			ep.Protocol = "openai_compatible"
 		}
+		ep.Adapter = normalizeDetectorAdapter(ep.Adapter)
 		ep.BaseURL = strings.TrimSpace(ep.BaseURL)
+		ep.NetworkScope = NormalizeNetworkScope(ep.NetworkScope, ep.BaseURL)
 		ep.Model = strings.TrimSpace(ep.Model)
 		if ep.Model == "" {
-			ep.Model = DefaultGuardModel
+			ep.Model = defaultDetectorModel(ep.Adapter)
 		}
 		if ep.TimeoutMS == 0 {
 			ep.TimeoutMS = DefaultTimeoutMS
@@ -250,6 +277,9 @@ func validateStorageConfig(cfg storageConfig) error {
 	}
 	if cfg.Strategy != "priority" {
 		return infraerrors.BadRequest("prompt_audit_invalid_strategy", "提示词审计策略仅支持 priority")
+	}
+	if !validFailureMode(normalizeFailureMode(cfg.FailureMode)) {
+		return infraerrors.BadRequest("prompt_audit_invalid_failure_mode", "提示词审计失败模式无效")
 	}
 	if cfg.WorkerCount < 1 || cfg.WorkerCount > MaxWorkerCount {
 		return infraerrors.BadRequest("prompt_audit_invalid_worker_count", "Worker 数量超出允许范围")
@@ -276,7 +306,10 @@ func validateStorageConfig(cfg storageConfig) error {
 		if ep.Protocol != "openai_compatible" {
 			return infraerrors.BadRequest("prompt_audit_invalid_endpoint_protocol", "审计节点仅支持 OpenAI 兼容协议")
 		}
-		if _, err := NormalizeBaseURL(ep.BaseURL); err != nil {
+		if !validDetectorAdapter(ep.Adapter) {
+			return infraerrors.BadRequest("prompt_audit_invalid_detector_adapter", "审计节点适配器无效")
+		}
+		if err := ValidateEndpointNetworkPolicy(ep.BaseURL, ep.NetworkScope); err != nil {
 			return err
 		}
 		if ep.TimeoutMS < MinTimeoutMS || ep.TimeoutMS > MaxTimeoutMS {
@@ -298,6 +331,9 @@ func validateStorageConfig(cfg storageConfig) error {
 func validateUpdateConfigRequest(req UpdateConfigRequest) error {
 	if strings.TrimSpace(req.Strategy) != "priority" {
 		return infraerrors.BadRequest("prompt_audit_invalid_strategy", "提示词审计策略仅支持 priority")
+	}
+	if !validFailureMode(normalizeFailureMode(req.FailureMode)) {
+		return infraerrors.BadRequest("prompt_audit_invalid_failure_mode", "提示词审计失败模式无效")
 	}
 	if req.WorkerCount < 1 || req.WorkerCount > MaxWorkerCount {
 		return infraerrors.BadRequest("prompt_audit_invalid_worker_count", "Worker 数量超出允许范围")
@@ -324,6 +360,9 @@ func validateUpdateConfigRequest(req UpdateConfigRequest) error {
 		}
 	}
 	for _, endpoint := range req.Endpoints {
+		if err := ValidateEndpointNetworkPolicy(endpoint.BaseURL, endpoint.NetworkScope); err != nil {
+			return err
+		}
 		if endpoint.TimeoutMS < MinTimeoutMS || endpoint.TimeoutMS > MaxTimeoutMS {
 			return infraerrors.BadRequest("prompt_audit_invalid_timeout", "审计节点超时超出允许范围")
 		}
@@ -376,15 +415,16 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool) PublicConfig 
 			status = "configured"
 		}
 		endpoints = append(endpoints, PublicEndpoint{
-			ID: ep.ID, Name: ep.Name, Protocol: ep.Protocol, BaseURL: ep.BaseURL,
-			Model: ep.Model, TimeoutMS: ep.TimeoutMS, InputLimit: ep.InputLimit,
+			ID: ep.ID, Name: ep.Name, Protocol: ep.Protocol, Adapter: normalizeDetectorAdapter(ep.Adapter), BaseURL: ep.BaseURL,
+			NetworkScope: ep.NetworkScope,
+			Model:        ep.Model, TimeoutMS: ep.TimeoutMS, InputLimit: ep.InputLimit,
 			Enabled: ep.Enabled, HasToken: hasToken, TokenStatus: status,
 		})
 	}
 	active := ActiveConfig{RiskControlEnabled: riskControlEnabled, Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled}
 	return PublicConfig{
 		Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled, StorePassEvents: cfg.StorePassEvents,
-		EffectiveMode: active.EffectiveMode(), Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
+		FailureMode: cfg.FailureMode, EffectiveMode: active.EffectiveMode(), Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: scanners, AllGroups: cfg.AllGroups,
 		GroupIDs: groupIDs, Endpoints: endpoints, ConfigVersion: cfg.ConfigVersion,
 		UpdatedAt: cfg.UpdatedAt, UpdatedBy: cfg.UpdatedBy, ChangeSummary: cfg.ChangeSummary,
@@ -394,7 +434,7 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool) PublicConfig 
 func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor SecretEncryptor) (ActiveConfig, error) {
 	active := ActiveConfig{
 		RiskControlEnabled: riskControlEnabled, Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled,
-		StorePassEvents: cfg.StorePassEvents, Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
+		StorePassEvents: cfg.StorePassEvents, FailureMode: cfg.FailureMode, Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: append([]string(nil), cfg.Scanners...), AllGroups: cfg.AllGroups,
 		GroupIDs: append([]int64(nil), cfg.GroupIDs...), ConfigVersion: cfg.ConfigVersion,
 		UpdatedAt: cfg.UpdatedAt, UpdatedBy: cfg.UpdatedBy, ChangeSummary: cfg.ChangeSummary,
@@ -413,11 +453,58 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 			token = plain
 		}
 		active.Endpoints = append(active.Endpoints, ActiveEndpoint{
-			ID: ep.ID, Name: ep.Name, Protocol: ep.Protocol, BaseURL: ep.BaseURL, Model: ep.Model,
-			Token: token, TimeoutMS: ep.TimeoutMS, InputLimit: ep.InputLimit, Enabled: ep.Enabled,
+			ID: ep.ID, Name: ep.Name, Protocol: ep.Protocol, Adapter: normalizeDetectorAdapter(ep.Adapter), BaseURL: ep.BaseURL, Model: ep.Model,
+			NetworkScope: ep.NetworkScope,
+			Token:        token, TimeoutMS: ep.TimeoutMS, InputLimit: ep.InputLimit, Enabled: ep.Enabled,
 		})
 	}
 	return active, nil
+}
+
+func normalizeFailureMode(mode FailureMode) FailureMode {
+	if strings.TrimSpace(string(mode)) == "" {
+		return DefaultFailureMode
+	}
+	return FailureMode(strings.TrimSpace(string(mode)))
+}
+
+func validFailureMode(mode FailureMode) bool {
+	switch mode {
+	case FailureAllowAndRecord, FailureBlockAndRecord, FailureFallbackLocal, FailureObserve:
+		return true
+	default:
+		return false
+	}
+}
+
+const (
+	DetectorAdapterQwen3Guard     = "qwen3guard_chat"
+	DetectorAdapterModerations    = "openai_moderations"
+	DetectorAdapterStrictJSONChat = "strict_json_chat"
+)
+
+func normalizeDetectorAdapter(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return DetectorAdapterQwen3Guard
+	}
+	return value
+}
+
+func validDetectorAdapter(value string) bool {
+	switch normalizeDetectorAdapter(value) {
+	case DetectorAdapterQwen3Guard, DetectorAdapterModerations, DetectorAdapterStrictJSONChat:
+		return true
+	default:
+		return false
+	}
+}
+
+func defaultDetectorModel(adapter string) string {
+	if normalizeDetectorAdapter(adapter) == DetectorAdapterModerations {
+		return "omni-moderation-latest"
+	}
+	return DefaultGuardModel
 }
 
 func changeSummary(cfg storageConfig) string {

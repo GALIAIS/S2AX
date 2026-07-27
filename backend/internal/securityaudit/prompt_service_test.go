@@ -68,6 +68,45 @@ func TestPromptServiceStartReportsDependencyFailureWithoutPanic(t *testing.T) {
 	require.NoError(t, service.Shutdown(ctx))
 }
 
+func TestPromptServiceAppliesConfiguredRemoteFailureMode(t *testing.T) {
+	request := Request{
+		Protocol: "openai_chat_completions",
+		Body:     []byte(`{"messages":[{"role":"user","content":"hello"}]}`),
+	}
+	for _, test := range []struct {
+		mode      FailureMode
+		allow     bool
+		wantError bool
+	}{
+		{mode: FailureBlockAndRecord, wantError: true},
+		{mode: FailureAllowAndRecord, allow: true},
+		{mode: FailureFallbackLocal, allow: true},
+		{mode: FailureObserve, allow: true},
+	} {
+		t.Run(string(test.mode), func(t *testing.T) {
+			cfg := guardConfig(ActiveEndpoint{ID: "bad", Enabled: true, TimeoutMS: 1000, InputLimit: 100})
+			cfg.FailureMode = test.mode
+			cfg.AllGroups = true
+			store := &fakeConfigStore{cfg: cfg, active: true}
+			service := &PromptService{
+				config: store, evaluator: newGuardEvaluator(&scriptedScanner{}, nil, NewAtomicMetrics(), 4, 2),
+				metrics: NewAtomicMetrics(), clock: realClock{},
+			}
+			decision, err := service.Evaluate(context.Background(), request)
+			if test.wantError {
+				require.Error(t, err)
+				require.Nil(t, decision)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, decision)
+			require.Equal(t, test.allow, decision.AllowNextStage)
+			require.Equal(t, test.mode, decision.FailureMode)
+			require.Equal(t, ErrorCodeUnavailable, decision.ErrorCode)
+		})
+	}
+}
+
 func TestPromptServiceRejectsInvalidDeleteConfirmationClaims(t *testing.T) {
 	now := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
 	start, end := now.Add(-time.Hour), now.Add(time.Hour)

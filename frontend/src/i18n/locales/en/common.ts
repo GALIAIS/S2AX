@@ -218,6 +218,7 @@ export default {
     securityAudit: 'Security Audit',
     contentModeration: 'Content Moderation',
     promptAudit: 'Prompt Audit',
+    invocationArchive: 'Invocation Archive',
     auditLogs: 'Audit Logs',
   },
 

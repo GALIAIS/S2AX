@@ -86,6 +86,14 @@
               @preview-delete="requestFilterDeletePreview"
             />
           </div>
+
+          <div v-show="activeTab === 'jobs'" data-test="tab-panel-jobs">
+            <PromptJobWorkspace />
+          </div>
+
+          <div v-show="activeTab === 'control'" data-test="tab-panel-control">
+            <SecurityAuditWorkbench />
+          </div>
         </main>
       </template>
     </div>
@@ -138,7 +146,16 @@
       @confirm="confirmFilterDelete"
       @criteria-change="clearDeletePreview"
     />
-    <EventDetailDialog :show="showEventDetail" :event="activeEvent" :loading="loading.detail" @close="closeEventDetail" />
+    <EventDetailDialog
+      :show="showEventDetail"
+      :event="activeEvent"
+      :loading="loading.detail"
+      :revealed-prompt="revealedPrompt"
+      :revealing="loading.revealing"
+      @close="closeEventDetail"
+      @reveal="revealEvidence"
+    />
+    <TotpStepUpDialog :controller="securityStepUp" />
   </AppLayout>
 </template>
 
@@ -147,7 +164,14 @@ import { computed, defineComponent, h, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 import { useAppStore } from '@/stores/app'
+import {
+  isStepUpBlocked,
+  isStepUpCancelled,
+  stepUpBlockReason,
+  useStepUp,
+} from '@/composables/useStepUp'
 import { extractApiErrorCode, extractApiErrorMessage } from '@/utils/apiError'
 import RuntimeOverview from './components/RuntimeOverview.vue'
 import EndpointPool from './components/EndpointPool.vue'
@@ -155,6 +179,8 @@ import PolicyPanel from './components/PolicyPanel.vue'
 import EventWorkspace from './components/EventWorkspace.vue'
 import EventDetailDialog from './components/EventDetailDialog.vue'
 import FilterDeleteDialog from './components/FilterDeleteDialog.vue'
+import PromptJobWorkspace from './components/PromptJobWorkspace.vue'
+import SecurityAuditWorkbench from './components/SecurityAuditWorkbench.vue'
 import promptAuditAPI from './api'
 import type {
   PromptAuditDraft,
@@ -172,10 +198,13 @@ import { buildUpdateRequest, cloneData, configToDraft, draftFingerprint, emptyEv
 
 const { t, locale } = useI18n()
 const appStore = useAppStore()
-type PromptAuditPageTab = 'config' | 'events'
+const securityStepUp = useStepUp()
+type PromptAuditPageTab = 'config' | 'events' | 'jobs' | 'control'
 const activeTab = ref<PromptAuditPageTab>('events')
 const pageTabs = computed(() => [
   { id: 'events' as const, label: t('admin.promptAudit.tabs.events') },
+  { id: 'jobs' as const, label: t('admin.promptAudit.tabs.jobs') },
+  { id: 'control' as const, label: t('admin.promptAudit.tabs.control') },
   { id: 'config' as const, label: t('admin.promptAudit.tabs.config') },
 ])
 const serverConfig = ref<PromptAuditDraft | null>(null)
@@ -187,6 +216,7 @@ const filters = ref<PromptEventFilters>(emptyEventFilters())
 const appliedFilters = ref<PromptEventFilters>(emptyEventFilters())
 const selectedEventIds = ref<number[]>([])
 const activeEvent = ref<PromptAuditEvent | null>(null)
+const revealedPrompt = ref('')
 const showEventDetail = ref(false)
 const probeResults = reactive<Record<string, PromptProbeResult>>({})
 const probingIds = ref<string[]>([])
@@ -195,7 +225,7 @@ const deletePreview = ref<PromptDeletePreview | null>(null)
 const deletePreviewFilters = ref<PromptEventFilters | null>(null)
 const showBlockingConfirmation = ref(false)
 const deleteRequest = reactive<{ mode: '' | 'single' | 'batch'; ids: number[] }>({ mode: '', ids: [] })
-const loading = reactive({ config: false, runtime: false, groups: false, events: false, saving: false, detail: false, deleting: false, previewing: false })
+const loading = reactive({ config: false, runtime: false, groups: false, events: false, saving: false, detail: false, revealing: false, deleting: false, previewing: false })
 const loadErrors = reactive<PromptLoadErrors>({ config: '', runtime: '', groups: '', events: '' })
 const dirty = computed(() => draftFingerprint(draft.value) !== draftFingerprint(serverConfig.value))
 
@@ -242,6 +272,23 @@ function errorMessage(error: unknown, fallbackKey: string): string {
     if (translated !== key) return translated
   }
   return extractApiErrorMessage(error, t(fallbackKey))
+}
+
+async function runSensitive<T>(operation: () => Promise<T>): Promise<T | undefined> {
+  try {
+    return await securityStepUp.run(operation)
+  } catch (error) {
+    if (isStepUpCancelled(error)) return undefined
+    if (isStepUpBlocked(error)) {
+      appStore.showError(
+        stepUpBlockReason(error) === 'STEP_UP_ADMIN_API_KEY_FORBIDDEN'
+          ? t('stepUp.adminApiKeyForbidden')
+          : t('stepUp.notEnabled'),
+      )
+      return undefined
+    }
+    throw error
+  }
 }
 
 async function loadConfig() {
@@ -313,7 +360,8 @@ async function saveConfig() {
   if (!draft.value || !dirty.value) return
   loading.saving = true
   try {
-    const saved = await promptAuditAPI.updateConfig(buildUpdateRequest(draft.value))
+    const saved = await runSensitive(() => promptAuditAPI.updateConfig(buildUpdateRequest(draft.value!)))
+    if (!saved) return
     serverConfig.value = configToDraft(saved)
     draft.value = configToDraft(saved)
     appStore.showSuccess(t('admin.promptAudit.messages.saved'))
@@ -329,7 +377,8 @@ async function runProbe(endpoint: PromptAuditEndpointDraft) {
   if (probingIds.value.includes(endpoint.id)) return
   probingIds.value = [...probingIds.value, endpoint.id]
   try {
-    const result = await promptAuditAPI.probeEndpoint(endpoint)
+    const result = await runSensitive(() => promptAuditAPI.probeEndpoint(endpoint))
+    if (!result) return
     probeResults[endpoint.id] = result
     if (result.ok) appStore.showSuccess(t('admin.promptAudit.messages.probeSucceeded'))
     else appStore.showError(`${result.error_code || result.status}: ${result.message}`)
@@ -357,11 +406,29 @@ async function openEvent(id: number) {
   showEventDetail.value = true
   loading.detail = true
   activeEvent.value = null
+  revealedPrompt.value = ''
   try { activeEvent.value = await promptAuditAPI.getEvent(id) }
   catch (error) { appStore.showError(errorMessage(error, 'admin.promptAudit.errors.loadDetail')); showEventDetail.value = false }
   finally { loading.detail = false }
 }
-function closeEventDetail() { showEventDetail.value = false; activeEvent.value = null }
+function closeEventDetail() {
+  showEventDetail.value = false
+  activeEvent.value = null
+  revealedPrompt.value = ''
+}
+async function revealEvidence(reason: string) {
+  if (!activeEvent.value || loading.revealing) return
+  loading.revealing = true
+  try {
+    const result = await runSensitive(() => promptAuditAPI.revealEventEvidence(activeEvent.value!.id, reason))
+    if (!result) return
+    revealedPrompt.value = result.full_prompt
+  } catch (error) {
+    appStore.showError(errorMessage(error, 'admin.promptAudit.errors.revealEvidence'))
+  } finally {
+    loading.revealing = false
+  }
+}
 function requestSingleDelete(id: number) { deleteRequest.mode = 'single'; deleteRequest.ids = [id] }
 function requestBatchDelete() { if (selectedEventIds.value.length) { deleteRequest.mode = 'batch'; deleteRequest.ids = [...selectedEventIds.value] } }
 function clearDeleteRequest() { deleteRequest.mode = ''; deleteRequest.ids = [] }
@@ -372,7 +439,10 @@ async function confirmIDDelete() {
   if (!mode || ids.length === 0) return
   loading.deleting = true
   try {
-    const result = mode === 'single' ? await promptAuditAPI.deleteEvent(ids[0]) : await promptAuditAPI.batchDeleteEvents(ids)
+    const result = await runSensitive(() => (
+      mode === 'single' ? promptAuditAPI.deleteEvent(ids[0]) : promptAuditAPI.batchDeleteEvents(ids)
+    ))
+    if (!result) return
     appStore.showSuccess(t('admin.promptAudit.messages.deleted', { count: result.deleted_events }))
     await Promise.allSettled([loadEvents(), loadRuntime()])
   } catch (error) { appStore.showError(errorMessage(error, 'admin.promptAudit.errors.delete')) }
@@ -404,17 +474,19 @@ async function confirmFilterDelete(filters?: PromptEventFilters) {
   if (loading.deleting) return
   loading.deleting = true
   try {
-    let preview = deletePreview.value
-    let previewFilters = deletePreviewFilters.value ? cloneData(deletePreviewFilters.value) : null
-    // One-click path: no fresh preview (never requested, or cleared by a
-    // criteria change) — mint the confirmation token on the fly from the
-    // criteria the dialog just emitted, then delete in the same action.
-    if ((!preview || !previewFilters) && filters) {
-      preview = await promptAuditAPI.previewDelete(filters)
-      previewFilters = cloneData(filters)
-    }
-    if (!preview || !previewFilters) return
-    const result = await promptAuditAPI.deleteEventsByFilter(previewFilters, preview)
+    const result = await runSensitive(async () => {
+      let preview = deletePreview.value
+      let previewFilters = deletePreviewFilters.value ? cloneData(deletePreviewFilters.value) : null
+      // Mint the confirmation token inside the step-up retry callback so a
+      // delayed second factor cannot leave a stale destructive token.
+      if ((!preview || !previewFilters) && filters) {
+        preview = await promptAuditAPI.previewDelete(filters)
+        previewFilters = cloneData(filters)
+      }
+      if (!preview || !previewFilters) return null
+      return promptAuditAPI.deleteEventsByFilter(previewFilters, preview)
+    })
+    if (!result) return
     closeFilterDelete()
     appStore.showSuccess(t('admin.promptAudit.messages.deleted', { count: result.deleted_events }))
     await Promise.allSettled([loadEvents(), loadRuntime()])

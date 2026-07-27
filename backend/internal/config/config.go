@@ -1543,6 +1543,9 @@ type TotpConfig struct {
 	// EncryptionKey 用于加密 TOTP 密钥的 AES-256 密钥（32 字节 hex 编码）
 	// 如果为空，将自动生成一个随机密钥（仅适用于开发环境）
 	EncryptionKey string `mapstructure:"encryption_key"`
+	// PreviousEncryptionKeys 是轮换窗口内仅用于解密旧数据的历史 AES-256 密钥。
+	// 新数据始终使用 EncryptionKey 加密；最多保留 4 把，完成数据迁移后应及时移除。
+	PreviousEncryptionKeys []string `mapstructure:"previous_encryption_keys"`
 	// EncryptionKeyConfigured 标记加密密钥是否为手动配置（非自动生成）
 	// 只有手动配置了密钥才允许在管理后台启用 TOTP 功能
 	EncryptionKeyConfigured bool `mapstructure:"-"`
@@ -1729,6 +1732,7 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	}
 	trustedProxiesEnv, trustedProxiesEnvConfigured := os.LookupEnv("SERVER_TRUSTED_PROXIES")
 	forwardedClientIPHeadersEnv, forwardedClientIPHeadersEnvConfigured := os.LookupEnv("SECURITY_FORWARDED_CLIENT_IP_HEADERS")
+	previousEncryptionKeysEnv, previousEncryptionKeysEnvConfigured := os.LookupEnv("TOTP_PREVIOUS_ENCRYPTION_KEYS")
 	trustedProxiesConfigured := viper.InConfig("server.trusted_proxies") ||
 		viper.IsSet("server.trusted_proxies") || trustedProxiesEnvConfigured
 
@@ -1746,6 +1750,11 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	}
 	if forwardedClientIPHeadersEnvConfigured {
 		cfg.Security.ForwardedClientIPHeaders = normalizeStringSlice(strings.Split(forwardedClientIPHeadersEnv, ","))
+	}
+	if previousEncryptionKeysEnvConfigured {
+		cfg.Totp.PreviousEncryptionKeys = normalizeStringSlice(strings.Split(previousEncryptionKeysEnv, ","))
+	} else {
+		cfg.Totp.PreviousEncryptionKeys = normalizeStringSlice(cfg.Totp.PreviousEncryptionKeys)
 	}
 	cfg.Server.TrustedProxiesConfigured = trustedProxiesConfigured
 	if cfg.Gateway.OpenAIScheduler.StickyEscapeTTFTMs == 0 {
@@ -2188,6 +2197,7 @@ func setDefaults() {
 
 	// TOTP
 	viper.SetDefault("totp.encryption_key", "")
+	viper.SetDefault("totp.previous_encryption_keys", []string{})
 
 	// Default
 	// Admin credentials are created via the setup flow (web wizard / CLI / AUTO_SETUP).

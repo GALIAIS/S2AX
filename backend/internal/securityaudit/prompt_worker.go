@@ -107,7 +107,27 @@ func (r *Runner) worker(ctx context.Context, workerID int) {
 					break
 				}
 				r.runtime.active.Add(1)
-				r.processSafely(ctx, workerID, cfg, job)
+				jobConfig, found, resolveErr := r.config.ActiveVersion(ctx, job.ConfigVersion)
+				switch {
+				case resolveErr != nil:
+					r.runtime.failed.Add(1)
+					err := r.finishFailure(ctx, job, &GuardError{
+						Code: "config_snapshot_unavailable", Retryable: true, Cause: resolveErr,
+					})
+					if err != nil {
+						r.setLastError("config_snapshot_unavailable", err.Error())
+					}
+				case !found:
+					r.runtime.failed.Add(1)
+					err := r.finishFailure(ctx, job, &GuardError{
+						Code: "config_snapshot_missing", Retryable: false,
+					})
+					if err != nil {
+						r.setLastError("config_snapshot_missing", err.Error())
+					}
+				default:
+					r.processSafely(ctx, workerID, jobConfig, job)
+				}
 				r.runtime.active.Add(-1)
 			}
 		}
@@ -189,6 +209,17 @@ func (r *Runner) processJob(ctx context.Context, workerID int, cfg ActiveConfig,
 		"action": aggregated.Action, "chunk_total": aggregated.ChunkTotal,
 		"latency_ms": aggregated.LatencyMS, "guard_endpoint_id": aggregated.GuardEndpointID, "status": "completed",
 	}))
+	protected, protectErr := protectPromptEvidence(job.Snapshot, aggregated, r.config, r.clock.Now())
+	if protectErr != nil {
+		if r.metrics != nil {
+			r.metrics.IncRecordFailed()
+		}
+		LogWarn(EventResultRecordFailed, mergeLogFields(baseFields, map[string]any{
+			"worker_id": workerID, "decision": aggregated.Decision,
+			"error_code": "evidence_encryption_failed", "status": "failed",
+		}))
+	}
+	job.Snapshot = protected
 	event, err := r.repo.Complete(ctx, job, aggregated, cfg.StorePassEvents)
 	if err != nil {
 		return err
@@ -250,7 +281,9 @@ func (r *Runner) finishFailure(ctx context.Context, job *Job, err error) error {
 		if updateErr := r.repo.Fail(ctx, job.ID, job.ClaimVersion, code, "prompt guard processing failed"); updateErr != nil {
 			return updateErr
 		}
-		_ = r.payload.Delete(ctx, job.ID)
+		// Keep the transient Redis payload until its original bounded TTL so an
+		// operator can retry a terminal detector failure. It is never copied to
+		// PostgreSQL and discard removes it immediately.
 		LogError(EventProcessFailed, mergeLogFields(baseFields, map[string]any{"attempts": job.Attempts, "max_attempts": job.MaxAttempts, "status": "failed", "error_code": code, "retryable": false}))
 	}
 	r.setLastError(code, err.Error())

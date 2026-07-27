@@ -114,7 +114,13 @@ func RegisterAdminRoutes(
 		registerContentModerationRoutes(admin, h)
 
 		// 独立提示词输入审计
-		registerPromptAuditRoutes(admin, h)
+		registerPromptAuditRoutes(admin, h, stepUpAuth)
+
+		// 调用归档：仅管理员可配置、检索和经二次验证查看明文载荷。
+		registerInvocationArchiveRoutes(admin, h, stepUpAuth)
+
+		// 统一安全审计、可靠处置与复核闭环
+		registerSecurityAuditRoutes(admin, h, stepUpAuth)
 
 		// 邀请返利（专属用户管理）
 		registerAffiliateRoutes(admin, h)
@@ -124,19 +130,91 @@ func RegisterAdminRoutes(
 	}
 }
 
-func registerPromptAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+func registerInvocationArchiveRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware) {
+	if h == nil || h.Admin == nil || h.Admin.InvocationArchive == nil {
+		return
+	}
+	archive := admin.Group("/invocation-archive")
+	{
+		archive.GET("/config", h.Admin.InvocationArchive.GetConfig)
+		archive.PUT("/config", gin.HandlerFunc(stepUpAuth), h.Admin.InvocationArchive.UpdateConfig)
+		archive.GET("/runtime", h.Admin.InvocationArchive.GetRuntime)
+		archive.GET("/subjects", h.Admin.InvocationArchive.ListSubjects)
+		archive.GET("/records", h.Admin.InvocationArchive.ListRecords)
+		archive.GET("/records/:id", h.Admin.InvocationArchive.GetRecord)
+		archive.GET("/records/:id/accesses", h.Admin.InvocationArchive.ListAccessLogs)
+		archive.POST("/records/:id/reveal", gin.HandlerFunc(stepUpAuth), h.Admin.InvocationArchive.RevealRecord)
+		archive.DELETE("/records/:id", gin.HandlerFunc(stepUpAuth), h.Admin.InvocationArchive.DeleteRecord)
+		archive.POST("/records/batch-delete", gin.HandlerFunc(stepUpAuth), h.Admin.InvocationArchive.BatchDelete)
+	}
+}
+
+func registerSecurityAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware) {
+	audit := admin.Group("/security-audit")
+	{
+		audit.GET("/overview", h.Admin.PromptAudit.SecurityOverview)
+
+		audit.GET("/policies", h.Admin.PromptAudit.ListPolicies)
+		audit.POST("/policies", h.Admin.PromptAudit.CreatePolicy)
+		audit.GET("/policies/:key/transitions", h.Admin.PromptAudit.ListPolicyTransitions)
+		audit.GET("/policies/:key/versions", h.Admin.PromptAudit.ListPolicyVersions)
+		audit.GET("/policies/:key/versions/:version/shadow-evaluations", h.Admin.PromptAudit.ListPolicyShadowEvaluations)
+		audit.POST("/policies/:key/versions/:version/validate", h.Admin.PromptAudit.ValidatePolicy)
+		audit.POST("/policies/:key/versions/:version/simulate", h.Admin.PromptAudit.SimulatePolicy)
+		audit.POST("/policies/:key/versions/:version/replay", h.Admin.PromptAudit.ReplayPolicy)
+		audit.POST("/policies/:key/versions/:version/shadow", h.Admin.PromptAudit.ShadowPolicy)
+		audit.POST("/policies/:key/versions/:version/activate", gin.HandlerFunc(stepUpAuth), h.Admin.PromptAudit.ActivatePolicy)
+		audit.POST("/policies/:key/versions/:version/rollback", gin.HandlerFunc(stepUpAuth), h.Admin.PromptAudit.RollbackPolicy)
+
+		audit.GET("/decisions", h.Admin.PromptAudit.ListUnifiedDecisions)
+		audit.GET("/decisions/:id", h.Admin.PromptAudit.GetUnifiedDecision)
+		audit.POST("/decisions/:id/evidence/reveal", gin.HandlerFunc(stepUpAuth), h.Admin.PromptAudit.RevealUnifiedEvidence)
+		audit.POST("/decisions/:id/open-case", h.Admin.PromptAudit.OpenDecisionCase)
+		audit.POST("/decisions/:id/feedback", h.Admin.PromptAudit.AddDecisionFeedback)
+
+		audit.GET("/actions", h.Admin.PromptAudit.ListActions)
+		audit.POST("/actions/:id/retry", gin.HandlerFunc(stepUpAuth), h.Admin.PromptAudit.RetryAction)
+		audit.POST("/actions/:id/cancel", gin.HandlerFunc(stepUpAuth), h.Admin.PromptAudit.CancelAction)
+		audit.POST("/actions/:id/revert", gin.HandlerFunc(stepUpAuth), h.Admin.PromptAudit.RevertAction)
+
+		audit.GET("/cases", h.Admin.PromptAudit.ListCases)
+		audit.GET("/cases/:id", h.Admin.PromptAudit.GetCase)
+		audit.POST("/cases/:id/transition", gin.HandlerFunc(stepUpAuth), h.Admin.PromptAudit.TransitionCase)
+
+		audit.GET("/exceptions", h.Admin.PromptAudit.ListExceptions)
+		audit.POST("/exceptions", gin.HandlerFunc(stepUpAuth), h.Admin.PromptAudit.CreateException)
+		audit.POST("/exceptions/:id/expire", gin.HandlerFunc(stepUpAuth), h.Admin.PromptAudit.ExpireException)
+
+		audit.GET("/endpoints", h.Admin.PromptAudit.ListEndpointHealth)
+		audit.POST("/endpoints/:id/reset-breaker", gin.HandlerFunc(stepUpAuth), h.Admin.PromptAudit.ResetEndpointBreaker)
+
+		audit.GET("/signals", h.Admin.PromptAudit.ListBehaviorSignals)
+		audit.GET("/notifications", h.Admin.PromptAudit.ListSecurityAuditNotifications)
+		audit.POST("/notifications/read-all", h.Admin.PromptAudit.MarkAllSecurityAuditNotificationsRead)
+		audit.POST("/notifications/:id/status", h.Admin.PromptAudit.UpdateSecurityAuditNotificationStatus)
+	}
+}
+
+func registerPromptAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware) {
 	promptAudit := admin.Group("/prompt-audit")
 	{
 		promptAudit.GET("/config", h.Admin.PromptAudit.GetConfig)
-		promptAudit.PUT("/config", h.Admin.PromptAudit.UpdateConfig)
-		promptAudit.POST("/endpoints/probe", h.Admin.PromptAudit.ProbeEndpoint)
+		// Config can enable blocking or authorize private/loopback audit targets.
+		promptAudit.PUT("/config", gin.HandlerFunc(stepUpAuth), h.Admin.PromptAudit.UpdateConfig)
+		// Probes contain credentials and can reach explicitly trusted network scopes.
+		promptAudit.POST("/endpoints/probe", gin.HandlerFunc(stepUpAuth), h.Admin.PromptAudit.ProbeEndpoint)
 		promptAudit.GET("/runtime", h.Admin.PromptAudit.GetRuntime)
+		promptAudit.GET("/jobs", h.Admin.PromptAudit.ListJobs)
+		promptAudit.POST("/jobs/:id/retry", gin.HandlerFunc(stepUpAuth), h.Admin.PromptAudit.RetryJob)
+		promptAudit.POST("/jobs/:id/quarantine", gin.HandlerFunc(stepUpAuth), h.Admin.PromptAudit.QuarantineJob)
+		promptAudit.POST("/jobs/:id/discard", gin.HandlerFunc(stepUpAuth), h.Admin.PromptAudit.DiscardJob)
 		promptAudit.GET("/events", h.Admin.PromptAudit.ListEvents)
 		promptAudit.GET("/events/:id", h.Admin.PromptAudit.GetEvent)
-		promptAudit.DELETE("/events/:id", h.Admin.PromptAudit.DeleteEvent)
-		promptAudit.POST("/events/batch-delete", h.Admin.PromptAudit.BatchDelete)
+		promptAudit.POST("/events/:id/evidence/reveal", gin.HandlerFunc(stepUpAuth), h.Admin.PromptAudit.RevealEventEvidence)
+		promptAudit.DELETE("/events/:id", gin.HandlerFunc(stepUpAuth), h.Admin.PromptAudit.DeleteEvent)
+		promptAudit.POST("/events/batch-delete", gin.HandlerFunc(stepUpAuth), h.Admin.PromptAudit.BatchDelete)
 		promptAudit.POST("/events/delete-preview", h.Admin.PromptAudit.DeletePreview)
-		promptAudit.POST("/events/delete-by-filter", h.Admin.PromptAudit.DeleteByFilter)
+		promptAudit.POST("/events/delete-by-filter", gin.HandlerFunc(stepUpAuth), h.Admin.PromptAudit.DeleteByFilter)
 	}
 }
 

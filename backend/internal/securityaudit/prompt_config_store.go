@@ -2,7 +2,9 @@ package securityaudit
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -124,6 +126,13 @@ func (m *ConfigManager) Reload(ctx context.Context) error {
 		m.markUntrustedIfNoActiveSnapshot()
 		return err
 	}
+	if m.db != nil {
+		if err := persistPromptAuditConfigVersion(ctx, m.db, storage); err != nil {
+			m.recordLoadError(err)
+			m.markUntrustedIfNoActiveSnapshot()
+			return fmt.Errorf("persist prompt audit config version: %w", err)
+		}
+	}
 	now := m.clock.Now()
 	m.snapshot.Store(&activeConfigSnapshot{storage: cloneStorageConfig(storage), active: cloneActiveConfig(active), loadedAt: now})
 	m.configUntrusted.Store(false)
@@ -143,6 +152,48 @@ func (m *ConfigManager) Active() (ActiveConfig, bool) {
 		return ActiveConfig{}, false
 	}
 	return cloneActiveConfig(snapshot.active), true
+}
+
+func (m *ConfigManager) ActiveVersion(ctx context.Context, version int64) (ActiveConfig, bool, error) {
+	if m == nil || version < 1 {
+		return ActiveConfig{}, false, nil
+	}
+	if active, ok := m.Active(); ok && active.ConfigVersion == version {
+		return active, true, nil
+	}
+	if m.db == nil {
+		return ActiveConfig{}, false, nil
+	}
+	var raw, expectedDigest string
+	err := m.db.QueryRowContext(ctx, `
+SELECT config_json::text,config_digest
+FROM prompt_audit_config_versions
+WHERE config_version=$1`, version).Scan(&raw, &expectedDigest)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ActiveConfig{}, false, nil
+	}
+	if err != nil {
+		return ActiveConfig{}, false, err
+	}
+	storage, err := ParseStorageConfig(raw)
+	if err != nil {
+		return ActiveConfig{}, false, fmt.Errorf("decode prompt audit config snapshot: %w", err)
+	}
+	if storage.ConfigVersion != version {
+		return ActiveConfig{}, false, errors.New("prompt audit config snapshot version mismatch")
+	}
+	actualDigest, _, err := promptAuditConfigDigest(storage)
+	if err != nil {
+		return ActiveConfig{}, false, err
+	}
+	if strings.TrimSpace(expectedDigest) == "" || !strings.EqualFold(expectedDigest, actualDigest) {
+		return ActiveConfig{}, false, errors.New("prompt audit config snapshot digest mismatch")
+	}
+	active, err := ActiveFromStorage(storage, true, m.encryptor)
+	if err != nil {
+		return ActiveConfig{}, false, err
+	}
+	return active, true, nil
 }
 
 func (m *ConfigManager) BlockingActivationDegraded() bool {
@@ -247,6 +298,12 @@ func (m *ConfigManager) Save(ctx context.Context, req UpdateConfigRequest, actor
 	if err != nil {
 		return PublicConfig{}, err
 	}
+	if err := persistPromptAuditConfigVersion(ctx, tx, current); err != nil {
+		return PublicConfig{}, err
+	}
+	if err := persistPromptAuditConfigVersion(ctx, tx, next); err != nil {
+		return PublicConfig{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO settings (key,value,updated_at) VALUES ($1,$2,NOW())
 		ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=EXCLUDED.updated_at`,
@@ -296,7 +353,7 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 	}
 	next := storageConfig{
 		Enabled: req.Enabled, BlockingEnabled: req.BlockingEnabled, StorePassEvents: req.StorePassEvents,
-		Strategy: strings.TrimSpace(req.Strategy), WorkerCount: req.WorkerCount,
+		FailureMode: normalizeFailureMode(req.FailureMode), Strategy: strings.TrimSpace(req.Strategy), WorkerCount: req.WorkerCount,
 		QueueCapacity: req.QueueCapacity, Scanners: append([]string(nil), req.Scanners...),
 		AllGroups: req.AllGroups, GroupIDs: append([]int64(nil), req.GroupIDs...),
 		ConfigVersion: current.ConfigVersion, UpdatedBy: actorID,
@@ -309,8 +366,10 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 		}
 		stored := StorageEndpoint{
 			ID: strings.TrimSpace(endpoint.ID), Name: strings.TrimSpace(endpoint.Name),
-			Protocol: strings.TrimSpace(endpoint.Protocol), BaseURL: baseURL, Model: strings.TrimSpace(endpoint.Model),
-			TimeoutMS: endpoint.TimeoutMS, InputLimit: endpoint.InputLimit, Enabled: endpoint.Enabled,
+			Protocol: strings.TrimSpace(endpoint.Protocol), Adapter: normalizeDetectorAdapter(endpoint.Adapter),
+			BaseURL: baseURL, Model: strings.TrimSpace(endpoint.Model),
+			NetworkScope: NormalizeNetworkScope(endpoint.NetworkScope, baseURL),
+			TimeoutMS:    endpoint.TimeoutMS, InputLimit: endpoint.InputLimit, Enabled: endpoint.Enabled,
 		}
 		old, hadOld := currentByID[stored.ID]
 		switch {
@@ -332,6 +391,54 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 		return storageConfig{}, err
 	}
 	return next, nil
+}
+
+type configVersionStore interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func persistPromptAuditConfigVersion(ctx context.Context, store configVersionStore, cfg storageConfig) error {
+	if store == nil {
+		return errors.New("prompt audit config version store unavailable")
+	}
+	digest, raw, err := promptAuditConfigDigest(cfg)
+	if err != nil {
+		return err
+	}
+	var createdAt any
+	if !cfg.UpdatedAt.IsZero() {
+		createdAt = cfg.UpdatedAt
+	}
+	if _, err := store.ExecContext(ctx, `
+INSERT INTO prompt_audit_config_versions(config_version,config_json,config_digest,created_by,created_at)
+VALUES ($1,$2::jsonb,$3,(SELECT id FROM users WHERE id=$4),COALESCE($5::timestamptz,NOW()))
+ON CONFLICT (config_version) DO NOTHING`,
+		cfg.ConfigVersion, raw, digest, cfg.UpdatedBy, createdAt); err != nil {
+		return err
+	}
+	var storedDigest string
+	if err := store.QueryRowContext(ctx, `
+SELECT config_digest
+FROM prompt_audit_config_versions
+WHERE config_version=$1`, cfg.ConfigVersion).Scan(&storedDigest); err != nil {
+		return err
+	}
+	if !strings.EqualFold(storedDigest, digest) {
+		return errors.New("prompt audit config version already exists with different content")
+	}
+	return nil
+}
+
+func promptAuditConfigDigest(cfg storageConfig) (string, []byte, error) {
+	canonical := cloneStorageConfig(cfg)
+	normalizeStorageConfig(&canonical)
+	raw, err := json.Marshal(canonical)
+	if err != nil {
+		return "", nil, err
+	}
+	digest := sha256.Sum256(raw)
+	return hex.EncodeToString(digest[:]), raw, nil
 }
 
 func (m *ConfigManager) RuntimeState() (expected int64, active int64, loadedAt *time.Time, loadError string) {

@@ -32,6 +32,11 @@ func TestRedisPayloadStoreRoundTripTTLNamespaceAndDelete(t *testing.T) {
 	require.NoError(t, err)
 	require.Greater(t, ttl, time.Duration(0))
 	require.LessOrEqual(t, ttl, DefaultPayloadTTL)
+	ttls, err := store.TTLs(ctx, []int64{jobID, jobID + 1})
+	require.NoError(t, err)
+	require.Greater(t, ttls[jobID], time.Duration(0))
+	require.LessOrEqual(t, ttls[jobID], DefaultPayloadTTL)
+	require.LessOrEqual(t, ttls[jobID+1], time.Duration(0))
 	require.NoError(t, store.Delete(ctx, jobID))
 	_, err = store.Get(ctx, jobID)
 	require.ErrorIs(t, err, redis.Nil)
@@ -82,4 +87,55 @@ func TestPromptRuntimeAggregatesConfigWorkersQueueRedisEndpointsAndGuardMetrics(
 	// The runner has not been started in this integration test, so the honest
 	// process status is degraded rather than a fabricated running heartbeat.
 	require.Equal(t, "degraded", runtime.ProcessStatus)
+}
+
+func TestPromptAuditJobGovernanceUsesRealRedisPayloadState(t *testing.T) {
+	address := strings.TrimSpace(os.Getenv(promptAuditRedisTestEnv))
+	if address == "" {
+		t.Skip(promptAuditRedisTestEnv + " is not set")
+	}
+	db := openPromptAuditIntegrationDB(t)
+	client := redis.NewClient(&redis.Options{Addr: address})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	payload := NewRedisPayloadStore(client)
+	repo := NewPostgreSQLRepository(db)
+	service := &PromptService{repo: repo, payload: payload}
+	ctx := context.Background()
+	actorID := insertIdentity(t, db, "users")
+
+	retryJob, err := repo.CreateStagingWithCapacity(ctx, integrationSnapshot("retry"), 1, 3, 10)
+	require.NoError(t, err)
+	require.NoError(t, repo.MarkStagingFailed(ctx, retryJob.ID, "endpoint_unavailable", "sanitized"))
+	require.NoError(t, payload.Set(ctx, retryJob.ID, "transient retry canary", time.Minute))
+	retried, err := service.RetryJob(ctx, retryJob.ID, actorID, "endpoint recovered")
+	require.NoError(t, err)
+	require.Equal(t, "queued", retried.Status)
+
+	discardJob, err := repo.CreateStagingWithCapacity(ctx, integrationSnapshot("discard"), 1, 3, 10)
+	require.NoError(t, err)
+	require.NoError(t, repo.MarkStagingFailed(ctx, discardJob.ID, "invalid_response", "sanitized"))
+	require.NoError(t, payload.Set(ctx, discardJob.ID, "transient discard canary", time.Minute))
+	discarded, err := service.DiscardJob(ctx, discardJob.ID, actorID, "invalid detector contract")
+	require.NoError(t, err)
+	require.Equal(t, "discarded", discarded.Status)
+	_, err = payload.Get(ctx, discardJob.ID)
+	require.ErrorIs(t, err, redis.Nil)
+
+	expiredJob, err := repo.CreateStagingWithCapacity(ctx, integrationSnapshot("expired"), 1, 3, 10)
+	require.NoError(t, err)
+	require.NoError(t, repo.MarkStagingFailed(ctx, expiredJob.ID, "payload_missing", "sanitized"))
+	_, err = service.RetryJob(ctx, expiredJob.ID, actorID, "try missing payload")
+	require.ErrorIs(t, err, ErrJobPayloadUnavailable)
+
+	page, err := service.ListJobs(ctx, JobFilter{}, 1, 20)
+	require.NoError(t, err)
+	require.Equal(t, int64(3), page.Total)
+	states := map[int64]string{}
+	for _, item := range page.Items {
+		states[item.Job.ID] = item.PayloadState
+	}
+	require.Equal(t, payloadStateExpired, states[expiredJob.ID])
+	require.Contains(t, []string{payloadStateNotApplicable, payloadStateExpired}, states[retryJob.ID],
+		"a concurrently running integration worker may consume the retried job before this read")
+	require.Equal(t, payloadStateNotApplicable, states[discardJob.ID])
 }

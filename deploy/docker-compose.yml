@@ -108,6 +108,7 @@ services:
       # with 2FA).
       # Generate a secure key: openssl rand -hex 32
       - TOTP_ENCRYPTION_KEY=${TOTP_ENCRYPTION_KEY:-}
+      - TOTP_PREVIOUS_ENCRYPTION_KEYS=${TOTP_PREVIOUS_ENCRYPTION_KEYS:-}
 
       # =======================================================================
       # Timezone Configuration

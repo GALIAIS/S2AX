@@ -31,13 +31,23 @@ func (c *advancingClock) Now() time.Time {
 }
 
 type fakeConfigStore struct {
-	cfg    ActiveConfig
-	active bool
+	cfg      ActiveConfig
+	active   bool
+	versions map[int64]ActiveConfig
 }
 
 func (s *fakeConfigStore) Start(context.Context) error    { return nil }
 func (s *fakeConfigStore) Shutdown(context.Context) error { return nil }
 func (s *fakeConfigStore) Active() (ActiveConfig, bool)   { return cloneActiveConfig(s.cfg), s.active }
+func (s *fakeConfigStore) ActiveVersion(_ context.Context, version int64) (ActiveConfig, bool, error) {
+	if cfg, ok := s.versions[version]; ok {
+		return cloneActiveConfig(cfg), true, nil
+	}
+	if !s.active || (s.cfg.ConfigVersion > 0 && s.cfg.ConfigVersion != version) {
+		return ActiveConfig{}, false, nil
+	}
+	return cloneActiveConfig(s.cfg), true, nil
+}
 func (s *fakeConfigStore) EffectiveMode() Mode {
 	if s.BlockingActivationDegraded() {
 		return ModeBlocking
@@ -419,7 +429,8 @@ func TestWorkerRetryBackoffTerminalFailureAndFailover(t *testing.T) {
 			} else {
 				require.Equal(t, 1, repo.failed)
 				require.Equal(t, tt.err.Code, repo.failedCode)
-				require.Equal(t, []int64{51}, payload.deleted)
+				require.Empty(t, payload.deleted)
+				require.Equal(t, "abc", payload.values[51], "terminal failure payload remains only until its original Redis TTL for operator retry")
 			}
 			snapshot := metrics.Snapshot()
 			require.Equal(t, int64(1), snapshot.Total)
@@ -581,6 +592,46 @@ func TestPromptAuditSyntheticAsyncBaseline(t *testing.T) {
 	require.LessOrEqual(t, snapshot.LatencyP50MS, snapshot.LatencyP95MS)
 	require.LessOrEqual(t, snapshot.LatencyP95MS, snapshot.LatencyP99MS)
 	t.Logf("synthetic async baseline: p50=%dms p95=%dms p99=%dms failure_rate=2%% false_positive_rate=0%% event_growth=8/100", snapshot.LatencyP50MS, snapshot.LatencyP95MS, snapshot.LatencyP99MS)
+}
+
+func TestPromptAuditWorkerUsesJobConfigurationVersion(t *testing.T) {
+	current := asyncConfig()
+	current.ConfigVersion = 2
+	current.Endpoints[0].ID = "current-endpoint"
+	historical := cloneActiveConfig(current)
+	historical.ConfigVersion = 1
+	historical.Endpoints[0].ID = "historical-endpoint"
+
+	job := &Job{
+		ID: 1, ConfigVersion: 1, ClaimVersion: 1, Attempts: 1, MaxAttempts: 1,
+		Snapshot: PromptSnapshot{RequestID: "req-version-pinned", PromptLength: 5},
+	}
+	repo := &fakeJobRepository{claimQueue: []*Job{job}}
+	payload := &fakePayloadStore{values: map[int64]string{1: "audit"}}
+	var scannedEndpoint string
+	scanner := PromptScannerFunc(func(_ context.Context, endpoint ActiveEndpoint, _ string, _ []string) (*NormalizedResult, error) {
+		scannedEndpoint = endpoint.ID
+		return &NormalizedResult{
+			Decision: EventPass, RiskLevel: RiskLow, Action: ActionAllow,
+			GuardEndpointID: endpoint.ID, ScannerBackend: "test",
+		}, nil
+	})
+	configStore := &fakeConfigStore{
+		cfg: current, active: true, versions: map[int64]ActiveConfig{1: historical},
+	}
+	runner := NewRunner(configStore, repo, payload, scanner, NewAtomicMetrics())
+	ctx, cancel := context.WithCancel(context.Background())
+	require.NoError(t, runner.Start(ctx))
+	require.Eventually(t, func() bool {
+		repo.mu.Lock()
+		defer repo.mu.Unlock()
+		return repo.completeCount == 1
+	}, 2*time.Second, 20*time.Millisecond)
+	cancel()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), time.Second)
+	defer shutdownCancel()
+	require.NoError(t, runner.Shutdown(shutdownCtx))
+	require.Equal(t, "historical-endpoint", scannedEndpoint)
 }
 
 func TestRequestCloneOwnsMutableInputs(t *testing.T) {

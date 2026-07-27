@@ -8,10 +8,11 @@ import (
 )
 
 type GuardEvaluator struct {
-	scanner PromptScanner
-	repo    JobRepository
-	metrics Metrics
-	clock   Clock
+	scanner  PromptScanner
+	repo     JobRepository
+	metrics  Metrics
+	evidence SecretEncryptor
+	clock    Clock
 
 	global       chan struct{}
 	perNodeLimit int
@@ -19,8 +20,17 @@ type GuardEvaluator struct {
 	nodes        map[string]chan struct{}
 }
 
-func NewGuardEvaluator(scanner PromptScanner, repo JobRepository, metrics Metrics) *GuardEvaluator {
-	return newGuardEvaluator(scanner, repo, metrics, 64, 16)
+type endpointRuntimeHealthStore interface {
+	BeginEndpointAttempt(context.Context, ActiveEndpoint, time.Duration) (bool, error)
+	UpsertEndpointHealth(context.Context, ActiveEndpoint, ProbeResult) error
+}
+
+func NewGuardEvaluator(scanner PromptScanner, repo JobRepository, metrics Metrics, evidence ...SecretEncryptor) *GuardEvaluator {
+	evaluator := newGuardEvaluator(scanner, repo, metrics, 64, 16)
+	if len(evidence) > 0 {
+		evaluator.evidence = evidence[0]
+	}
+	return evaluator
 }
 
 func newGuardEvaluator(scanner PromptScanner, repo JobRepository, metrics Metrics, globalLimit, perNodeLimit int) *GuardEvaluator {
@@ -151,7 +161,17 @@ func (g *GuardEvaluator) Evaluate(ctx context.Context, cfg ActiveConfig, snapsho
 		"status": "completed",
 	}))
 	if g.repo != nil {
-		if _, recordErr := g.repo.RecordBlocking(ctx, snapshot.Redacted(), cfg.ConfigVersion, aggregated, cfg.StorePassEvents); recordErr != nil {
+		protected, protectErr := protectPromptEvidence(snapshot, aggregated, g.evidence, g.clock.Now())
+		if protectErr != nil {
+			if g.metrics != nil {
+				g.metrics.IncRecordFailed()
+			}
+			LogWarn(EventResultRecordFailed, mergeLogFields(baseFields, map[string]any{
+				"decision": kind, "error_code": "evidence_encryption_failed", "stage": snapshot.Stage,
+				"status": "failed",
+			}))
+		}
+		if _, recordErr := g.repo.RecordBlocking(ctx, protected, cfg.ConfigVersion, aggregated, cfg.StorePassEvents); recordErr != nil {
 			if g.metrics != nil {
 				g.metrics.IncRecordFailed()
 			}
@@ -190,6 +210,18 @@ func logGuardFailure(snapshot PromptSnapshot, cfg ActiveConfig, kind DecisionKin
 func (g *GuardEvaluator) scanChunk(ctx context.Context, cfg ActiveConfig, endpoints []ActiveEndpoint, chunk string) (*NormalizedResult, error) {
 	var lastErr error
 	for index, endpoint := range endpoints {
+		if healthStore, ok := g.repo.(endpointRuntimeHealthStore); ok {
+			healthCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 500*time.Millisecond)
+			allowed, healthErr := healthStore.BeginEndpointAttempt(healthCtx, endpoint, time.Minute)
+			cancel()
+			if healthErr == nil && !allowed {
+				lastErr = &GuardError{Code: ErrorCodeUnavailable, Retryable: true}
+				if index < len(endpoints)-1 && g.metrics != nil {
+					g.metrics.IncFailover()
+				}
+				continue
+			}
+		}
 		semaphore := g.nodeSemaphore(endpoint.ID)
 		select {
 		case semaphore <- struct{}{}:
@@ -205,13 +237,17 @@ func (g *GuardEvaluator) scanChunk(ctx context.Context, cfg ActiveConfig, endpoi
 			}
 			continue
 		}
+		started := g.clock.Now()
 		result, err := callPromptScanner(ctx, g.scanner, endpoint, chunk, cfg.Scanners)
 		<-semaphore
-		if err == nil && result != nil {
-			return result, nil
-		}
 		if err == nil {
-			err = &GuardError{Code: ErrorCodeInvalidResponse, Retryable: false}
+			if result == nil {
+				err = &GuardError{Code: ErrorCodeInvalidResponse, Retryable: false}
+			}
+		}
+		g.recordEndpointRuntimeResult(ctx, endpoint, g.clock.Now().Sub(started), err)
+		if err == nil {
+			return result, nil
 		}
 		lastErr = err
 		var guardErr *GuardError
@@ -226,6 +262,44 @@ func (g *GuardEvaluator) scanChunk(ctx context.Context, cfg ActiveConfig, endpoi
 		lastErr = &GuardError{Code: ErrorCodeUnavailable}
 	}
 	return nil, lastErr
+}
+
+func (g *GuardEvaluator) recordEndpointRuntimeResult(
+	ctx context.Context,
+	endpoint ActiveEndpoint,
+	latency time.Duration,
+	callErr error,
+) {
+	healthStore, ok := g.repo.(endpointRuntimeHealthStore)
+	if !ok {
+		return
+	}
+	result := ProbeResult{
+		OK:        callErr == nil,
+		Status:    "healthy",
+		LatencyMS: int(latency.Milliseconds()),
+		CheckedAt: g.clock.Now(),
+	}
+	if callErr != nil {
+		result.Status = "unhealthy"
+		result.ErrorCode = guardErrorCode(callErr)
+		var guardErr *GuardError
+		if errors.As(callErr, &guardErr) {
+			result.HTTPStatus = guardErr.HTTPStatus
+			result.Retryable = guardErr.Retryable
+			if guardErr.Timeout {
+				result.ErrorCode = "prompt_guard_timeout"
+			}
+		}
+	}
+	healthCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 500*time.Millisecond)
+	defer cancel()
+	if err := healthStore.UpsertEndpointHealth(healthCtx, endpoint, result); err != nil {
+		LogWarn("prompt_audit.endpoint_runtime_health_persist_failed", map[string]any{
+			"guard_endpoint_id": endpoint.ID,
+			"error_code":        "endpoint_runtime_health_persist_failed",
+		})
+	}
 }
 
 func callPromptScanner(ctx context.Context, scanner PromptScanner, endpoint ActiveEndpoint, chunk string, scanners []string) (result *NormalizedResult, err error) {

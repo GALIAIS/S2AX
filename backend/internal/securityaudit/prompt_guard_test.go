@@ -18,6 +18,34 @@ type scriptedScanner struct {
 	entered chan<- struct{}
 }
 
+type healthAwareJobRepository struct {
+	*fakeJobRepository
+	mu      sync.Mutex
+	allowed map[string]bool
+	results map[string][]ProbeResult
+}
+
+func (r *healthAwareJobRepository) BeginEndpointAttempt(
+	_ context.Context,
+	endpoint ActiveEndpoint,
+	_ time.Duration,
+) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.allowed[endpoint.ID], nil
+}
+
+func (r *healthAwareJobRepository) UpsertEndpointHealth(
+	_ context.Context,
+	endpoint ActiveEndpoint,
+	result ProbeResult,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.results[endpoint.ID] = append(r.results[endpoint.ID], result)
+	return nil
+}
+
 func (s *scriptedScanner) Scan(ctx context.Context, endpoint ActiveEndpoint, _ string, _ []string) (*NormalizedResult, error) {
 	s.mu.Lock()
 	s.calls = append(s.calls, endpoint.ID)
@@ -71,6 +99,28 @@ func TestGuardEvaluatorOrderedFailoverAndInvalidTerminal(t *testing.T) {
 	require.Equal(t, int64(2), snapshotMetrics.Total)
 	require.Equal(t, int64(1), snapshotMetrics.Allowed)
 	require.Equal(t, int64(1), snapshotMetrics.Invalid)
+}
+
+func TestGuardEvaluatorSkipsOpenCircuitAndRecordsRuntimeHealth(t *testing.T) {
+	repo := &healthAwareJobRepository{
+		fakeJobRepository: &fakeJobRepository{},
+		allowed:           map[string]bool{"open": false, "healthy": true},
+		results:           map[string][]ProbeResult{},
+	}
+	scanner := &scriptedScanner{}
+	evaluator := newGuardEvaluator(scanner, repo, NewAtomicMetrics(), 2, 2)
+
+	decision, err := evaluator.Evaluate(context.Background(), guardConfig(
+		ActiveEndpoint{ID: "open", Enabled: true, TimeoutMS: 1000, InputLimit: 100},
+		ActiveEndpoint{ID: "healthy", Enabled: true, TimeoutMS: 1000, InputLimit: 100},
+	), PromptSnapshot{RequestID: "runtime-health", ScanText: "hello", PromptLength: 5})
+
+	require.NoError(t, err)
+	require.Equal(t, DecisionAllow, decision.Kind)
+	require.Equal(t, []string{"healthy"}, scanner.calls)
+	require.Empty(t, repo.results["open"])
+	require.Len(t, repo.results["healthy"], 1)
+	require.True(t, repo.results["healthy"][0].OK)
 }
 
 func TestGuardEvaluatorGlobalBulkheadIsNonBlocking(t *testing.T) {
