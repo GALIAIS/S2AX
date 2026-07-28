@@ -78,6 +78,24 @@ func TestSettingService_GetPublicSettings_ExposesTablePreferences(t *testing.T) 
 	require.Equal(t, []int{20, 50, 100}, settings.TablePageSizeOptions)
 }
 
+func TestSettingService_GetPublicSettings_ExposesAccountDirectoryRefreshInterval(t *testing.T) {
+	repo := &settingPublicRepoStub{
+		values: map[string]string{
+			SettingKeyAccountDirectoryRefreshIntervalSeconds: "120",
+		},
+	}
+	svc := NewSettingService(repo, &config.Config{})
+
+	settings, err := svc.GetPublicSettings(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 120, settings.AccountDirectoryRefreshSec)
+
+	repo.values[SettingKeyAccountDirectoryRefreshIntervalSeconds] = "invalid"
+	settings, err = svc.GetPublicSettings(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, accountDirectoryRefreshIntervalFallback, settings.AccountDirectoryRefreshSec)
+}
+
 func TestSettingService_GetPublicSettings_ExposesForceEmailOnThirdPartySignup(t *testing.T) {
 	repo := &settingPublicRepoStub{
 		values: map[string]string{

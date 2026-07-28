@@ -332,6 +332,9 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 		return nil, fmt.Errorf("marshal table page size options: %w", err)
 	}
 	updates[SettingKeyTablePageSizeOptions] = string(tablePageSizeOptionsJSON)
+	updates[SettingKeyAccountDirectoryRefreshIntervalSeconds] = strconv.Itoa(
+		normalizeAccountDirectoryRefreshInterval(settings.AccountDirectoryRefreshSec),
+	)
 	updates[SettingKeyCustomMenuItems] = settings.CustomMenuItems
 	updates[SettingKeyCustomEndpoints] = settings.CustomEndpoints
 

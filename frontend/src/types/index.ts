@@ -230,6 +230,7 @@ export interface PublicSettings {
   city_pixel_renderer_enabled: boolean
   table_default_page_size: number
   table_page_size_options: number[]
+  account_directory_refresh_interval_seconds?: number
   custom_menu_items: CustomMenuItem[]
   custom_endpoints: CustomEndpoint[]
   linuxdo_oauth_enabled: boolean

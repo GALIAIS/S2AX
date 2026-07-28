@@ -539,8 +539,8 @@ export default {
         apiBaseUrlPlaceholder: 'https://api.example.com',
         apiBaseUrlHint:
           'Used for "Use Key", "Import to CC Switch", and callback URL suggestions. Leave empty to use current site URL.',
-        tablePreferencesTitle: 'Global Table Preferences',
-        tablePreferencesDescription: 'Configure default pagination behavior for shared table components',
+        tablePreferencesTitle: 'Table and Account Directory Preferences',
+        tablePreferencesDescription: 'Configure shared table pagination and the account directory auto-refresh cadence',
         tableDefaultPageSize: 'Default Rows Per Page',
         tableDefaultPageSizeHint: 'Must be an integer between 5 and 1000',
         tablePageSizeOptions: 'Rows Per Page Options',
@@ -548,6 +548,9 @@ export default {
         tablePageSizeOptionsHint: 'Use commas to separate integers between 5 and 1000; values are deduplicated and sorted on save',
         tableDefaultPageSizeRangeError: 'Default rows per page must be between {min} and {max}',
         tablePageSizeOptionsFormatError: 'Invalid options format. Enter comma-separated integers between {min} and {max}',
+        accountDirectoryRefreshInterval: 'Account Directory Auto-refresh (seconds)',
+        accountDirectoryRefreshIntervalHint: 'Set to 0 to disable. Enabled values must be 15-3600 seconds. Refreshes read server-side cache and statistics without probing upstream providers.',
+        accountDirectoryRefreshIntervalRangeError: 'Auto-refresh must be 0 or an integer between {min} and {max}',
         customEndpoints: {
           title: 'Custom Endpoints',
           description: 'Add additional API endpoint URLs for users to quickly copy on the API Keys page',

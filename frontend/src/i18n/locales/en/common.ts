@@ -259,6 +259,7 @@ export default {
     unavailableHint: 'Currently unavailable.',
     readyHint: 'Currently schedulable.',
     loadFailed: 'Failed to load the account directory',
+    autoRefreshEvery: 'Auto-refresh every {seconds}s',
     searchLabel: 'Search account directory',
     searchPlaceholder: 'Search account, group, platform, or type…',
     viewMode: 'View mode',

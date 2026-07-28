@@ -143,6 +143,7 @@ type SystemSettings struct {
 	PurchaseSubscriptionURL     string           `json:"purchase_subscription_url"`
 	TableDefaultPageSize        int              `json:"table_default_page_size"`
 	TablePageSizeOptions        []int            `json:"table_page_size_options"`
+	AccountDirectoryRefreshSec  int              `json:"account_directory_refresh_interval_seconds"`
 	CustomMenuItems             []CustomMenuItem `json:"custom_menu_items"`
 	CustomEndpoints             []CustomEndpoint `json:"custom_endpoints"`
 
@@ -349,6 +350,7 @@ type PublicSettings struct {
 	PurchaseSubscriptionURL          string                   `json:"purchase_subscription_url"`
 	TableDefaultPageSize             int                      `json:"table_default_page_size"`
 	TablePageSizeOptions             []int                    `json:"table_page_size_options"`
+	AccountDirectoryRefreshSec       int                      `json:"account_directory_refresh_interval_seconds"`
 	CustomMenuItems                  []CustomMenuItem         `json:"custom_menu_items"`
 	CustomEndpoints                  []CustomEndpoint         `json:"custom_endpoints"`
 	DingTalkOAuthEnabled             bool                     `json:"dingtalk_oauth_enabled"`

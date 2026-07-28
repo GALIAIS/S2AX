@@ -292,6 +292,8 @@ const (
 	SettingKeyCustomMenuItems             = "custom_menu_items"             // 自定义菜单项（JSON 数组）
 	SettingKeyCustomEndpoints             = "custom_endpoints"              // 自定义端点列表（JSON 数组）
 
+	SettingKeyAccountDirectoryRefreshIntervalSeconds = "account_directory_refresh_interval_seconds" // 账号目录自动刷新间隔（0 = 关闭）
+
 	// 默认配置
 	SettingKeyDefaultConcurrency   = "default_concurrency"    // 新用户默认并发量
 	SettingKeyDefaultBalance       = "default_balance"        // 新用户默认余额

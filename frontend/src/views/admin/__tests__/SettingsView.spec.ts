@@ -376,6 +376,7 @@ const baseSettingsResponse = {
   hide_ccs_import_button: false,
   table_default_page_size: 20,
   table_page_size_options: [10, 20, 50, 100],
+  account_directory_refresh_interval_seconds: 60,
   backend_mode_enabled: false,
   custom_menu_items: [],
   custom_endpoints: [],
@@ -819,6 +820,23 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(payload).not.toHaveProperty("payment_visible_method_wxpay_source");
     expect(payload).not.toHaveProperty("payment_visible_method_alipay_enabled");
     expect(payload).not.toHaveProperty("payment_visible_method_wxpay_enabled");
+  });
+
+  it("configures the account directory auto-refresh interval", async () => {
+    const wrapper = mountView();
+
+    await flushPromises();
+    await wrapper
+      .get('[data-testid="account-directory-refresh-interval"]')
+      .setValue("120");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        account_directory_refresh_interval_seconds: 120,
+      }),
+    );
   });
 
   it("submits the admin recharge affiliate rebate setting", async () => {

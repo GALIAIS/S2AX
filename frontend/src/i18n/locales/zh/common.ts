@@ -259,6 +259,7 @@ export default {
     unavailableHint: '当前暂不可用。',
     readyHint: '当前可调度。',
     loadFailed: '加载账号目录失败',
+    autoRefreshEvery: '每 {seconds} 秒自动刷新',
     searchLabel: '搜索账号目录',
     searchPlaceholder: '搜索账号、分组、平台或类型…',
     viewMode: '显示方式',

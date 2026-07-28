@@ -398,6 +398,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if !equalIntSlice(before.TablePageSizeOptions, after.TablePageSizeOptions) {
 		changed = append(changed, "table_page_size_options")
 	}
+	if before.AccountDirectoryRefreshSec != after.AccountDirectoryRefreshSec {
+		changed = append(changed, "account_directory_refresh_interval_seconds")
+	}
 	if before.CustomMenuItems != after.CustomMenuItems {
 		changed = append(changed, "custom_menu_items")
 	}

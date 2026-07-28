@@ -78,6 +78,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyPurchaseSubscriptionURL:                   "",
 		SettingKeyTableDefaultPageSize:                      "20",
 		SettingKeyTablePageSizeOptions:                      "[10,20,50,100]",
+		SettingKeyAccountDirectoryRefreshIntervalSeconds:    "60",
 		SettingKeyCustomMenuItems:                           "[]",
 		SettingKeyCustomEndpoints:                           "[]",
 		SettingKeyWeChatConnectEnabled:                      "false",
@@ -352,6 +353,9 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.TableDefaultPageSize, result.TablePageSizeOptions = parseTablePreferences(
 		settings[SettingKeyTableDefaultPageSize],
 		settings[SettingKeyTablePageSizeOptions],
+	)
+	result.AccountDirectoryRefreshSec = parseAccountDirectoryRefreshInterval(
+		settings[SettingKeyAccountDirectoryRefreshIntervalSeconds],
 	)
 
 	// 解析整数类型
@@ -1229,6 +1233,33 @@ func parseTablePreferences(defaultPageSizeRaw, optionsRaw string) (int, []int) {
 	}
 
 	return normalizeTablePreferences(defaultPageSize, options)
+}
+
+const (
+	accountDirectoryRefreshIntervalMin      = 15
+	accountDirectoryRefreshIntervalMax      = 3600
+	accountDirectoryRefreshIntervalFallback = 60
+)
+
+func parseAccountDirectoryRefreshInterval(raw string) int {
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return accountDirectoryRefreshIntervalFallback
+	}
+	return normalizeAccountDirectoryRefreshInterval(value)
+}
+
+func normalizeAccountDirectoryRefreshInterval(value int) int {
+	if value <= 0 {
+		return 0
+	}
+	if value < accountDirectoryRefreshIntervalMin {
+		return accountDirectoryRefreshIntervalMin
+	}
+	if value > accountDirectoryRefreshIntervalMax {
+		return accountDirectoryRefreshIntervalMax
+	}
+	return value
 }
 
 func normalizeTablePreferences(defaultPageSize int, options []int) (int, []int) {

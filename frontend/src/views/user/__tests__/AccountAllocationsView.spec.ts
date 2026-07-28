@@ -1,10 +1,17 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 import AccountAllocationsView from '../AccountAllocationsView.vue'
 
-const { listVisible } = vi.hoisted(() => ({
+const { listVisible, appStore } = vi.hoisted(() => ({
   listVisible: vi.fn(),
+  appStore: {
+    cachedPublicSettings: {
+      account_directory_refresh_interval_seconds: 0,
+    } as { account_directory_refresh_interval_seconds?: number },
+    publicSettingsLoaded: true,
+    fetchPublicSettings: vi.fn(),
+  },
 }))
 
 const messages: Record<string, string> = {
@@ -65,6 +72,7 @@ const messages: Record<string, string> = {
   'accountAllocations.assignedAt': 'Assigned',
   'accountAllocations.coolingUntilLabel': 'Expected recovery',
   'accountAllocations.unknownPlatform': 'Unknown platform',
+  'accountAllocations.autoRefreshEvery': 'Auto-refresh every {seconds}s',
   'common.retry': 'Retry',
   'common.refresh': 'Refresh',
   'common.refreshing': 'Refreshing',
@@ -74,6 +82,10 @@ const messages: Record<string, string> = {
 
 vi.mock('@/api/accountAllocations', () => ({
   default: { listVisible },
+}))
+
+vi.mock('@/stores/app', () => ({
+  useAppStore: () => appStore,
 }))
 
 vi.mock('@/utils/apiError', () => ({
@@ -96,7 +108,10 @@ vi.mock('vue-i18n', async () => {
       t: (key: string, values?: Record<string, number>) => {
         const template = messages[key] ?? key
         return values
-          ? template.replace('{count}', String(values.count ?? '')).replace('{total}', String(values.total ?? ''))
+          ? template
+            .replace('{count}', String(values.count ?? ''))
+            .replace('{total}', String(values.total ?? ''))
+            .replace('{seconds}', String(values.seconds ?? ''))
           : template
       },
     }),
@@ -107,8 +122,13 @@ const AppLayoutStub = { template: '<div><slot /></div>' }
 const IconStub = { template: '<span aria-hidden="true" />' }
 const PlatformTypeBadgeStub = { props: ['platform', 'type'], template: '<span>{{ platform }} / {{ type }}</span>' }
 const UsageProgressBarStub = {
-  props: ['label', 'utilization', 'windowStats'],
-  template: '<span data-test="quota-window">{{ label }} {{ utilization }} {{ windowStats?.requests ?? "" }} {{ windowStats?.tokens ?? "" }}</span>',
+  props: {
+    label: String,
+    utilization: Number,
+    windowStats: Object,
+    expanded: Boolean,
+  },
+  template: '<span data-test="quota-window" :data-expanded="String(expanded)">{{ label }} {{ utilization }} {{ windowStats?.requests ?? "" }} {{ windowStats?.tokens ?? "" }}</span>',
 }
 const SelectStub = {
   props: ['modelValue', 'options'],
@@ -204,9 +224,19 @@ const mountView = () => mount(AccountAllocationsView, {
 
 describe('AccountAllocationsView', () => {
   beforeEach(() => {
+    vi.useFakeTimers()
     window.localStorage.clear()
     listVisible.mockReset()
     listVisible.mockResolvedValue(visibleOverview)
+    appStore.cachedPublicSettings = {
+      account_directory_refresh_interval_seconds: 0,
+    }
+    appStore.publicSettingsLoaded = true
+    appStore.fetchPublicSettings.mockReset()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('renders only server-masked names and opens a read-only detail view', async () => {
@@ -255,8 +285,40 @@ describe('AccountAllocationsView', () => {
     expect(wrapper.text()).toContain('Dedicated assignment')
     expect(wrapper.text()).toContain('A $2.09')
     expect(wrapper.text()).toContain('U $1.69')
+    expect(wrapper.findAll('[data-test="quota-window"]').every((bar) => bar.attributes('data-expanded') === 'true')).toBe(true)
 
     await wrapper.findAll('button.card')[1].trigger('click')
     expect(wrapper.get('[data-test="dialog"]').text()).toContain('Upstream quota')
+  })
+
+  it('refreshes on the administrator-configured interval without replacing the loaded table', async () => {
+    appStore.cachedPublicSettings = {
+      account_directory_refresh_interval_seconds: 30,
+    }
+    let resolveRefresh: ((value: typeof visibleOverview) => void) | undefined
+    listVisible
+      .mockResolvedValueOnce(visibleOverview)
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveRefresh = resolve
+      }))
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Auto-refresh every 30s')
+    expect(appStore.fetchPublicSettings).toHaveBeenCalledWith(true)
+    expect(listVisible).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(listVisible).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-test="table"]').exists()).toBe(true)
+    expect(wrapper.find('.animate-pulse').exists()).toBe(false)
+
+    resolveRefresh?.(visibleOverview)
+    await flushPromises()
+    wrapper.unmount()
+
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(listVisible).toHaveBeenCalledTimes(2)
   })
 })

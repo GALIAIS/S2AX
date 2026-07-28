@@ -1,11 +1,11 @@
 <template>
-  <div>
-    <!-- Window stats row (above progress bar) -->
+  <div :class="expanded ? 'flex flex-col gap-1.5' : 'flex flex-col'">
     <div
       v-if="windowStats && (windowStats.requests > 0 || windowStats.tokens > 0)"
-      class="mb-0.5 flex items-center"
+      data-test="usage-window-stats"
+      :class="expanded ? 'order-2 pl-11' : 'order-1 mb-0.5'"
     >
-      <div class="flex items-center gap-1.5 text-[9px] text-gray-500 dark:text-gray-400">
+      <div class="flex flex-wrap items-center gap-1 text-[9px] text-gray-500 dark:text-gray-400">
         <span class="rounded bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800">
           {{ formatRequests }} req
         </span>
@@ -25,30 +25,43 @@
       </div>
     </div>
 
-    <!-- Progress bar row -->
-    <div class="flex items-center gap-1">
-      <!-- Label badge (fixed width for alignment) -->
+    <div
+      data-test="usage-progress-row"
+      :class="expanded
+        ? 'order-1 grid grid-cols-[2.25rem_minmax(5rem,1fr)_2.5rem_minmax(3rem,auto)] items-center gap-2'
+        : 'order-2 flex items-center gap-1'"
+    >
       <span
-        :class="['w-[32px] shrink-0 rounded px-1 text-center text-[10px] font-medium', labelClass]"
+        :class="[
+          'shrink-0 rounded px-1 text-center text-[10px] font-medium',
+          expanded ? 'flex h-5 w-9 items-center justify-center' : 'w-[32px]',
+          labelClass
+        ]"
       >
         {{ label }}
       </span>
 
-      <!-- Progress bar container -->
-      <div class="h-1.5 w-8 shrink-0 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+      <div
+        data-test="usage-progress-track"
+        :class="[
+          'h-1.5 shrink-0 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700',
+          expanded ? 'w-full' : 'w-8'
+        ]"
+      >
         <div
           :class="['h-full transition-all duration-300', barClass]"
           :style="{ width: barWidth }"
         ></div>
       </div>
 
-      <!-- Percentage -->
-      <span :class="['w-[32px] shrink-0 text-right text-[10px] font-medium', textClass]">
+      <span :class="[expanded ? 'w-10' : 'w-[32px]', 'shrink-0 text-right text-[10px] font-medium', textClass]">
         {{ displayPercent }}
       </span>
 
-      <!-- Reset time -->
-      <span v-if="shouldShowResetTime" class="shrink-0 text-[10px] text-gray-400">
+      <span
+        v-if="shouldShowResetTime"
+        :class="[expanded ? 'min-w-12 text-right' : '', 'shrink-0 text-[10px] text-gray-400']"
+      >
         {{ formatResetTime }}
       </span>
     </div>
@@ -70,6 +83,7 @@ const props = defineProps<{
   windowStats?: WindowStats | null
   showNowWhenIdle?: boolean
   remainingCapacity?: boolean
+  expanded?: boolean
 }>()
 
 const { t } = useI18n()

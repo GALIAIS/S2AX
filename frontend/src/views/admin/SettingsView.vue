@@ -5679,7 +5679,7 @@
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   {{ t("admin.settings.site.tablePreferencesDescription") }}
                 </p>
-                <div class="mt-4 grid grid-cols-1 gap-6 md:grid-cols-2">
+                <div class="mt-4 grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
                   <div>
                     <label
                       class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
@@ -5714,6 +5714,25 @@
                     />
                     <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                       {{ t("admin.settings.site.tablePageSizeOptionsHint") }}
+                    </p>
+                  </div>
+                  <div>
+                    <label
+                      class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                    >
+                      {{ t("admin.settings.site.accountDirectoryRefreshInterval") }}
+                    </label>
+                    <input
+                      v-model.number="form.account_directory_refresh_interval_seconds"
+                      data-testid="account-directory-refresh-interval"
+                      type="number"
+                      min="0"
+                      :max="accountDirectoryRefreshIntervalMax"
+                      step="1"
+                      class="input w-40"
+                    />
+                    <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.site.accountDirectoryRefreshIntervalHint") }}
                     </p>
                   </div>
                 </div>
@@ -8320,6 +8339,8 @@ const openaiFastPolicyLoaded = ref(false);
 const tablePageSizeMin = 5;
 const tablePageSizeMax = 1000;
 const tablePageSizeDefault = 20;
+const accountDirectoryRefreshIntervalMin = 15;
+const accountDirectoryRefreshIntervalMax = 3600;
 
 function defaultLoginAgreementDocuments(): LoginAgreementDocument[] {
   return [
@@ -8856,6 +8877,7 @@ const form = reactive<SettingsForm>({
   payment_alipay_mobile_precreate_deep_link: false,
   table_default_page_size: tablePageSizeDefault,
   table_page_size_options: [10, 20, 50, 100],
+  account_directory_refresh_interval_seconds: 60,
   custom_menu_items: [] as Array<{
     id: string;
     label: string;
@@ -10199,8 +10221,30 @@ async function saveSettings() {
       return;
     }
 
+    const accountDirectoryRefreshInterval = Number(
+      form.account_directory_refresh_interval_seconds,
+    );
+    if (
+      !Number.isInteger(accountDirectoryRefreshInterval) ||
+      (accountDirectoryRefreshInterval !== 0 &&
+        (accountDirectoryRefreshInterval <
+          accountDirectoryRefreshIntervalMin ||
+          accountDirectoryRefreshInterval >
+            accountDirectoryRefreshIntervalMax))
+    ) {
+      appStore.showError(
+        t("admin.settings.site.accountDirectoryRefreshIntervalRangeError", {
+          min: accountDirectoryRefreshIntervalMin,
+          max: accountDirectoryRefreshIntervalMax,
+        }),
+      );
+      return;
+    }
+
     form.table_default_page_size = normalizedTableDefaultPageSize;
     form.table_page_size_options = normalizedTablePageSizeOptions;
+    form.account_directory_refresh_interval_seconds =
+      accountDirectoryRefreshInterval;
 
     const normalizedLoginAgreementDocuments =
       normalizeLoginAgreementDocumentsForSave();
@@ -10361,6 +10405,8 @@ async function saveSettings() {
       hide_ccs_import_button: form.hide_ccs_import_button,
       table_default_page_size: form.table_default_page_size,
       table_page_size_options: form.table_page_size_options,
+      account_directory_refresh_interval_seconds:
+        form.account_directory_refresh_interval_seconds,
       custom_menu_items: form.custom_menu_items,
       custom_endpoints: form.custom_endpoints,
       frontend_url: form.frontend_url,

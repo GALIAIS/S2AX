@@ -91,15 +91,21 @@
                 <span class="sr-only">{{ t('accountAllocations.viewModes.grid') }}</span>
               </button>
             </div>
-            <button type="button" class="btn btn-secondary btn-sm shrink-0" :disabled="loading" @click="loadAccounts">
-              <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
+            <button type="button" class="btn btn-secondary btn-sm shrink-0" :disabled="loading || refreshing" @click="loadAccounts">
+              <Icon name="refresh" size="sm" :class="loading || refreshing ? 'animate-spin' : ''" />
               <span class="hidden sm:inline">{{ t('common.refresh') }}</span>
             </button>
           </div>
         </div>
 
         <div class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-3 text-xs text-gray-500 dark:border-dark-700 dark:text-dark-400">
-          <span>{{ t('accountAllocations.showing', { count: filteredAccounts.length, total: visibleAccountCount }) }}</span>
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span>{{ t('accountAllocations.showing', { count: filteredAccounts.length, total: visibleAccountCount }) }}</span>
+            <span v-if="autoRefreshIntervalSeconds > 0" class="inline-flex items-center gap-1">
+              <Icon name="clock" size="xs" />
+              {{ t('accountAllocations.autoRefreshEvery', { seconds: autoRefreshIntervalSeconds }) }}
+            </span>
+          </div>
           <button v-if="filtersActive" type="button" class="btn btn-ghost btn-sm" @click="resetFilters">
             {{ t('accountAllocations.resetFilters') }}
           </button>
@@ -170,45 +176,54 @@
           </template>
 
           <template #cell-usage="{ row }">
-            <div class="min-w-[15rem] space-y-1.5">
-              <div v-if="row.upstream_quota" class="space-y-1 border-b border-gray-100 pb-1.5 dark:border-dark-700">
-                <div class="flex items-center justify-between gap-2 text-[10px] text-gray-500 dark:text-dark-400">
-                  <span>{{ t('accountAllocations.upstreamQuota') }}</span>
-                  <span class="badge badge-gray">{{ usageDetailAccessLabel(row.usage_detail_access) }}</span>
+            <div class="w-[22rem] min-w-[19rem] max-w-full">
+              <div v-if="row.upstream_quota" class="border border-gray-100 bg-gray-50/70 px-2.5 py-2 dark:border-dark-700 dark:bg-dark-800/50">
+                <div class="mb-2 flex min-w-0 items-center gap-2">
+                  <span class="shrink-0 text-xs font-medium text-gray-700 dark:text-dark-200">{{ t('accountAllocations.upstreamQuota') }}</span>
+                  <span class="badge badge-gray shrink-0 text-[10px]">{{ usageDetailAccessLabel(row.usage_detail_access) }}</span>
+                  <span class="ml-auto truncate text-[10px] text-gray-400 dark:text-dark-500" :title="formatDateTime(row.upstream_quota.updated_at)">
+                    {{ t('accountAllocations.cachedQuotaSnapshot') }} · {{ formatRelativeTime(row.upstream_quota.updated_at) }}
+                  </span>
                 </div>
-                <UsageProgressBar
-                  v-if="row.upstream_quota.five_hour"
-                  label="5h"
-                  :utilization="row.upstream_quota.five_hour.utilization"
-                  :resets-at="row.upstream_quota.five_hour.resets_at"
-                  :window-stats="row.upstream_quota.five_hour.window_stats"
-                  color="indigo"
-                  :show-now-when-idle="true"
-                />
-                <UsageProgressBar
-                  v-if="row.upstream_quota.seven_day"
-                  label="7d"
-                  :utilization="row.upstream_quota.seven_day.utilization"
-                  :resets-at="row.upstream_quota.seven_day.resets_at"
-                  :window-stats="row.upstream_quota.seven_day.window_stats"
-                  color="emerald"
-                  :show-now-when-idle="true"
-                />
-                <p class="text-[10px] text-gray-400 dark:text-dark-500" :title="formatDateTime(row.upstream_quota.updated_at)">
-                  {{ t('accountAllocations.cachedQuotaSnapshot') }} · {{ formatRelativeTime(row.upstream_quota.updated_at) }}
-                </p>
+                <div class="space-y-1.5">
+                  <UsageProgressBar
+                    v-if="row.upstream_quota.five_hour"
+                    label="5h"
+                    :utilization="row.upstream_quota.five_hour.utilization"
+                    :resets-at="row.upstream_quota.five_hour.resets_at"
+                    :window-stats="row.upstream_quota.five_hour.window_stats"
+                    color="indigo"
+                    :show-now-when-idle="true"
+                    expanded
+                  />
+                  <UsageProgressBar
+                    v-if="row.upstream_quota.seven_day"
+                    label="7d"
+                    :utilization="row.upstream_quota.seven_day.utilization"
+                    :resets-at="row.upstream_quota.seven_day.resets_at"
+                    :window-stats="row.upstream_quota.seven_day.window_stats"
+                    color="emerald"
+                    :show-now-when-idle="true"
+                    expanded
+                  />
+                </div>
               </div>
-              <p v-else-if="row.usage_detail_access" class="text-[11px] text-gray-500 dark:text-dark-400">
+              <p v-else-if="row.usage_detail_access" class="border border-gray-100 bg-gray-50/70 px-2.5 py-2 text-[11px] text-gray-500 dark:border-dark-700 dark:bg-dark-800/50 dark:text-dark-400">
                 {{ usageDetailAccessLabel(row.usage_detail_access) }} · {{ t('accountAllocations.usageDetailGrantedNoSnapshot') }}
               </p>
-              <div class="flex flex-wrap items-center gap-1 text-[11px] text-gray-600 dark:text-dark-300">
-                <span class="badge badge-gray font-medium">{{ usageWindowLabel(row.usage.scope) }}</span>
-                <span class="rounded bg-gray-100 px-1.5 py-0.5 font-mono dark:bg-dark-800">{{ formatCompactNumber(row.usage.request_count, { allowBillions: false }) }} {{ t('accountAllocations.requests') }}</span>
-                <span class="rounded bg-gray-100 px-1.5 py-0.5 font-mono dark:bg-dark-800">{{ formatCompactNumber(row.usage.total_tokens) }} {{ t('accountAllocations.tokens') }}</span>
-                <span v-if="hasLeaseUsage(row) && row.usage.account_cost != null" class="rounded bg-gray-100 px-1.5 py-0.5 font-mono dark:bg-dark-800" :title="t('accountAllocations.leaseAccountCost')">A ${{ formatCostFixed(row.usage.account_cost ?? 0, 2) }}</span>
-                <span v-if="hasLeaseUsage(row) && row.usage.user_cost != null" class="rounded bg-gray-100 px-1.5 py-0.5 font-mono dark:bg-dark-800" :title="t('accountAllocations.leaseUserCost')">U ${{ formatCostFixed(row.usage.user_cost ?? 0, 2) }}</span>
+              <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-gray-100 pt-2 text-[11px] text-gray-500 dark:border-dark-700 dark:text-dark-400">
+                <span class="badge badge-gray shrink-0 font-medium" :title="usageScopeLabel(row.usage.scope)">{{ usageWindowLabel(row.usage.scope) }}</span>
+                <span class="inline-flex items-baseline gap-1">
+                  <strong class="font-mono text-sm text-gray-900 dark:text-white">{{ formatCompactNumber(row.usage.request_count, { allowBillions: false }) }}</strong>
+                  <span>{{ t('accountAllocations.requests') }}</span>
+                </span>
+                <span class="inline-flex items-baseline gap-1">
+                  <strong class="font-mono text-sm text-gray-900 dark:text-white">{{ formatCompactNumber(row.usage.total_tokens) }}</strong>
+                  <span>{{ t('accountAllocations.tokens') }}</span>
+                </span>
+                <span v-if="hasLeaseUsage(row) && row.usage.account_cost != null" class="font-mono" :title="t('accountAllocations.leaseAccountCost')">A ${{ formatCostFixed(row.usage.account_cost ?? 0, 2) }}</span>
+                <span v-if="hasLeaseUsage(row) && row.usage.user_cost != null" class="font-mono" :title="t('accountAllocations.leaseUserCost')">U ${{ formatCostFixed(row.usage.user_cost ?? 0, 2) }}</span>
               </div>
-              <p class="text-xs text-gray-500 dark:text-dark-400">{{ usageScopeLabel(row.usage.scope) }}</p>
             </div>
           </template>
 
@@ -228,7 +243,7 @@
       </section>
 
       <section v-else class="space-y-4">
-        <div v-if="loading" class="flex items-center gap-2 text-xs text-gray-500 dark:text-dark-400" role="status">
+        <div v-if="refreshing" class="flex items-center gap-2 text-xs text-gray-500 dark:text-dark-400" role="status">
           <Icon name="refresh" size="xs" class="animate-spin" />
           {{ t('common.refreshing') }}
         </div>
@@ -289,6 +304,7 @@
                   :window-stats="account.upstream_quota.five_hour.window_stats"
                   color="indigo"
                   :show-now-when-idle="true"
+                  expanded
                 />
                 <UsageProgressBar
                   v-if="account.upstream_quota.seven_day"
@@ -298,6 +314,7 @@
                   :window-stats="account.upstream_quota.seven_day.window_stats"
                   color="emerald"
                   :show-now-when-idle="true"
+                  expanded
                 />
                 <p class="text-[10px] text-gray-400 dark:text-dark-500" :title="formatDateTime(account.upstream_quota.updated_at)">
                   {{ t('accountAllocations.cachedQuotaSnapshot') }} · {{ formatRelativeTime(account.upstream_quota.updated_at) }}
@@ -394,6 +411,7 @@
                 :window-stats="selectedAccount.upstream_quota.five_hour.window_stats"
                 color="indigo"
                 :show-now-when-idle="true"
+                expanded
               />
               <UsageProgressBar
                 v-if="selectedAccount.upstream_quota.seven_day"
@@ -403,6 +421,7 @@
                 :window-stats="selectedAccount.upstream_quota.seven_day.window_stats"
                 color="emerald"
                 :show-now-when-idle="true"
+                expanded
               />
               <p class="text-xs text-gray-500 dark:text-dark-400" :title="formatDateTime(selectedAccount.upstream_quota.updated_at)">
                 {{ t('accountAllocations.cachedQuotaSnapshot') }} · {{ formatRelativeTime(selectedAccount.upstream_quota.updated_at) }}
@@ -449,15 +468,20 @@ import Select, { type SelectOption } from '@/components/common/Select.vue'
 import type { Column } from '@/components/common/types'
 import UsageProgressBar from '@/components/account/UsageProgressBar.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatCompactNumber, formatCostFixed, formatDateTime, formatNumber, formatRelativeTime } from '@/utils/format'
 
 const { t } = useI18n()
+const appStore = useAppStore()
 
 type AccountDirectoryViewMode = 'list' | 'grid'
 
 const ACCOUNT_DIRECTORY_VIEW_MODE_STORAGE_KEY = 'user-account-directory-view-mode'
 const GRID_PAGE_SIZE = 24
+const AUTO_REFRESH_INTERVAL_MIN = 15
+const AUTO_REFRESH_INTERVAL_MAX = 3600
+const AUTO_REFRESH_INTERVAL_DEFAULT = 60
 
 const emptySummary = (): UserVisibleAccountSummary => ({
   public_group_count: 0,
@@ -478,6 +502,8 @@ const preferredViewMode = (): AccountDirectoryViewMode => {
 const accounts = ref<UserVisibleAccount[]>([])
 const summary = ref<UserVisibleAccountSummary>(emptySummary())
 const loading = ref(true)
+const refreshing = ref(false)
+const initialized = ref(false)
 const loadError = ref<string | null>(null)
 const selectedAccount = ref<UserVisibleAccount | null>(null)
 const searchQuery = ref('')
@@ -488,6 +514,19 @@ const statusFilter = ref<'all' | AccountAllocationUserStatus>('all')
 const viewMode = ref<AccountDirectoryViewMode>(preferredViewMode())
 const gridLimit = ref(GRID_PAGE_SIZE)
 let requestID = 0
+let refreshInFlight = false
+let autoRefreshTimer: number | null = null
+
+const autoRefreshIntervalSeconds = computed(() => {
+  const configured = Number(
+    appStore.cachedPublicSettings?.account_directory_refresh_interval_seconds
+      ?? AUTO_REFRESH_INTERVAL_DEFAULT,
+  )
+  if (!Number.isFinite(configured)) return AUTO_REFRESH_INTERVAL_DEFAULT
+  const seconds = Math.floor(configured)
+  if (seconds <= 0) return 0
+  return Math.min(AUTO_REFRESH_INTERVAL_MAX, Math.max(AUTO_REFRESH_INTERVAL_MIN, seconds))
+})
 
 const sourceOptions = computed<SelectOption[]>(() => [
   { value: 'all', label: t('accountAllocations.filters.allSources') },
@@ -619,22 +658,62 @@ const availabilityHint = (account: UserVisibleAccount): string => {
   return t('accountAllocations.unavailableHint')
 }
 
-const loadAccounts = async () => {
+const refreshAccounts = async (silent: boolean) => {
+  if (refreshInFlight) return
+  refreshInFlight = true
+  const initialLoad = !initialized.value
   const currentRequestID = ++requestID
-  loading.value = true
-  loadError.value = null
+  if (initialLoad) {
+    loading.value = true
+    loadError.value = null
+  } else if (!silent) {
+    refreshing.value = true
+  }
   try {
     const result: UserVisibleAccountOverview = await accountAllocationsAPI.listVisible()
     if (currentRequestID === requestID) {
       accounts.value = result.items
       summary.value = result.summary
+      initialized.value = true
+      if (selectedAccount.value) {
+        selectedAccount.value = result.items.find(
+          (account) => account.view_key === selectedAccount.value?.view_key,
+        ) ?? null
+      }
     }
   } catch (error: unknown) {
-    if (currentRequestID === requestID) {
+    if (currentRequestID === requestID && initialLoad) {
       loadError.value = extractApiErrorMessage(error, t('accountAllocations.loadFailed'))
     }
   } finally {
-    if (currentRequestID === requestID) loading.value = false
+    if (currentRequestID === requestID) {
+      loading.value = false
+      refreshing.value = false
+    }
+    refreshInFlight = false
+  }
+}
+
+const loadAccounts = () => refreshAccounts(false)
+
+const stopAutoRefresh = () => {
+  if (autoRefreshTimer === null) return
+  window.clearInterval(autoRefreshTimer)
+  autoRefreshTimer = null
+}
+
+const startAutoRefresh = () => {
+  stopAutoRefresh()
+  const seconds = autoRefreshIntervalSeconds.value
+  if (seconds <= 0) return
+  autoRefreshTimer = window.setInterval(() => {
+    if (!document.hidden) void refreshAccounts(true)
+  }, seconds * 1000)
+}
+
+const handleVisibilityChange = () => {
+  if (!document.hidden && autoRefreshIntervalSeconds.value > 0) {
+    void refreshAccounts(true)
   }
 }
 
@@ -674,6 +753,18 @@ watch(platformOptions, (options) => {
   if (!options.some((option) => String(option.value) === platformFilter.value)) platformFilter.value = 'all'
 })
 
-onMounted(() => { void loadAccounts() })
-onUnmounted(() => { requestID += 1 })
+watch(autoRefreshIntervalSeconds, startAutoRefresh)
+
+onMounted(() => {
+  void loadAccounts()
+  startAutoRefresh()
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  void appStore.fetchPublicSettings(true)
+})
+
+onUnmounted(() => {
+  requestID += 1
+  stopAutoRefresh()
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+})
 </script>

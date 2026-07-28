@@ -233,6 +233,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		PurchaseSubscriptionURL:                                settings.PurchaseSubscriptionURL,
 		TableDefaultPageSize:                                   settings.TableDefaultPageSize,
 		TablePageSizeOptions:                                   settings.TablePageSizeOptions,
+		AccountDirectoryRefreshSec:                             settings.AccountDirectoryRefreshSec,
 		CustomMenuItems:                                        dto.ParseCustomMenuItems(settings.CustomMenuItems),
 		CustomEndpoints:                                        dto.ParseCustomEndpoints(settings.CustomEndpoints),
 		DefaultConcurrency:                                     settings.DefaultConcurrency,

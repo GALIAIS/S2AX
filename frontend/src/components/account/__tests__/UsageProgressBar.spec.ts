@@ -146,4 +146,26 @@ describe('UsageProgressBar', () => {
     expect(wrapper.get('.h-1\\.5 > div').attributes('style')).toContain('width: 100%')
     expect(wrapper.get('.h-1\\.5 > div').classes()).toContain('bg-red-500')
   })
+
+  it('扩展布局使用可伸缩进度轨道并将窗口统计放在轨道下方', () => {
+    const wrapper = mount(UsageProgressBar, {
+      props: {
+        label: '5h',
+        utilization: 51,
+        resetsAt: '2026-03-17T02:30:00Z',
+        color: 'indigo',
+        expanded: true,
+        windowStats: {
+          requests: 63,
+          tokens: 1_600_000,
+          cost: 0.65,
+          user_cost: 0.65
+        }
+      }
+    })
+
+    expect(wrapper.get('[data-test="usage-progress-row"]').classes()).toContain('grid')
+    expect(wrapper.get('[data-test="usage-progress-track"]').classes()).toContain('w-full')
+    expect(wrapper.get('[data-test="usage-window-stats"]').classes()).toContain('order-2')
+  })
 })
