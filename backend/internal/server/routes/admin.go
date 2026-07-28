@@ -147,6 +147,7 @@ func registerInvocationArchiveRoutes(admin *gin.RouterGroup, h *handler.Handlers
 		archive.GET("/records/:id", h.Admin.InvocationArchive.GetRecord)
 		archive.GET("/records/:id/accesses", h.Admin.InvocationArchive.ListAccessLogs)
 		archive.POST("/records/:id/reveal", gin.HandlerFunc(stepUpAuth), h.Admin.InvocationArchive.RevealRecord)
+		archive.POST("/records/:id/payloads/:slot", gin.HandlerFunc(stepUpAuth), h.Admin.InvocationArchive.RevealPayloadChunk)
 		archive.DELETE("/records/:id", gin.HandlerFunc(stepUpAuth), h.Admin.InvocationArchive.DeleteRecord)
 		archive.POST("/records/batch-delete", gin.HandlerFunc(stepUpAuth), h.Admin.InvocationArchive.BatchDelete)
 	}

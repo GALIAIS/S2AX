@@ -2,6 +2,7 @@ package invocationarchive
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -128,12 +129,19 @@ func (w *captureResponseWriter) ReadFrom(reader io.Reader) (int64, error) {
 
 type payloadEnvelope struct {
 	Encoding        string                 `json:"encoding"`
+	Compression     string                 `json:"compression,omitempty"`
 	Data            string                 `json:"data"`
 	Frames          []payloadFrameEnvelope `json:"frames,omitempty"`
 	FramesTruncated bool                   `json:"frames_truncated,omitempty"`
 }
 
+const (
+	payloadCompressionNone = "none"
+	payloadCompressionGzip = "gzip"
+)
+
 type payloadFrameEnvelope struct {
+	Sequence      int       `json:"sequence,omitempty"`
 	Kind          string    `json:"kind"`
 	OccurredAt    time.Time `json:"occurred_at"`
 	Offset        int64     `json:"offset"`
@@ -169,16 +177,34 @@ func protectPayloadEnvelope(encryptor service.SecretEncryptor, envelope payloadE
 }
 
 func newPayloadEnvelope(payload []byte, frames []capturedFrame, framesTruncated bool) payloadEnvelope {
-	envelope := payloadEnvelope{Encoding: "base64", Data: base64.StdEncoding.EncodeToString(payload), FramesTruncated: framesTruncated}
+	return newPayloadEnvelopeWithEncoding(payload, payloadEncoding(payload), frames, framesTruncated)
+}
+
+func payloadEncoding(payload []byte) string {
 	if utf8.Valid(payload) {
-		envelope.Encoding = "utf8"
+		return "utf8"
+	}
+	return "base64"
+}
+
+func newPayloadEnvelopeWithEncoding(payload []byte, encoding string, frames []capturedFrame, framesTruncated bool) payloadEnvelope {
+	envelope := payloadEnvelope{Encoding: encoding, Compression: payloadCompressionNone, FramesTruncated: framesTruncated}
+	if encoding == "utf8" {
 		envelope.Data = string(payload)
+	} else {
+		envelope.Encoding = "base64"
+		envelope.Data = base64.StdEncoding.EncodeToString(payload)
 	}
 	if len(frames) > 0 {
 		envelope.Frames = make([]payloadFrameEnvelope, 0, len(frames))
-		for _, frame := range frames {
+		for index, frame := range frames {
+			sequence := frame.sequence
+			if sequence < 1 {
+				sequence = index + 1
+			}
 			envelope.Frames = append(envelope.Frames, payloadFrameEnvelope{
-				Kind: normalizeWebSocketFrameKind(frame.kind), OccurredAt: frame.occurredAt,
+				Sequence: sequence,
+				Kind:     normalizeWebSocketFrameKind(frame.kind), OccurredAt: frame.occurredAt,
 				Offset: frame.offset, TotalBytes: frame.totalBytes, CapturedBytes: frame.capturedBytes, Truncated: frame.truncated,
 			})
 		}
@@ -196,31 +222,69 @@ func revealPayload(encryptor service.SecretEncryptor, ciphertext, contentType, s
 	if encryptor == nil {
 		return view, ErrPayloadUnavailable
 	}
-	plain, err := encryptor.Decrypt(ciphertext)
+	envelope, payload, err := decryptPayloadEnvelope(encryptor, ciphertext)
 	if err != nil {
 		return view, err
 	}
-	var envelope payloadEnvelope
-	if err := json.Unmarshal([]byte(plain), &envelope); err != nil {
-		return view, err
-	}
-	payload, err := decodePayloadEnvelope(envelope)
-	if err != nil {
-		return view, err
-	}
-	frames, err := revealPayloadFrames(payload, envelope.Frames)
+	frames, err := revealPayloadFrames(payload, envelope.Frames, 0, int64(len(payload)))
 	if err != nil {
 		return view, err
 	}
 	view.Available = true
 	view.Encoding = envelope.Encoding
-	view.Data = envelope.Data
+	view.Compression = normalizePayloadCompression(envelope.Compression)
+	view.Data = encodePayloadData(payload, envelope.Encoding)
+	view.Offset = 0
+	view.LoadedBytes = int64(len(payload))
+	view.Complete = true
 	view.Frames = frames
 	view.FramesTruncated = envelope.FramesTruncated
 	return view, nil
 }
 
+func decryptPayloadEnvelope(encryptor service.SecretEncryptor, ciphertext string) (payloadEnvelope, []byte, error) {
+	if encryptor == nil {
+		return payloadEnvelope{}, nil, ErrPayloadUnavailable
+	}
+	plain, err := encryptor.Decrypt(ciphertext)
+	if err != nil {
+		return payloadEnvelope{}, nil, err
+	}
+	var envelope payloadEnvelope
+	if err := json.Unmarshal([]byte(plain), &envelope); err != nil {
+		return payloadEnvelope{}, nil, err
+	}
+	payload, err := decodePayloadEnvelope(envelope)
+	if err != nil {
+		return payloadEnvelope{}, nil, err
+	}
+	return envelope, payload, nil
+}
+
 func decodePayloadEnvelope(envelope payloadEnvelope) ([]byte, error) {
+	compression := normalizePayloadCompression(envelope.Compression)
+	if compression == payloadCompressionGzip {
+		compressed, err := base64.StdEncoding.DecodeString(envelope.Data)
+		if err != nil {
+			return nil, err
+		}
+		reader, err := gzip.NewReader(bytes.NewReader(compressed))
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = reader.Close() }()
+		payload, err := io.ReadAll(io.LimitReader(reader, int64(maxCaptureBytes)+1))
+		if err != nil {
+			return nil, err
+		}
+		if len(payload) > maxCaptureBytes {
+			return nil, ErrPayloadUnavailable
+		}
+		return payload, nil
+	}
+	if compression != payloadCompressionNone {
+		return nil, ErrPayloadUnavailable
+	}
 	switch envelope.Encoding {
 	case "utf8":
 		if !utf8.ValidString(envelope.Data) {
@@ -238,11 +302,61 @@ func decodePayloadEnvelope(envelope payloadEnvelope) ([]byte, error) {
 	}
 }
 
-func revealPayloadFrames(payload []byte, frames []payloadFrameEnvelope) ([]PayloadFrameView, error) {
+func normalizePayloadCompression(value string) string {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "", payloadCompressionNone:
+		return payloadCompressionNone
+	case payloadCompressionGzip:
+		return payloadCompressionGzip
+	default:
+		return ""
+	}
+}
+
+func encodePayloadData(payload []byte, encoding string) string {
+	if encoding == "utf8" {
+		return string(payload)
+	}
+	return base64.StdEncoding.EncodeToString(payload)
+}
+
+func gzipPayloadEnvelope(envelope payloadEnvelope) (payloadEnvelope, bool, error) {
+	if normalizePayloadCompression(envelope.Compression) == payloadCompressionGzip {
+		return envelope, false, nil
+	}
+	payload, err := decodePayloadEnvelope(envelope)
+	if err != nil {
+		return payloadEnvelope{}, false, err
+	}
+	if len(payload) == 0 {
+		return envelope, false, nil
+	}
+	var compressed bytes.Buffer
+	writer, err := gzip.NewWriterLevel(&compressed, gzip.BestSpeed)
+	if err != nil {
+		return payloadEnvelope{}, false, err
+	}
+	if _, err := writer.Write(payload); err != nil {
+		_ = writer.Close()
+		return payloadEnvelope{}, false, err
+	}
+	if err := writer.Close(); err != nil {
+		return payloadEnvelope{}, false, err
+	}
+	result := envelope
+	result.Compression = payloadCompressionGzip
+	result.Data = base64.StdEncoding.EncodeToString(compressed.Bytes())
+	return result, true, nil
+}
+
+func revealPayloadFrames(payload []byte, frames []payloadFrameEnvelope, segmentStart, segmentEnd int64) ([]PayloadFrameView, error) {
 	if len(frames) == 0 {
 		return nil, nil
 	}
 	if len(frames) > maxWebSocketFrameMetadata {
+		return nil, ErrPayloadUnavailable
+	}
+	if segmentStart < 0 || segmentEnd < segmentStart || segmentEnd > int64(len(payload)) {
 		return nil, ErrPayloadUnavailable
 	}
 	result := make([]PayloadFrameView, 0, len(frames))
@@ -250,15 +364,20 @@ func revealPayloadFrames(payload []byte, frames []payloadFrameEnvelope) ([]Paylo
 		if frame.Offset < 0 || frame.CapturedBytes < 0 || frame.TotalBytes < frame.CapturedBytes || frame.Offset > int64(len(payload)) {
 			return nil, ErrPayloadUnavailable
 		}
-		end := frame.Offset + frame.CapturedBytes
-		if end < frame.Offset || end > int64(len(payload)) {
+		frameEnd := frame.Offset + frame.CapturedBytes
+		if frameEnd < frame.Offset || frameEnd > int64(len(payload)) {
 			return nil, ErrPayloadUnavailable
 		}
-		framePayload := payload[frame.Offset:end]
-		frameEnvelope := newPayloadEnvelope(framePayload, nil, false)
+		if frameEnd <= segmentStart || frame.Offset >= segmentEnd {
+			continue
+		}
+		sequence := frame.Sequence
+		if sequence < 1 {
+			sequence = index + 1
+		}
 		result = append(result, PayloadFrameView{
-			Sequence: index + 1, Kind: normalizeWebSocketFrameKind(frame.Kind), OccurredAt: frame.OccurredAt,
-			Encoding: frameEnvelope.Encoding, Data: frameEnvelope.Data,
+			Sequence: sequence, Kind: normalizeWebSocketFrameKind(frame.Kind), OccurredAt: frame.OccurredAt,
+			Offset:     frame.Offset,
 			TotalBytes: frame.TotalBytes, CapturedBytes: frame.CapturedBytes, Truncated: frame.Truncated,
 		})
 	}
@@ -440,7 +559,8 @@ func (c *websocketFrameCapture) Write(kind string, payload []byte) {
 		return
 	}
 	c.frames = append(c.frames, capturedFrame{
-		kind: normalizeWebSocketFrameKind(kind), occurredAt: time.Now().UTC(), offset: offset,
+		sequence: len(c.frames) + 1,
+		kind:     normalizeWebSocketFrameKind(kind), occurredAt: time.Now().UTC(), offset: offset,
 		totalBytes: int64(len(payload)), capturedBytes: int64(captured), truncated: truncated,
 	})
 }

@@ -113,6 +113,35 @@ func (h *AdminHandler) RevealRecord(c *gin.Context) {
 	response.Success(c, reveal)
 }
 
+func (h *AdminHandler) RevealPayloadChunk(c *gin.Context) {
+	id, ok := archiveRecordID(c)
+	if !ok {
+		return
+	}
+	slot, ok := archivePayloadSlot(c)
+	if !ok {
+		return
+	}
+	offset, ok := archivePayloadOffset(c)
+	if !ok {
+		return
+	}
+	limit := positiveQuery(c, "limit", defaultPayloadChunkBytes, maxPayloadChunkBytes)
+	c.Header("Cache-Control", "no-store, no-cache, must-revalidate, private")
+	c.Header("Pragma", "no-cache")
+	chunk, err := h.service.RevealPayloadChunk(c.Request.Context(), id, archiveAdminID(c), slot, offset, limit, middleware.SecurityClientIP(c), c.Request.UserAgent())
+	if err != nil {
+		setArchiveAudit(c, "failed", archiveErrorCode(err), map[string]any{"archive_record_id": id, "payload_slot": slot, "payload_offset": offset})
+		respondArchiveRecordError(c, err)
+		return
+	}
+	setArchiveAudit(c, "success", "", map[string]any{
+		"archive_record_id": id, "payload_slot": slot, "payload_offset": chunk.Payload.Offset,
+		"payload_loaded_bytes": chunk.Payload.LoadedBytes, "payload_complete": chunk.Payload.Complete,
+	})
+	response.Success(c, chunk)
+}
+
 func (h *AdminHandler) DeleteRecord(c *gin.Context) {
 	id, ok := archiveRecordID(c)
 	if !ok {
@@ -196,6 +225,28 @@ func archiveRecordID(c *gin.Context) (int64, bool) {
 	return id, true
 }
 
+func archivePayloadSlot(c *gin.Context) (PayloadSlot, bool) {
+	slot := PayloadSlot(strings.TrimSpace(c.Param("slot")))
+	if slot != PayloadSlotRequest && slot != PayloadSlotResponse {
+		response.ErrorFrom(c, infraerrors.BadRequest("invocation_archive_payload_slot_invalid", "归档载荷类型无效"))
+		return "", false
+	}
+	return slot, true
+}
+
+func archivePayloadOffset(c *gin.Context) (int64, bool) {
+	value := strings.TrimSpace(c.Query("offset"))
+	if value == "" {
+		return 0, true
+	}
+	offset, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || offset < 0 {
+		response.ErrorFrom(c, infraerrors.BadRequest("invocation_archive_payload_range_invalid", "归档载荷范围无效"))
+		return 0, false
+	}
+	return offset, true
+}
+
 func archiveAdminID(c *gin.Context) int64 {
 	subject, ok := middleware.GetAuthSubjectFromContext(c)
 	if !ok {
@@ -232,6 +283,8 @@ func respondArchiveRecordError(c *gin.Context, err error) bool {
 		response.ErrorFrom(c, infraerrors.Conflict("invocation_archive_payload_expired", "调用归档载荷已过期"))
 	case errors.Is(err, ErrPayloadUnavailable):
 		response.ErrorFrom(c, infraerrors.Conflict("invocation_archive_payload_unavailable", "调用归档载荷不可用"))
+	case errors.Is(err, ErrPayloadRangeInvalid):
+		response.ErrorFrom(c, infraerrors.BadRequest("invocation_archive_payload_range_invalid", "归档载荷范围无效"))
 	default:
 		response.ErrorFrom(c, err)
 	}
@@ -248,6 +301,8 @@ func archiveErrorCode(err error) string {
 		return "invocation_archive_payload_expired"
 	case errors.Is(err, ErrPayloadUnavailable):
 		return "invocation_archive_payload_unavailable"
+	case errors.Is(err, ErrPayloadRangeInvalid):
+		return "invocation_archive_payload_range_invalid"
 	default:
 		return "invocation_archive_request_failed"
 	}

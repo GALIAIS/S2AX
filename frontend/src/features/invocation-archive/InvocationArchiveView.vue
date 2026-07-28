@@ -185,6 +185,51 @@
               </span>
             </label>
 
+            <section class="mt-6 border-t border-gray-200 pt-6 dark:border-dark-700">
+              <div class="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <h3 class="text-base font-semibold text-gray-950 dark:text-white">{{ t('admin.invocationArchive.compression.title') }}</h3>
+                  <p class="mt-1 max-w-3xl text-sm text-gray-500 dark:text-dark-300">{{ t('admin.invocationArchive.compression.description') }}</p>
+                </div>
+              </div>
+              <label class="mt-4 flex items-start gap-3 rounded-xl border border-gray-200 p-4 text-sm dark:border-dark-700">
+                <input v-model="draft.compression.enabled" type="checkbox" class="mt-0.5 h-4 w-4" />
+                <span>
+                  <span class="font-medium text-gray-900 dark:text-white">{{ t('admin.invocationArchive.compression.enabled') }}</span>
+                  <span class="mt-1 block text-gray-500 dark:text-dark-300">{{ t('admin.invocationArchive.compression.enabledHint') }}</span>
+                </span>
+              </label>
+              <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                <label class="text-sm text-gray-700 dark:text-dark-200">
+                  <span>{{ t('admin.invocationArchive.compression.afterHours') }}</span>
+                  <input :value="draft.compression.after_hours" type="number" min="0" max="8760" class="input mt-1 w-full" @input="setCompressionNumber('after_hours', $event)" />
+                  <span class="mt-1 block text-xs text-gray-500 dark:text-dark-400">{{ t('admin.invocationArchive.compression.zeroDisabled') }}</span>
+                </label>
+                <label class="text-sm text-gray-700 dark:text-dark-200">
+                  <span>{{ t('admin.invocationArchive.compression.minBytes') }}</span>
+                  <input :value="bytesToMiB(draft.compression.min_bytes)" type="number" min="0.001" max="256" step="0.001" class="input mt-1 w-full" @input="setCompressionMiB('min_bytes', $event)" />
+                </label>
+                <label class="text-sm text-gray-700 dark:text-dark-200">
+                  <span>{{ t('admin.invocationArchive.compression.triggerBytes') }}</span>
+                  <input :value="bytesToMiB(draft.compression.trigger_bytes)" type="number" min="0" max="1048576" step="1" class="input mt-1 w-full" @input="setCompressionMiB('trigger_bytes', $event)" />
+                  <span class="mt-1 block text-xs text-gray-500 dark:text-dark-400">{{ t('admin.invocationArchive.compression.zeroDisabled') }}</span>
+                </label>
+                <label class="text-sm text-gray-700 dark:text-dark-200">
+                  <span>{{ t('admin.invocationArchive.compression.triggerRecords') }}</span>
+                  <input :value="draft.compression.trigger_records" type="number" min="0" max="1000000" class="input mt-1 w-full" @input="setCompressionNumber('trigger_records', $event)" />
+                  <span class="mt-1 block text-xs text-gray-500 dark:text-dark-400">{{ t('admin.invocationArchive.compression.zeroDisabled') }}</span>
+                </label>
+                <label class="text-sm text-gray-700 dark:text-dark-200">
+                  <span>{{ t('admin.invocationArchive.compression.batchSize') }}</span>
+                  <input :value="draft.compression.batch_size" type="number" min="1" max="100" class="input mt-1 w-full" @input="setCompressionNumber('batch_size', $event)" />
+                </label>
+                <label class="text-sm text-gray-700 dark:text-dark-200">
+                  <span>{{ t('admin.invocationArchive.compression.intervalMinutes') }}</span>
+                  <input :value="draft.compression.interval_minutes" type="number" min="1" max="1440" class="input mt-1 w-full" @input="setCompressionNumber('interval_minutes', $event)" />
+                </label>
+              </div>
+            </section>
+
             <div class="mt-8 border-t border-gray-200 pt-6 dark:border-dark-700">
               <div class="flex flex-wrap items-end justify-between gap-4">
                 <div>
@@ -274,9 +319,11 @@
             </article>
           </div>
           <div v-else class="mt-6 py-12 text-center text-sm text-gray-500">{{ t('common.loading') }}</div>
-          <div v-if="runtime?.last_config_error || runtime?.last_persist_error" class="mt-6 grid gap-4 lg:grid-cols-2">
+          <div v-if="runtime?.last_config_error || runtime?.last_persist_error || runtime?.last_storage_error || runtime?.compression?.last_error" class="mt-6 grid gap-4 lg:grid-cols-2">
             <div v-if="runtime.last_config_error" class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200"><p class="font-medium">{{ t('admin.invocationArchive.runtime.configError') }}</p><p class="mt-1 break-words">{{ runtime.last_config_error }}</p></div>
             <div v-if="runtime.last_persist_error" class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-200"><p class="font-medium">{{ t('admin.invocationArchive.runtime.persistError') }}</p><p class="mt-1 break-words">{{ runtime.last_persist_error }}</p></div>
+            <div v-if="runtime.last_storage_error" class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200"><p class="font-medium">{{ t('admin.invocationArchive.runtime.storageError') }}</p><p class="mt-1 break-words">{{ runtime.last_storage_error }}</p></div>
+            <div v-if="runtime.compression?.last_error" class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-200"><p class="font-medium">{{ t('admin.invocationArchive.runtime.compressionError') }}</p><p class="mt-1 break-words">{{ runtime.compression.last_error }}</p></div>
           </div>
         </section>
       </template>
@@ -307,17 +354,20 @@
               <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.invocationArchive.detail.revealHint') }}</p>
             </div>
           </template>
-          <div v-if="reveal" class="mt-5 grid gap-4 xl:grid-cols-2">
-            <article v-for="payload in payloadPanels" :key="payload.slot" class="min-w-0 rounded-xl border border-gray-200 dark:border-dark-700">
+          <div v-if="hasPayloadChunks" class="mt-5 grid items-start gap-4 xl:grid-cols-2">
+            <article v-for="payload in payloadPanels" :key="payload.slot" class="min-w-0 self-start rounded-xl border border-gray-200 dark:border-dark-700">
               <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-dark-700">
                 <div>
                   <h4 class="text-sm font-semibold text-gray-950 dark:text-white">{{ payload.label }}</h4>
                   <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ payloadMeta(payload.payload) }}</p>
                   <p v-if="payload.payload.available" class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ payloadFormatLabel(payload.presentation.format) }} · {{ payloadEncodingLabel(payload.payload.encoding, payload.presentation.charset) }}</p>
+                  <p v-if="payload.payload.available" class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ payloadSegmentLabel(payload.payload) }}</p>
                 </div>
                 <div v-if="payload.payload.available" class="flex flex-wrap items-center gap-2">
-                  <button type="button" class="btn btn-secondary btn-sm" @click="copyText(payload.display)">{{ t('admin.invocationArchive.detail.copyCurrent') }}</button>
-                  <button v-if="payload.mode !== 'raw'" type="button" class="btn btn-ghost btn-sm" @click="copyText(payload.presentation.raw)">{{ t('admin.invocationArchive.detail.copyRaw') }}</button>
+                  <button type="button" class="btn btn-secondary btn-sm" @click="copyText(payload.display)">{{ payload.payload.complete ? t('admin.invocationArchive.detail.copyCurrent') : t('admin.invocationArchive.detail.copyLoaded') }}</button>
+                  <button v-if="payload.mode !== 'raw'" type="button" class="btn btn-ghost btn-sm" @click="copyText(payload.presentation.raw)">{{ payload.payload.complete ? t('admin.invocationArchive.detail.copyRaw') : t('admin.invocationArchive.detail.copyRawLoaded') }}</button>
+                  <button v-if="hasPreviousPayload(payload.slot)" type="button" class="btn btn-ghost btn-sm" :disabled="payloadLoading[payload.slot]" @click="loadPreviousPayload(payload.slot)">{{ t('admin.invocationArchive.detail.previousSegment') }}</button>
+                  <button v-if="!payload.payload.complete" type="button" class="btn btn-ghost btn-sm" :disabled="payloadLoading[payload.slot]" @click="loadNextPayload(payload.slot)">{{ payloadLoading[payload.slot] ? t('common.loading') : t('admin.invocationArchive.detail.nextSegment') }}</button>
                 </div>
               </div>
               <template v-if="payload.payload.available">
@@ -345,12 +395,12 @@
                       <span v-if="entry.title" class="font-mono text-gray-700 dark:text-dark-200">{{ entry.title }}</span>
                       <span v-for="item in entry.metadata" :key="item" class="text-gray-500 dark:text-dark-400">{{ item }}</span>
                     </div>
-                    <pre class="mt-3 whitespace-pre-wrap break-words font-mono text-xs leading-6 text-gray-800 dark:text-dark-100">{{ entry.content }}</pre>
+                    <pre class="m-0 mt-3 whitespace-pre-wrap break-words font-mono text-xs leading-6 text-gray-800 dark:text-dark-100">{{ entry.content }}</pre>
                   </article>
                 </div>
-                <pre v-else class="max-h-[28rem] overflow-auto whitespace-pre-wrap break-words bg-gray-50 p-4 text-xs leading-6 text-gray-800 dark:bg-dark-900/70 dark:text-dark-100">{{ payload.display }}</pre>
+                <pre v-else class="m-0 max-h-[28rem] overflow-auto whitespace-pre-wrap break-words bg-gray-50 p-4 text-xs leading-6 text-gray-800 dark:bg-dark-900/70 dark:text-dark-100">{{ payload.display }}</pre>
               </template>
-              <pre v-else class="max-h-[28rem] overflow-auto whitespace-pre-wrap break-words bg-gray-50 p-4 text-xs leading-6 text-gray-800 dark:bg-dark-900/70 dark:text-dark-100">{{ payload.display }}</pre>
+              <pre v-else class="m-0 max-h-[28rem] overflow-auto whitespace-pre-wrap break-words bg-gray-50 p-4 text-xs leading-6 text-gray-800 dark:bg-dark-900/70 dark:text-dark-100">{{ payload.display }}</pre>
             </article>
           </div>
         </section>
@@ -403,16 +453,17 @@ import {
   type InvocationArchivePayloadWarning,
 } from './payloadPresentation'
 import {
+  defaultInvocationArchiveCompression,
   emptyInvocationArchiveFilters,
   type InvocationArchiveAccessLog,
   type InvocationArchiveConfig,
   type InvocationArchiveFilters,
   type InvocationArchiveMode,
   type InvocationArchiveOutcome,
+  type InvocationArchivePayloadChunk,
   type InvocationArchivePayloadView,
   type InvocationArchiveRecord,
   type InvocationArchiveRecordPage,
-  type InvocationArchiveReveal,
   type InvocationArchiveRuntime,
   type InvocationArchiveScope,
   type InvocationArchiveScopeRule,
@@ -450,9 +501,11 @@ const newRule = reactive<{ scope: InvocationArchiveScope; query: string; subject
 const detailOpen = ref(false)
 const activeRecord = ref<InvocationArchiveRecord | null>(null)
 const accessLogs = ref<InvocationArchiveAccessLog[]>([])
-const reveal = ref<InvocationArchiveReveal | null>(null)
+const payloadChunks = reactive<Record<ArchivePayloadSlot, InvocationArchivePayloadChunk | null>>({ request: null, response: null })
+const payloadHistory = reactive<Record<ArchivePayloadSlot, number[]>>({ request: [], response: [] })
 const payloadViewModes = reactive<Record<ArchivePayloadSlot, InvocationArchivePayloadViewMode>>({ request: 'formatted', response: 'formatted' })
 const payloadCharsets = reactive<Record<ArchivePayloadSlot, string>>({ request: 'auto', response: 'auto' })
+const payloadLoading = reactive<Record<ArchivePayloadSlot, boolean>>({ request: false, response: false })
 const loading = reactive({ config: false, runtime: false, records: false, saving: false, subjects: false, detail: false, revealing: false, deleting: false })
 const errors = reactive({ config: '', runtime: '', records: '', subjects: '' })
 const recordsLoaded = ref(false)
@@ -470,11 +523,22 @@ const refreshStatus = computed(() => {
 })
 const runtimeMetrics = computed(() => {
   if (!runtime.value) return []
+  const storage = runtime.value.storage || {
+    record_count: 0, block_count: 0, captured_bytes: 0, payload_bytes: 0, database_bytes: 0,
+    compressed_records: 0, compressed_payloads: 0, saved_bytes: 0,
+  }
+  const compression = runtime.value.compression
   return [
     { label: t('admin.invocationArchive.runtime.status'), value: runtime.value.started ? t('admin.invocationArchive.runtime.running') : t('admin.invocationArchive.runtime.stopped'), hint: t('admin.invocationArchive.runtime.version', { version: runtime.value.config_version }) },
     { label: t('admin.invocationArchive.runtime.queue'), value: `${runtime.value.queue_depth} / ${runtime.value.queue_capacity}`, hint: t('admin.invocationArchive.runtime.queueHint') },
     { label: t('admin.invocationArchive.runtime.persisted'), value: number(runtime.value.persisted), hint: t('admin.invocationArchive.runtime.acceptedDropped', { accepted: number(runtime.value.accepted), dropped: number(runtime.value.dropped) }) },
     { label: t('admin.invocationArchive.runtime.purge'), value: number(runtime.value.expired_purged), hint: t('admin.invocationArchive.runtime.failures', { count: number(runtime.value.persist_failures) }) },
+    { label: t('admin.invocationArchive.runtime.records'), value: number(storage.record_count), hint: t('admin.invocationArchive.runtime.capturedBytes', { value: formatBytes(storage.captured_bytes) }) },
+    { label: t('admin.invocationArchive.runtime.payloadBlocks'), value: number(storage.block_count), hint: t('admin.invocationArchive.runtime.payloadBlocksHint') },
+    { label: t('admin.invocationArchive.runtime.payloadBytes'), value: formatBytes(storage.payload_bytes), hint: t('admin.invocationArchive.runtime.payloadBytesHint') },
+    { label: t('admin.invocationArchive.runtime.databaseBytes'), value: formatBytes(storage.database_bytes), hint: storage.updated_at ? t('admin.invocationArchive.runtime.storageUpdatedAt', { time: formatDate(storage.updated_at) }) : t('common.notAvailable') },
+    { label: t('admin.invocationArchive.runtime.compressed'), value: `${number(storage.compressed_records)} / ${number(storage.compressed_payloads)}`, hint: compression?.enabled ? t('admin.invocationArchive.runtime.compressionRuns', { count: number(compression.runs) }) : t('common.disabled') },
+    { label: t('admin.invocationArchive.runtime.savedBytes'), value: formatBytes(storage.saved_bytes), hint: compression?.last_compressed_at ? t('admin.invocationArchive.runtime.lastCompressedAt', { time: formatDate(compression.last_compressed_at) }) : t('common.notAvailable') },
   ]
 })
 const detailMetadata = computed(() => {
@@ -492,10 +556,14 @@ const detailMetadata = computed(() => {
     { label: t('admin.invocationArchive.detail.client'), value: [record.client_ip, record.user_agent].filter(Boolean).join(' · ') },
   ]
 })
-const revealedPayloads = computed(() => reveal.value ? [
-  { slot: 'request' as const, label: t('admin.invocationArchive.records.request'), payload: reveal.value.request },
-  { slot: 'response' as const, label: t('admin.invocationArchive.records.response'), payload: reveal.value.response },
-] : [])
+const hasPayloadChunks = computed(() => Boolean(payloadChunks.request || payloadChunks.response))
+const revealedPayloads = computed(() => (['request', 'response'] as const)
+  .map((slot) => {
+    const chunk = payloadChunks[slot]
+    if (!chunk) return null
+    return { slot, label: t(`admin.invocationArchive.records.${slot}`), payload: chunk.payload, nextOffset: chunk.next_offset }
+  })
+  .filter((payload): payload is { slot: ArchivePayloadSlot; label: string; payload: InvocationArchivePayloadView; nextOffset: number } => payload !== null))
 const payloadPanels = computed(() => revealedPayloads.value.map((payload) => {
   const presentation = presentInvocationArchivePayload(payload.payload, payloadCharsets[payload.slot])
   const mode = supportedPayloadViewMode(payloadViewModes[payload.slot], presentation)
@@ -503,7 +571,7 @@ const payloadPanels = computed(() => revealedPayloads.value.map((payload) => {
 }))
 
 function cloneConfig(config: InvocationArchiveConfig | null): InvocationArchiveConfig | null {
-  return config ? { ...config, rules: config.rules.map((rule) => ({ ...rule })) } : null
+  return config ? { ...config, compression: { ...defaultInvocationArchiveCompression(), ...(config.compression || {}) }, rules: config.rules.map((rule) => ({ ...rule })) } : null
 }
 function configFingerprint(config: InvocationArchiveConfig | null): string {
   if (!config) return ''
@@ -513,6 +581,7 @@ function configFingerprint(config: InvocationArchiveConfig | null): string {
     max_request_bytes: config.max_request_bytes,
     max_response_bytes: config.max_response_bytes,
     direct_view_enabled: config.direct_view_enabled,
+    compression: config.compression,
     rules: [...config.rules].sort(ruleSort),
   })
 }
@@ -643,6 +712,16 @@ function setDraftMiB(field: 'max_request_bytes' | 'max_response_bytes', event: E
   const value = Number((event.target as HTMLInputElement).value)
   if (Number.isFinite(value)) draft.value[field] = Math.round(value * MEBIBYTE)
 }
+function setCompressionNumber(field: 'after_hours' | 'trigger_records' | 'batch_size' | 'interval_minutes', event: Event) {
+  if (!draft.value) return
+  const value = Number((event.target as HTMLInputElement).value)
+  if (Number.isFinite(value)) draft.value.compression[field] = Math.round(value)
+}
+function setCompressionMiB(field: 'min_bytes' | 'trigger_bytes', event: Event) {
+  if (!draft.value) return
+  const value = Number((event.target as HTMLInputElement).value)
+  if (Number.isFinite(value)) draft.value.compression[field] = Math.round(value * MEBIBYTE)
+}
 function bytesToMiB(value: number): string { return (value / MEBIBYTE).toFixed(3).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1') }
 function resetDraft() { draft.value = cloneConfig(serverConfig.value) }
 async function searchSubjects() {
@@ -690,6 +769,7 @@ async function saveConfig() {
       max_request_bytes: draft.value!.max_request_bytes,
       max_response_bytes: draft.value!.max_response_bytes,
       direct_view_enabled: draft.value!.direct_view_enabled,
+      compression: { ...draft.value!.compression },
       rules: [...draft.value!.rules].sort(ruleSort),
     }))
     if (!saved) return
@@ -709,7 +789,7 @@ async function openRecord(id: number) {
   loading.detail = true
   activeRecord.value = null
   accessLogs.value = []
-  reveal.value = null
+  clearPayloadChunks()
   resetPayloadReview()
   try {
     const [record, accesses] = await Promise.all([invocationArchiveAPI.getRecord(id), invocationArchiveAPI.listAccessLogs(id)])
@@ -726,23 +806,67 @@ function closeDetail() {
   detailOpen.value = false
   activeRecord.value = null
   accessLogs.value = []
-  reveal.value = null
+  clearPayloadChunks()
   resetPayloadReview()
 }
 async function revealPayloads() {
   if (!activeRecord.value || loading.revealing) return
   loading.revealing = true
   try {
-    const result = await runSensitive(() => invocationArchiveAPI.revealRecord(activeRecord.value!.id))
+    const recordID = activeRecord.value.id
+    const result = await runSensitive(async () => ({
+      request: await invocationArchiveAPI.revealPayloadChunk(recordID, 'request'),
+      response: await invocationArchiveAPI.revealPayloadChunk(recordID, 'response'),
+    }))
     if (!result) return
-    reveal.value = result
-    resetPayloadReview(result)
-    accessLogs.value = await invocationArchiveAPI.listAccessLogs(activeRecord.value.id)
+    payloadChunks.request = result.request
+    payloadChunks.response = result.response
+    payloadHistory.request.splice(0)
+    payloadHistory.response.splice(0)
+    resetPayloadReview({ request: result.request.payload, response: result.response.payload })
+    accessLogs.value = await invocationArchiveAPI.listAccessLogs(recordID)
   } catch (error) {
     appStore.showError(errorMessage(error, 'admin.invocationArchive.errors.reveal'))
   } finally {
     loading.revealing = false
   }
+}
+function clearPayloadChunks() {
+  payloadChunks.request = null
+  payloadChunks.response = null
+  payloadHistory.request.splice(0)
+  payloadHistory.response.splice(0)
+  payloadLoading.request = false
+  payloadLoading.response = false
+}
+async function loadPayloadSegment(slot: ArchivePayloadSlot, offset: number): Promise<boolean> {
+  if (!activeRecord.value || payloadLoading[slot] || loading.revealing) return false
+  payloadLoading[slot] = true
+  try {
+    const chunk = await runSensitive(() => invocationArchiveAPI.revealPayloadChunk(activeRecord.value!.id, slot, offset))
+    if (!chunk) return false
+    payloadChunks[slot] = chunk
+    return true
+  } catch (error) {
+    appStore.showError(errorMessage(error, 'admin.invocationArchive.errors.reveal'))
+    return false
+  } finally {
+    payloadLoading[slot] = false
+  }
+}
+function hasPreviousPayload(slot: ArchivePayloadSlot): boolean { return payloadHistory[slot].length > 0 }
+async function loadNextPayload(slot: ArchivePayloadSlot) {
+  const current = payloadChunks[slot]
+  if (!current || current.payload.complete || payloadLoading[slot]) return
+  const currentOffset = current.payload.offset || 0
+  payloadHistory[slot].push(currentOffset)
+  if (!await loadPayloadSegment(slot, current.next_offset)) payloadHistory[slot].pop()
+}
+async function loadPreviousPayload(slot: ArchivePayloadSlot) {
+  if (payloadLoading[slot]) return
+  const previous = payloadHistory[slot].pop()
+  if (previous === undefined) return
+  if (!await loadPayloadSegment(slot, previous)) payloadHistory[slot].push(previous)
 }
 function requestDelete(ids: number[]) {
   deleteIDs.value = [...new Set(ids)].filter((id) => id > 0)
@@ -798,7 +922,17 @@ function formatBytes(value: number): string {
   return `${(value / MEBIBYTE).toFixed(2)} MiB`
 }
 function payloadMeta(payload: InvocationArchivePayloadView): string {
-  return `${payload.content_type || t('common.notAvailable')} · ${captureLabel(payload.status, payload.captured_bytes, payload.total_bytes, payload.truncated)}${payload.encoding ? ` · ${payload.encoding}` : ''}`
+  const compression = payload.compression && payload.compression !== 'none' ? ` · ${payload.compression}` : ''
+  return `${payload.content_type || t('common.notAvailable')} · ${captureLabel(payload.status, payload.captured_bytes, payload.total_bytes, payload.truncated)}${payload.encoding ? ` · ${payload.encoding}` : ''}${compression}`
+}
+function payloadSegmentLabel(payload: InvocationArchivePayloadView): string {
+  const offset = payload.offset || 0
+  const loaded = payload.loaded_bytes ?? 0
+  return t('admin.invocationArchive.detail.loadedRange', {
+    from: formatBytes(offset),
+    to: formatBytes(offset + loaded),
+    total: formatBytes(payload.captured_bytes),
+  })
 }
 function payloadUnavailableLabel(status: string): string {
   const key = `admin.invocationArchive.capture.${status}`
@@ -817,10 +951,10 @@ function payloadDisplayText(payload: InvocationArchivePayloadView, presentation:
   if (mode === 'raw') return presentation.raw
   return presentation.formatted
 }
-function resetPayloadReview(value: InvocationArchiveReveal | null = null) {
+function resetPayloadReview(value: Partial<Record<ArchivePayloadSlot, InvocationArchivePayloadView>> = {}) {
   for (const slot of ['request', 'response'] as const) {
     payloadCharsets[slot] = 'auto'
-    const payload = value?.[slot]
+    const payload = value[slot]
     if (!payload) {
       payloadViewModes[slot] = 'formatted'
       continue
@@ -866,6 +1000,8 @@ function canAutoRefresh(): boolean {
     && !loading.saving
     && !loading.detail
     && !loading.revealing
+    && !payloadLoading.request
+    && !payloadLoading.response
     && !loading.deleting
     && !dirty.value
 }

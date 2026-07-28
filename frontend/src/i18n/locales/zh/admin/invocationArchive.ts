@@ -24,17 +24,24 @@ export default {
       defaultMode: '默认归档模式', retentionDays: '保留天数', requestLimit: '请求上限（MiB）', responseLimit: '响应上限（MiB）', directView: '允许管理员直接查看加密载荷', directViewHint: '关闭时只能查看元数据。开启后，管理员二次验证后可直接查看，每次查看仍会写入访问证据。',
       unsaved: '存在未保存修改', synced: '配置已同步',
     },
+    compression: {
+      title: '归档压缩',
+      description: '在响应完成后的后台维护任务中，对已加密归档先压缩再重新加密。不会占用网关请求路径；时间、总载荷容量或记录数任一条件满足时执行。',
+      enabled: '启用后台压缩', enabledHint: '压缩使用 gzip，并只在实际减少密文存储空间时写回记录。',
+      afterHours: '时间阈值（小时）', minBytes: '最小载荷（MiB）', triggerBytes: '总载荷容量阈值（MiB）', triggerRecords: '记录数阈值', batchSize: '每批记录数', intervalMinutes: '检查间隔（分钟）', zeroDisabled: '填 0 可关闭此触发条件。',
+    },
     rules: {
       title: '作用域规则', description: '通过主体选择器创建精确规则；保存时服务端会验证主体仍然存在且未删除。', count: '{count} 条规则', scope: '作用域', subjectSearch: '搜索主体', subjectSearchPlaceholder: '输入名称、邮箱或 ID', subject: '主体', selectSubject: '选择主体', mode: '模式', empty: '暂无覆盖规则，所有调用使用默认策略。',
     },
     runtime: {
-      title: '归档运行态', description: '归档写入在网关响应后异步执行；队列饱和会丢弃归档工作，不会阻塞或影响用户调用。', status: '服务状态', running: '运行中', stopped: '未运行', version: '配置 v{version}', queue: '异步队列', queueHint: '当前深度 / 容量', persisted: '已持久化', acceptedDropped: '接收 {accepted} · 丢弃 {dropped}', purge: '已清理过期记录', failures: '持久化失败 {count}', configError: '配置加载错误', persistError: '最近持久化错误',
+      title: '归档运行态', description: '归档写入在网关响应后异步执行；队列饱和会丢弃归档工作，不会阻塞或影响用户调用。存储统计由后台定期汇总，不读取任何载荷明文。', status: '服务状态', running: '运行中', stopped: '未运行', version: '配置 v{version}', queue: '异步队列', queueHint: '当前深度 / 容量', persisted: '已持久化', acceptedDropped: '接收 {accepted} · 丢弃 {dropped}', purge: '已清理过期记录', failures: '持久化失败 {count}', configError: '配置加载错误', persistError: '最近持久化错误', storageError: '存储统计错误', compressionError: '压缩维护错误',
+      records: '归档记录', capturedBytes: '已捕获 {value}', payloadBlocks: '载荷分片', payloadBlocksHint: '每片独立加密，查看时只读取命中分片', payloadBytes: '加密载荷占用', payloadBytesHint: '请求与响应密文总量', databaseBytes: '数据库占用', storageUpdatedAt: '统计于 {time}', compressed: '压缩记录 / 载荷', compressionRuns: '后台检查 {count} 次', savedBytes: '压缩节省', lastCompressedAt: '最近压缩 {time}',
     },
     refresh: { waiting: '等待首次同步', refreshing: '正在刷新…', updatedAt: '更新于 {time} · 自动刷新 15 秒' },
     detail: {
       title: '归档记录 #{id}', createdAt: '创建时间', expiresAt: '过期时间', outcome: '执行结果', identity: '调用主体', group: '分组', route: '路由', model: '模型', requestId: '请求 ID', client: '客户端',
-      payloads: '加密载荷', payloadsHint: '正文不会随元数据加载。明文仅保留在本对话框内存中，关闭后立即清除；展示切换和字符集预览不会修改归档原文。', directViewDisabled: '当前策略未启用直接查看。请在“归档策略”中启用后保存；启用本身也需要二次验证。', reveal: '验证并查看载荷', revealHint: '本次查看会记录管理员、时间、结果和客户端信息。可在结构化、美化和原始载荷间切换。',
-      viewMode: '展示模式', structured: '结构化', formatted: '美化', repaired: '修复预览', raw: '原始', charset: '文本编码', copyCurrent: '复制当前视图', copyRaw: '复制原始载荷',
+      payloads: '加密载荷', payloadsHint: '正文不会随元数据加载。大载荷会按段读取，明文仅保留在本对话框内存中，关闭后立即清除；展示切换和字符集预览不会修改归档原文。', directViewDisabled: '当前策略未启用直接查看。请在“归档策略”中启用后保存；启用本身也需要二次验证。', reveal: '验证并查看载荷', revealHint: '本次查看会记录管理员、时间、结果和客户端信息。可在结构化、美化和原始载荷间切换。',
+      viewMode: '展示模式', structured: '结构化', formatted: '美化', repaired: '修复预览', raw: '原始', charset: '文本编码', copyCurrent: '复制当前视图', copyRaw: '复制原始载荷', copyLoaded: '复制已加载视图', copyRawLoaded: '复制已加载原文', previousSegment: '上一段', nextSegment: '下一段', loadedRange: '已加载 {from}–{to} / {total}',
       formats: { json: 'JSON', ndjson: 'JSON Lines', sse: 'SSE 事件流', form: '表单字段', text: '文本', base64: 'Base64' },
       encodings: { utf8: 'UTF-8', base64: 'Base64 → {charset}' },
       charsets: { auto: '自动（声明字符集 / UTF-8）', utf_8: 'UTF-8', gb18030: 'GB18030（简体中文）', big5: 'Big5（繁体中文）', shift_jis: 'Shift_JIS（日文）', windows_1252: 'Windows-1252', utf_16le: 'UTF-16 LE', utf_16be: 'UTF-16 BE' },
@@ -53,7 +60,7 @@ export default {
     messages: { saved: '调用归档策略已保存。', deleted: '已删除 {count} 条归档记录。' },
     errors: {
       loadConfig: '加载调用归档策略失败。', loadRuntime: '加载调用归档运行态失败。', loadRecords: '加载归档记录失败。', loadSubjects: '搜索归档规则主体失败。', loadDetail: '加载归档记录详情失败。', saveConfig: '保存调用归档策略失败。', reveal: '查看归档载荷失败。', delete: '删除归档记录失败。',
-      invocation_archive_rule_duplicate: '该主体已有同一作用域规则。', invocation_archive_config_conflict: '配置已被其他管理员更新，请刷新后重试。', invocation_archive_rule_subject_not_found: '所选主体不存在或已被删除。', invocation_archive_direct_view_disabled: '管理员尚未启用调用归档直接查看。', invocation_archive_payload_expired: '归档载荷已过期。', invocation_archive_payload_unavailable: '归档载荷不可用。',
+      invocation_archive_rule_duplicate: '该主体已有同一作用域规则。', invocation_archive_config_conflict: '配置已被其他管理员更新，请刷新后重试。', invocation_archive_rule_subject_not_found: '所选主体不存在或已被删除。', invocation_archive_direct_view_disabled: '管理员尚未启用调用归档直接查看。', invocation_archive_payload_expired: '归档载荷已过期。', invocation_archive_payload_unavailable: '归档载荷不可用。', invocation_archive_payload_range_invalid: '归档载荷分段范围无效，请重新打开记录。',
     },
   },
 }

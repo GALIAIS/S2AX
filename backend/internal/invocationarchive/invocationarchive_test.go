@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -176,11 +177,73 @@ func TestWebSocketArchivePreservesFrameBoundariesAndToolOutput(t *testing.T) {
 		if err != nil {
 			t.Fatalf("reveal WebSocket response: %v", err)
 		}
-		if len(view.Frames) != 2 || view.Frames[0].Data != string(firstFrame) || view.Frames[1].Encoding != "base64" || view.Frames[1].CapturedBytes != int64(len(secondFrame)) {
+		if len(view.Frames) != 2 || view.Frames[0].Offset != 0 || view.Frames[1].Offset != int64(len(firstFrame)) || view.Frames[1].CapturedBytes != int64(len(secondFrame)) {
 			t.Fatalf("unexpected revealed WebSocket frames: %#v", view.Frames)
 		}
 	default:
 		t.Fatal("WebSocket archive did not enqueue candidate")
+	}
+}
+
+func TestCompressedPayloadEnvelopeRoundTripsWithoutChangingPayload(t *testing.T) {
+	raw := []byte(strings.Repeat(`{"role":"assistant","content":"archive payload"}\n`, 2048))
+	envelope, changed, err := gzipPayloadEnvelope(newPayloadEnvelope(raw, nil, false))
+	if err != nil || !changed || envelope.Compression != payloadCompressionGzip {
+		t.Fatalf("gzip envelope: changed=%t compression=%q err=%v", changed, envelope.Compression, err)
+	}
+	ciphertext, _, err := protectPayloadEnvelope(passthroughEncryptor{}, envelope)
+	if err != nil {
+		t.Fatalf("protect compressed payload: %v", err)
+	}
+	view, err := revealPayload(passthroughEncryptor{}, ciphertext, "application/json", "captured", int64(len(raw)), int64(len(raw)), false)
+	if err != nil {
+		t.Fatalf("reveal compressed payload: %v", err)
+	}
+	if view.Compression != payloadCompressionGzip || view.Data != string(raw) || !view.Complete {
+		t.Fatalf("compressed payload changed during round trip: %#v", view)
+	}
+}
+
+func TestPayloadSegmentPreservesUTF8Boundaries(t *testing.T) {
+	raw := []byte("开头-你好-结束")
+	ciphertext, _, err := protectPayload(passthroughEncryptor{}, raw)
+	if err != nil {
+		t.Fatalf("protect payload: %v", err)
+	}
+	stored := storedPayload{
+		contentType: "text/plain", status: "captured", totalBytes: int64(len(raw)), capturedBytes: int64(len(raw)), ciphertext: ciphertext,
+	}
+	first, next, err := revealPayloadSegment(passthroughEncryptor{}, stored, 0, 7)
+	if err != nil || first.Data != "开头-" || next != int64(len([]byte("开头-"))) || first.Complete {
+		t.Fatalf("unexpected first UTF-8 segment: view=%#v next=%d err=%v", first, next, err)
+	}
+	second, end, err := revealPayloadSegment(passthroughEncryptor{}, stored, next, 7)
+	if err != nil || second.Data != "你好-" || end != int64(len([]byte("开头-你好-"))) {
+		t.Fatalf("unexpected second UTF-8 segment: view=%#v end=%d err=%v", second, end, err)
+	}
+}
+
+func TestPayloadBlocksUseIndependentBoundedEncryption(t *testing.T) {
+	raw := []byte(strings.Repeat("归档分片-", archivePayloadBlockBytes/len("归档分片-")+1024))
+	blocks, err := protectPayloadBlocks(passthroughEncryptor{}, newPayloadEnvelope(raw, nil, false))
+	if err != nil || len(blocks) < 2 {
+		t.Fatalf("expected independently protected blocks: count=%d err=%v", len(blocks), err)
+	}
+	offset := int64(0)
+	var restored []byte
+	for _, block := range blocks {
+		if block.offset != offset || block.capturedBytes <= 0 || block.capturedBytes > archivePayloadBlockBytes {
+			t.Fatalf("unexpected block range: %#v expected offset=%d", block, offset)
+		}
+		envelope, payload, err := decryptPayloadEnvelope(passthroughEncryptor{}, block.ciphertext)
+		if err != nil || envelope.Encoding != "utf8" || !utf8.Valid(payload) {
+			t.Fatalf("block must decrypt independently as valid UTF-8: envelope=%#v err=%v", envelope, err)
+		}
+		restored = append(restored, payload...)
+		offset += int64(len(payload))
+	}
+	if string(restored) != string(raw) {
+		t.Fatal("independently encrypted blocks did not preserve the source payload")
 	}
 }
 

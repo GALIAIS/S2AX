@@ -24,7 +24,10 @@ describe('Invocation Archive API', () => {
       },
     })
 
-    await expect(invocationArchiveAPI.getConfig()).resolves.toMatchObject({ rules: [] })
+    await expect(invocationArchiveAPI.getConfig()).resolves.toMatchObject({
+      rules: [],
+      compression: expect.objectContaining({ enabled: true, batch_size: 25, interval_minutes: 60 }),
+    })
   })
 
   it('keeps metadata listing separate from the step-up protected direct reveal endpoint', async () => {
@@ -40,6 +43,12 @@ describe('Invocation Archive API', () => {
     client.post.mockResolvedValue({ data: { record_id: 42 } })
     await invocationArchiveAPI.revealRecord(42)
     expect(client.post).toHaveBeenCalledWith('/admin/invocation-archive/records/42/reveal')
+
+    client.post.mockResolvedValue({ data: { record_id: 42, slot: 'response', payload: {}, next_offset: 262144 } })
+    await invocationArchiveAPI.revealPayloadChunk(42, 'response', 262144)
+    expect(client.post).toHaveBeenCalledWith('/admin/invocation-archive/records/42/payloads/response', undefined, {
+      params: { offset: 262144, limit: 262144 },
+    })
   })
 
   it('uses the scoped selector and destructive record endpoints', async () => {

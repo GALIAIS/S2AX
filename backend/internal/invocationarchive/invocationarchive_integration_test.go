@@ -163,21 +163,39 @@ func TestInvocationArchiveRealPostgresHTTPFlow(t *testing.T) {
 		require.True(t, revealed.Response.Available)
 		require.Contains(t, revealed.Request.Data, expected.secret)
 		require.Contains(t, revealed.Response.Data, expected.secret)
+		if expected.record.ID == alphaRecord.ID {
+			chunk, chunkErr := archive.RevealPayloadChunk(ctx, expected.record.ID, adminID, PayloadSlotRequest, 0, defaultPayloadChunkBytes, "127.0.0.1", "archive-integration-test")
+			require.NoError(t, chunkErr)
+			require.True(t, chunk.Payload.Available)
+			require.True(t, chunk.Payload.Complete)
+			require.Contains(t, chunk.Payload.Data, expected.secret)
+		}
 	}
 
 	var requestCiphertext, responseCiphertext string
+	var requestChunked, responseChunked bool
 	require.NoError(t, db.QueryRowContext(ctx, `
-		SELECT request_ciphertext,response_ciphertext
-		FROM invocation_archive_records WHERE id=$1`, alphaRecord.ID).Scan(&requestCiphertext, &responseCiphertext))
-	require.NotEmpty(t, requestCiphertext)
-	require.NotEmpty(t, responseCiphertext)
-	require.NotContains(t, requestCiphertext, "archive-alpha-secret")
-	require.NotContains(t, responseCiphertext, "archive-alpha-secret")
+		SELECT request_ciphertext,response_ciphertext,request_chunked,response_chunked
+		FROM invocation_archive_records WHERE id=$1`, alphaRecord.ID).Scan(&requestCiphertext, &responseCiphertext, &requestChunked, &responseChunked))
+	require.Empty(t, requestCiphertext)
+	require.Empty(t, responseCiphertext)
+	require.True(t, requestChunked)
+	require.True(t, responseChunked)
+	var payloadBlockCount int
+	require.NoError(t, db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM invocation_archive_payload_blocks WHERE record_id=$1`, alphaRecord.ID).Scan(&payloadBlockCount))
+	require.Equal(t, 2, payloadBlockCount)
+	compressionConfig := DefaultCompressionConfig()
+	compressionConfig.AfterHours = 0
+	compressionConfig.TriggerRecords = 1
+	_, err = archive.compactArchivePayloads(ctx, compressionConfig, ArchiveStorageStats{RecordCount: 1}, time.Now().UTC())
+	require.NoError(t, err)
 
 	accesses, err := archive.ListAccessLogs(ctx, alphaRecord.ID, 10)
 	require.NoError(t, err)
-	require.Len(t, accesses, 1)
-	require.Empty(t, accesses[0].Reason)
+	require.Len(t, accesses, 2)
+	require.Contains(t, accesses[0].Reason, "request:0-")
+	require.Empty(t, accesses[1].Reason)
 	require.Equal(t, "revealed", accesses[0].Outcome)
 
 	_, err = db.ExecContext(ctx, `UPDATE invocation_archive_config_versions SET config_digest='0' WHERE config_version=$1`, fullConfig.ConfigVersion)
@@ -247,10 +265,12 @@ func applyArchiveIntegrationSchema(t *testing.T, ctx context.Context, db *sql.DB
 		CREATE TABLE api_keys (id BIGINT PRIMARY KEY, user_id BIGINT NOT NULL, group_id BIGINT NULL, name TEXT NOT NULL DEFAULT '', deleted_at TIMESTAMPTZ NULL);
 		CREATE TABLE settings (id BIGSERIAL PRIMARY KEY, key VARCHAR(255) NOT NULL UNIQUE, value TEXT NOT NULL DEFAULT '', updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW());`)
 	require.NoError(t, err)
-	migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "303_invocation_archive.sql"))
-	require.NoError(t, err)
-	_, err = db.ExecContext(ctx, string(migration))
-	require.NoError(t, err)
+	for _, name := range []string{"303_invocation_archive.sql", "304_invocation_archive_payload_compression.sql", "305_invocation_archive_payload_blocks.sql"} {
+		migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", name))
+		require.NoError(t, err)
+		_, err = db.ExecContext(ctx, string(migration))
+		require.NoError(t, err)
+	}
 }
 
 func invokeArchiveGateway(t *testing.T, ctx context.Context, baseURL, archiveKey, payload string) {

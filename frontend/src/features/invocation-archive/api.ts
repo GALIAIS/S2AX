@@ -1,7 +1,9 @@
 import { apiClient } from '@/api/client'
+import { defaultInvocationArchiveCompression } from './types'
 import type {
   InvocationArchiveAccessLog,
   InvocationArchiveConfig,
+  InvocationArchivePayloadChunk,
   InvocationArchiveFilters,
   InvocationArchiveRecord,
   InvocationArchiveRecordPage,
@@ -15,7 +17,11 @@ import type {
 const basePath = '/admin/invocation-archive'
 
 function normalizeConfig(data: InvocationArchiveConfig): InvocationArchiveConfig {
-  return { ...data, rules: Array.isArray(data.rules) ? data.rules : [] }
+  return {
+    ...data,
+    compression: { ...defaultInvocationArchiveCompression(), ...(data.compression || {}) },
+    rules: Array.isArray(data.rules) ? data.rules : [],
+  }
 }
 
 export async function getConfig(): Promise<InvocationArchiveConfig> {
@@ -85,6 +91,18 @@ export async function revealRecord(id: number): Promise<InvocationArchiveReveal>
   return data
 }
 
+export async function revealPayloadChunk(
+  id: number,
+  slot: 'request' | 'response',
+  offset = 0,
+  limit = 256 * 1024,
+): Promise<InvocationArchivePayloadChunk> {
+  const { data } = await apiClient.post<InvocationArchivePayloadChunk>(`${basePath}/records/${id}/payloads/${slot}`, undefined, {
+    params: { offset, limit },
+  })
+  return data
+}
+
 export async function deleteRecord(id: number): Promise<{ deleted: number }> {
   const { data } = await apiClient.delete<{ deleted: number }>(`${basePath}/records/${id}`)
   return data
@@ -104,6 +122,7 @@ export const invocationArchiveAPI = {
   getRecord,
   listAccessLogs,
   revealRecord,
+  revealPayloadChunk,
   deleteRecord,
   batchDeleteRecords,
 }

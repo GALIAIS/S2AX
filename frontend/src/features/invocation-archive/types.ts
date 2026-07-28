@@ -8,6 +8,26 @@ export interface InvocationArchiveScopeRule {
   mode: InvocationArchiveMode
 }
 
+export interface InvocationArchiveCompressionConfig {
+  enabled: boolean
+  after_hours: number
+  min_bytes: number
+  trigger_bytes: number
+  trigger_records: number
+  batch_size: number
+  interval_minutes: number
+}
+
+export const defaultInvocationArchiveCompression = (): InvocationArchiveCompressionConfig => ({
+  enabled: true,
+  after_hours: 24,
+  min_bytes: 8 * 1024,
+  trigger_bytes: 128 * 1024 * 1024,
+  trigger_records: 500,
+  batch_size: 25,
+  interval_minutes: 60,
+})
+
 export interface InvocationArchiveConfig {
   config_version: number
   default_mode: InvocationArchiveMode
@@ -15,6 +35,7 @@ export interface InvocationArchiveConfig {
   max_request_bytes: number
   max_response_bytes: number
   direct_view_enabled: boolean
+  compression: InvocationArchiveCompressionConfig
   rules: InvocationArchiveScopeRule[]
   updated_at: string
   updated_by: number
@@ -27,6 +48,7 @@ export interface InvocationArchiveUpdateRequest {
   max_request_bytes: number
   max_response_bytes: number
   direct_view_enabled: boolean
+  compression: InvocationArchiveCompressionConfig
   rules: InvocationArchiveScopeRule[]
 }
 
@@ -40,10 +62,38 @@ export interface InvocationArchiveRuntime {
   persisted: number
   persist_failures: number
   expired_purged: number
+  storage?: InvocationArchiveStorageStats
+  compression?: InvocationArchiveCompressionRuntime
   last_config_error?: string
   last_config_error_at?: string
   last_persist_error?: string
   last_persist_error_at?: string
+  last_storage_error?: string
+  last_storage_error_at?: string
+}
+
+export interface InvocationArchiveStorageStats {
+  record_count: number
+  block_count: number
+  captured_bytes: number
+  payload_bytes: number
+  database_bytes: number
+  compressed_records: number
+  compressed_payloads: number
+  saved_bytes: number
+  updated_at?: string
+}
+
+export interface InvocationArchiveCompressionRuntime {
+  enabled: boolean
+  runs: number
+  records: number
+  payloads: number
+  saved_bytes: number
+  last_checked_at?: string
+  last_compressed_at?: string
+  last_error?: string
+  last_error_at?: string
 }
 
 export interface InvocationArchiveSubject {
@@ -111,9 +161,13 @@ export interface InvocationArchivePayloadView {
   status: string
   content_type: string
   encoding?: 'utf8' | 'base64' | string
+  compression?: 'none' | 'gzip' | string
   data?: string
   total_bytes: number
   captured_bytes: number
+  offset?: number
+  loaded_bytes?: number
+  complete?: boolean
   truncated: boolean
   frames?: InvocationArchivePayloadFrame[]
   frames_truncated?: boolean
@@ -123,8 +177,7 @@ export interface InvocationArchivePayloadFrame {
   sequence: number
   kind: 'text' | 'binary' | string
   occurred_at: string
-  encoding: 'utf8' | 'base64' | string
-  data: string
+  offset: number
   total_bytes: number
   captured_bytes: number
   truncated: boolean
@@ -135,6 +188,13 @@ export interface InvocationArchiveReveal {
   revealed_at: string
   request: InvocationArchivePayloadView
   response: InvocationArchivePayloadView
+}
+
+export interface InvocationArchivePayloadChunk {
+  record_id: number
+  slot: 'request' | 'response'
+  payload: InvocationArchivePayloadView
+  next_offset: number
 }
 
 export interface InvocationArchiveFilters {

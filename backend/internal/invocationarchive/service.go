@@ -18,13 +18,15 @@ import (
 )
 
 const (
-	configLockKey         int64 = 579147893221901923
-	archiveQueueCapacity        = 2048
-	archiveWorkerCount          = 2
-	archiveWriteTimeout         = 5 * time.Second
-	configRefreshInterval       = 5 * time.Second
-	cleanupInterval             = time.Hour
-	cleanupBatchSize            = 500
+	configLockKey             int64 = 579147893221901923
+	archiveQueueCapacity            = 2048
+	archiveWorkerCount              = 2
+	archiveWriteTimeout             = 5 * time.Second
+	configRefreshInterval           = 5 * time.Second
+	cleanupInterval                 = time.Hour
+	cleanupBatchSize                = 500
+	runtimeStatsInterval            = time.Minute
+	archiveMaintenanceTimeout       = 30 * time.Second
 )
 
 type capturedPayload struct {
@@ -41,6 +43,7 @@ type capturedPayload struct {
 // remain stored once in capturedPayload; Offset and CapturedBytes preserve the
 // exact frame boundaries without duplicating an often-large stream.
 type capturedFrame struct {
+	sequence      int
 	kind          string
 	occurredAt    time.Time
 	offset        int64
@@ -73,8 +76,6 @@ type archiveCandidate struct {
 
 type storedRecord struct {
 	Record
-	requestCiphertext  string
-	responseCiphertext string
 }
 
 type Service struct {
@@ -102,6 +103,10 @@ type Service struct {
 	lastConfigErrorAt  *time.Time
 	lastPersistError   string
 	lastPersistErrorAt *time.Time
+	lastStorageError   string
+	lastStorageErrorAt *time.Time
+	storage            ArchiveStorageStats
+	compression        CompressionRuntime
 }
 
 func NewService(db *sql.DB, settings service.SettingRepository, encryptor service.SecretEncryptor) *Service {
@@ -277,7 +282,12 @@ func (s *Service) Runtime() RuntimeSnapshot {
 	lastConfigErrorAt := cloneTime(s.lastConfigErrorAt)
 	lastPersistError := s.lastPersistError
 	lastPersistErrorAt := cloneTime(s.lastPersistErrorAt)
+	lastStorageError := s.lastStorageError
+	lastStorageErrorAt := cloneTime(s.lastStorageErrorAt)
+	storage := cloneArchiveStorageStats(s.storage)
+	compression := cloneCompressionRuntime(s.compression)
 	s.stateMu.RUnlock()
+	compression.Enabled = cfg.Compression.Enabled
 	queueDepth := 0
 	if s.queue != nil {
 		queueDepth = len(s.queue)
@@ -287,8 +297,10 @@ func (s *Service) Runtime() RuntimeSnapshot {
 		QueueDepth: queueDepth, QueueCapacity: archiveQueueCapacity,
 		Accepted: s.accepted.Load(), Dropped: s.dropped.Load(), Persisted: s.persisted.Load(),
 		PersistFailures: s.persistFailures.Load(), ExpiredPurged: s.expiredPurged.Load(),
+		Storage: storage, Compression: compression,
 		LastConfigError: lastConfigError, LastConfigErrorAt: lastConfigErrorAt,
 		LastPersistError: lastPersistError, LastPersistErrorAt: lastPersistErrorAt,
+		LastStorageError: lastStorageError, LastStorageErrorAt: lastStorageErrorAt,
 	}
 }
 
@@ -359,10 +371,15 @@ func (s *Service) persistWorker() {
 func (s *Service) maintenanceLoop(ctx context.Context) {
 	defer s.wg.Done()
 	s.purgeExpired(context.Background())
+	s.shardLegacyPayloads(context.Background())
+	s.refreshStorageStats(context.Background())
+	s.maybeCompactArchive(context.Background())
 	configTicker := time.NewTicker(configRefreshInterval)
 	cleanupTicker := time.NewTicker(cleanupInterval)
+	statsTicker := time.NewTicker(runtimeStatsInterval)
 	defer configTicker.Stop()
 	defer cleanupTicker.Stop()
+	defer statsTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -371,6 +388,11 @@ func (s *Service) maintenanceLoop(ctx context.Context) {
 			_ = s.Reload(ctx)
 		case <-cleanupTicker.C:
 			s.purgeExpired(ctx)
+			s.refreshStorageStats(ctx)
+		case <-statsTicker.C:
+			s.shardLegacyPayloads(ctx)
+			s.refreshStorageStats(ctx)
+			s.maybeCompactArchive(ctx)
 		}
 	}
 }
@@ -426,6 +448,39 @@ func (s *Service) setPersistError(err error) {
 	s.lastPersistError = trimText(err.Error(), 512)
 	s.lastPersistErrorAt = &now
 	s.stateMu.Unlock()
+}
+
+func (s *Service) setStorageError(err error) {
+	if s == nil || err == nil {
+		return
+	}
+	s.stateMu.Lock()
+	now := time.Now().UTC()
+	s.lastStorageError = trimText(err.Error(), 512)
+	s.lastStorageErrorAt = &now
+	s.stateMu.Unlock()
+}
+
+func (s *Service) clearStorageError() {
+	if s == nil {
+		return
+	}
+	s.stateMu.Lock()
+	s.lastStorageError = ""
+	s.lastStorageErrorAt = nil
+	s.stateMu.Unlock()
+}
+
+func cloneArchiveStorageStats(value ArchiveStorageStats) ArchiveStorageStats {
+	value.UpdatedAt = cloneTime(value.UpdatedAt)
+	return value
+}
+
+func cloneCompressionRuntime(value CompressionRuntime) CompressionRuntime {
+	value.LastCheckedAt = cloneTime(value.LastCheckedAt)
+	value.LastCompressedAt = cloneTime(value.LastCompressedAt)
+	value.LastErrorAt = cloneTime(value.LastErrorAt)
+	return value
 }
 
 func persistConfigVersion(ctx context.Context, transaction *sql.Tx, cfg Config) error {

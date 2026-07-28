@@ -35,7 +35,7 @@ export function presentInvocationArchivePayload(
   const raw = payload.data || ''
   const warnings: InvocationArchivePayloadWarning[] = []
   const isBase64 = payload.encoding?.toLowerCase() === 'base64'
-  const frameTranscript = buildFrameTranscript(payload.frames, payload.content_type, charsetChoice)
+  const frameTranscript = buildFrameTranscript(payload, charsetChoice)
   if (frameTranscript.truncated) warnings.push('transcript_limit')
   if (payload.frames_truncated) warnings.push('frame_metadata_limit')
   let text = raw
@@ -235,7 +235,10 @@ function buildSSETranscript(value: string): { entries: InvocationArchiveTranscri
     const data = lines.filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trimStart()).join('\n')
     if (!data || data === '[DONE]') continue
     const parsed = parseJSON(data)
-    const sourceEntries = parsed.ok ? buildTranscript(parsed.value) : { entries: [{ role: 'event', title: event, content: data, metadata: [] }], truncated: false }
+    const semantic = parsed.ok ? buildTranscript(parsed.value) : { entries: [], truncated: false }
+    const sourceEntries = semantic.entries.length > 0
+      ? semantic
+      : { entries: [{ role: 'event', title: event, content: parsed.ok ? printable(parsed.value) : data, metadata: [] }], truncated: semantic.truncated }
     for (const entry of sourceEntries.entries) {
       if (entries.length >= TRANSCRIPT_ENTRY_LIMIT) return { entries, truncated: true }
       entries.push({ ...entry, metadata: [`event: ${event}`, ...entry.metadata] })
@@ -260,7 +263,10 @@ function buildNDJSONTranscript(value: string): { entries: InvocationArchiveTrans
   for (const line of lines) {
     const parsed = parseJSON(line)
     if (!parsed.ok) continue
-    const sourceEntries = buildTranscript(parsed.value)
+    const semantic = buildTranscript(parsed.value)
+    const sourceEntries = semantic.entries.length > 0
+      ? semantic
+      : { entries: [{ role: 'event', content: printable(parsed.value), metadata: [] }], truncated: semantic.truncated }
     for (const entry of sourceEntries.entries) {
       if (entries.length >= TRANSCRIPT_ENTRY_LIMIT) return { entries, truncated: true }
       entries.push(entry)
@@ -331,6 +337,7 @@ function transcriptItems(value: unknown): unknown[] | undefined {
   for (const key of ['messages', 'input', 'output']) {
     if (Array.isArray(value[key])) return value[key] as unknown[]
   }
+  if (Array.isArray(value.choices)) return chatChoiceItems(value.choices)
   if (isRecord(value.item)) return [value.item]
   if (isRecord(value.response)) {
     for (const key of ['messages', 'input', 'output']) {
@@ -338,6 +345,17 @@ function transcriptItems(value: unknown): unknown[] | undefined {
     }
   }
   return typeof value.role === 'string' || typeof value.type === 'string' ? [value] : undefined
+}
+
+function chatChoiceItems(choices: unknown[]): Record<string, unknown>[] {
+  return choices.map((choice, index) => {
+    if (!isRecord(choice)) return { role: 'assistant', content: printable(choice), __archive_choice: index }
+    const source = isRecord(choice.delta) ? choice.delta : isRecord(choice.message) ? choice.message : choice
+    const item: Record<string, unknown> = { ...source, __archive_choice: choice.index ?? index }
+    if (!stringValue(item.role) && !stringValue(item.type)) item.role = 'assistant'
+    if (typeof choice.finish_reason === 'string' && choice.finish_reason) item.__archive_finish_reason = choice.finish_reason
+    return item
+  })
 }
 
 function toolCallEntry(value: unknown): InvocationArchiveTranscriptEntry {
@@ -414,26 +432,36 @@ function metadataFor(value: Record<string, unknown>): string[] {
     stringValue(value.tool_call_id) ? `tool call: ${stringValue(value.tool_call_id)}` : '',
     stringValue(value.name) ? `name: ${stringValue(value.name)}` : '',
     stringValue(value.type) ? `type: ${stringValue(value.type)}` : '',
+    typeof value.__archive_choice === 'number' ? `choice: ${value.__archive_choice}` : '',
+    stringValue(value.__archive_finish_reason) ? `finish: ${stringValue(value.__archive_finish_reason)}` : '',
   ].filter(Boolean)
 }
 
 function buildFrameTranscript(
-  frames: InvocationArchivePayloadFrame[] | undefined,
-  contentType: string,
+  payload: InvocationArchivePayloadView,
   charsetChoice: string,
 ): { entries: InvocationArchiveTranscriptEntry[]; truncated: boolean } {
+  const frames = payload.frames
   if (!Array.isArray(frames) || frames.length === 0) return { entries: [], truncated: false }
+  const source = payloadBytes(payload)
+  if (!source) return { entries: [], truncated: false }
+  const segmentOffset = payload.offset || 0
+  const segmentEnd = segmentOffset + (payload.loaded_bytes ?? source.byteLength)
   const entries: InvocationArchiveTranscriptEntry[] = []
   let truncated = false
   for (const frame of frames) {
     if (entries.length >= TRANSCRIPT_ENTRY_LIMIT) return { entries, truncated: true }
+    const frameStart = frame.offset
+    const frameEnd = frameStart + frame.captured_bytes
+    if (frameStart < segmentOffset || frameEnd > segmentEnd || frameEnd < frameStart) continue
+    const framePayload = source.slice(frameStart - segmentOffset, frameEnd - segmentOffset)
     const metadata = frameMetadata(frame)
-    const decoded = frameText(frame, contentType, charsetChoice)
+    const decoded = frameText(framePayload, payload.content_type, charsetChoice)
     if (!decoded) {
-      entries.push({ role: 'websocket_frame', title: frame.kind || 'frame', content: frame.data, metadata })
+      entries.push({ role: 'websocket_frame', title: frame.kind || 'frame', content: encodeBase64(framePayload), metadata })
       continue
     }
-    const formatted = formatText(decoded, contentType)
+    const formatted = formatText(decoded, payload.content_type)
     truncated ||= formatted.transcriptTruncated
     const sourceEntries = formatted.transcript
     if (sourceEntries.length === 0) {
@@ -448,12 +476,23 @@ function buildFrameTranscript(
   return { entries, truncated }
 }
 
-function frameText(frame: InvocationArchivePayloadFrame, contentType: string, charsetChoice: string): string | undefined {
-  if (frame.encoding?.toLowerCase() !== 'base64') return frame.data
-  const bytes = decodeBase64(frame.data)
-  if (!bytes) return undefined
+function payloadBytes(payload: InvocationArchivePayloadView): Uint8Array | undefined {
+  const raw = payload.data || ''
+  if (payload.encoding?.toLowerCase() === 'base64') return decodeBase64(raw)
+  return new TextEncoder().encode(raw)
+}
+
+function frameText(bytes: Uint8Array, contentType: string, charsetChoice: string): string | undefined {
   const decoded = decodeText(bytes, decoderCandidates(contentType, charsetChoice))
   return decoded && isLikelyText(decoded.value) ? decoded.value : undefined
+}
+
+function encodeBase64(bytes: Uint8Array): string {
+  let binary = ''
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000))
+  }
+  return btoa(binary)
 }
 
 function frameMetadata(frame: InvocationArchivePayloadFrame): string[] {
@@ -461,6 +500,7 @@ function frameMetadata(frame: InvocationArchivePayloadFrame): string[] {
   return [
     `frame: ${frame.sequence}`,
     `kind: ${frame.kind || 'text'}`,
+    `offset: ${frame.offset}`,
     frame.occurred_at ? `at: ${frame.occurred_at}` : '',
     frame.truncated ? `truncated · ${bytes}` : bytes,
   ].filter(Boolean)

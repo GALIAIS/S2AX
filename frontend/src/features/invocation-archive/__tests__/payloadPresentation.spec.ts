@@ -84,25 +84,25 @@ describe('Invocation Archive payload presentation', () => {
       type: 'response.output_item.done',
       item: { type: 'function_call_output', call_id: 'call_1', output: '{"ok":true}' },
     })
+    const frameBytes = new TextEncoder().encode(firstFrame).byteLength
     const presentation = presentInvocationArchivePayload(payload({
-      data: firstFrame,
+      encoding: 'base64',
+      data: btoa(`${firstFrame}\x00\xff\x01`),
       frames: [
         {
           sequence: 1,
           kind: 'text',
           occurred_at: '2026-07-27T00:00:00Z',
-          encoding: 'utf8',
-          data: firstFrame,
+          offset: 0,
           total_bytes: firstFrame.length,
-          captured_bytes: firstFrame.length,
+          captured_bytes: frameBytes,
           truncated: false,
         },
         {
           sequence: 2,
           kind: 'binary',
           occurred_at: '2026-07-27T00:00:01Z',
-          encoding: 'base64',
-          data: 'AP8B',
+          offset: frameBytes,
           total_bytes: 3,
           captured_bytes: 3,
           truncated: false,
@@ -125,8 +125,7 @@ describe('Invocation Archive payload presentation', () => {
       frames: [{
         sequence: 1,
         kind: 'text',
-        encoding: 'utf8',
-        data: frame,
+        offset: 0,
         total_bytes: frame.length,
         captured_bytes: frame.length,
         truncated: false,
@@ -151,6 +150,20 @@ describe('Invocation Archive payload presentation', () => {
     expect(presentation.format).toBe('sse')
     expect(presentation.transcript).toEqual(expect.arrayContaining([
       expect.objectContaining({ role: 'tool_call', title: 'search', content: '{\n  "query": "archive"\n}' }),
+    ]))
+  })
+
+  it('structures streamed Chat Completions deltas instead of falling back to raw SSE only', () => {
+    const presentation = presentInvocationArchivePayload(payload({
+      content_type: 'text/event-stream',
+      data: [
+        'data: {"id":"chatcmpl_test","choices":[{"index":0,"delta":{"role":"assistant","content":"hello"},"finish_reason":null}]}',
+        '',
+      ].join('\n'),
+    }))
+
+    expect(presentation.transcript).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'assistant', content: 'hello', metadata: expect.arrayContaining(['choice: 0']) }),
     ]))
   })
 })

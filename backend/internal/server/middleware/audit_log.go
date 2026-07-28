@@ -167,6 +167,7 @@ var auditActionOverrides = map[string]string{
 	"POST /api/v1/admin/security-audit/endpoints/:id/reset-breaker":              "admin.security_audit.endpoint.reset_breaker",
 	"PUT /api/v1/admin/invocation-archive/config":                                "admin.invocation_archive.config.update",
 	"POST /api/v1/admin/invocation-archive/records/:id/reveal":                   "admin.invocation_archive.record.reveal",
+	"POST /api/v1/admin/invocation-archive/records/:id/payloads/:slot":           "admin.invocation_archive.record.payload.reveal",
 	"DELETE /api/v1/admin/invocation-archive/records/:id":                        "admin.invocation_archive.record.delete",
 	"POST /api/v1/admin/invocation-archive/records/batch-delete":                 "admin.invocation_archive.records.batch_delete",
 }
@@ -201,6 +202,7 @@ var auditBodyOmittedRoutes = map[string]struct{}{
 	"POST /api/v1/admin/security-audit/endpoints/:id/reset-breaker":              {},
 	"PUT /api/v1/admin/invocation-archive/config":                                {},
 	"POST /api/v1/admin/invocation-archive/records/:id/reveal":                   {},
+	"POST /api/v1/admin/invocation-archive/records/:id/payloads/:slot":           {},
 	"DELETE /api/v1/admin/invocation-archive/records/:id":                        {},
 	"POST /api/v1/admin/invocation-archive/records/batch-delete":                 {},
 }
