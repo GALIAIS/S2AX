@@ -354,8 +354,8 @@
               <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.invocationArchive.detail.revealHint') }}</p>
             </div>
           </template>
-          <div v-if="hasPayloadChunks" class="mt-5 grid items-start gap-4 xl:grid-cols-2">
-            <article v-for="payload in payloadPanels" :key="payload.slot" class="min-w-0 self-start rounded-xl border border-gray-200 dark:border-dark-700">
+          <div v-if="hasPayloadChunks" class="mt-5 flex flex-col gap-4 xl:flex-row xl:items-start">
+            <article v-for="payload in payloadPanels" :key="payload.slot" class="w-full min-w-0 self-start rounded-xl border border-gray-200 xl:flex-1 dark:border-dark-700">
               <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-dark-700">
                 <div>
                   <h4 class="text-sm font-semibold text-gray-950 dark:text-white">{{ payload.label }}</h4>
