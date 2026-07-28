@@ -354,9 +354,9 @@
               <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.invocationArchive.detail.revealHint') }}</p>
             </div>
           </template>
-          <div v-if="hasPayloadChunks" class="mt-5 flex flex-col gap-4 xl:flex-row xl:items-start">
-            <article v-for="payload in payloadPanels" :key="payload.slot" class="w-full min-w-0 self-start rounded-xl border border-gray-200 xl:flex-1 dark:border-dark-700">
-              <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-dark-700">
+          <div v-if="hasPayloadChunks" class="archive-payload-grid mt-5 grid gap-4 xl:grid-cols-2">
+            <article v-for="payload in payloadPanels" :key="payload.slot" class="archive-payload-panel flex min-w-0 flex-col overflow-hidden rounded-xl border border-gray-200 dark:border-dark-700">
+              <div class="shrink-0 flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-dark-700">
                 <div>
                   <h4 class="text-sm font-semibold text-gray-950 dark:text-white">{{ payload.label }}</h4>
                   <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ payloadMeta(payload.payload) }}</p>
@@ -371,7 +371,7 @@
                 </div>
               </div>
               <template v-if="payload.payload.available">
-                <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-gray-50/70 px-4 py-2.5 dark:border-dark-700 dark:bg-dark-900/40">
+                <div class="shrink-0 flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-gray-50/70 px-4 py-2.5 dark:border-dark-700 dark:bg-dark-900/40">
                   <div class="flex flex-wrap items-center gap-2" role="group" :aria-label="t('admin.invocationArchive.detail.viewMode')">
                     <button v-if="payload.presentation.transcript.length > 0" type="button" class="btn btn-sm" :class="payload.mode === 'structured' ? 'btn-primary' : 'btn-secondary'" @click="payloadViewModes[payload.slot] = 'structured'">{{ t('admin.invocationArchive.detail.structured') }}</button>
                     <button v-if="payload.presentation.canFormat" type="button" class="btn btn-sm" :class="payload.mode === 'formatted' ? 'btn-primary' : 'btn-secondary'" @click="payloadViewModes[payload.slot] = 'formatted'">{{ t('admin.invocationArchive.detail.formatted') }}</button>
@@ -385,22 +385,26 @@
                     </select>
                   </label>
                 </div>
-                <div v-if="payload.presentation.warnings.length" class="space-y-2 border-b border-gray-200 px-4 py-3 dark:border-dark-700">
+                <div v-if="payload.presentation.warnings.length" class="shrink-0 space-y-2 border-b border-gray-200 px-4 py-3 dark:border-dark-700">
                   <p v-for="warning in payload.presentation.warnings" :key="warning" role="status" class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200">{{ payloadWarningLabel(warning) }}</p>
                 </div>
-                <div v-if="payload.mode === 'structured' && payload.presentation.transcript.length" class="max-h-[28rem] space-y-3 overflow-auto bg-gray-50 p-4 dark:bg-dark-900/70">
-                  <article v-for="(entry, index) in payload.presentation.transcript" :key="`${entry.role}:${entry.title || ''}:${index}`" class="border border-gray-200 bg-white p-3 dark:border-dark-700 dark:bg-dark-800/70">
-                    <div class="flex flex-wrap items-center gap-2 text-xs">
-                      <span class="rounded-full bg-primary-100 px-2 py-0.5 font-medium text-primary-700 dark:bg-primary-950/50 dark:text-primary-300">{{ entry.role }}</span>
-                      <span v-if="entry.title" class="font-mono text-gray-700 dark:text-dark-200">{{ entry.title }}</span>
-                      <span v-for="item in entry.metadata" :key="item" class="text-gray-500 dark:text-dark-400">{{ item }}</span>
-                    </div>
-                    <pre class="m-0 mt-3 whitespace-pre-wrap break-words font-mono text-xs leading-6 text-gray-800 dark:text-dark-100">{{ entry.content }}</pre>
-                  </article>
+                <div class="archive-payload-viewer bg-gray-50 dark:bg-dark-900/70">
+                  <div v-if="payload.mode === 'structured' && payload.presentation.transcript.length" class="space-y-3 p-4">
+                    <article v-for="(entry, index) in payload.presentation.transcript" :key="`${entry.role}:${entry.title || ''}:${index}`" class="border border-gray-200 bg-white p-3 dark:border-dark-700 dark:bg-dark-800/70">
+                      <div class="flex flex-wrap items-center gap-2 text-xs">
+                        <span class="rounded-full bg-primary-100 px-2 py-0.5 font-medium text-primary-700 dark:bg-primary-950/50 dark:text-primary-300">{{ entry.role }}</span>
+                        <span v-if="entry.title" class="font-mono text-gray-700 dark:text-dark-200">{{ entry.title }}</span>
+                        <span v-for="item in entry.metadata" :key="item" class="text-gray-500 dark:text-dark-400">{{ item }}</span>
+                      </div>
+                      <pre class="m-0 mt-3 whitespace-pre-wrap break-words font-mono text-xs leading-6 text-gray-800 dark:text-dark-100">{{ entry.content }}</pre>
+                    </article>
+                  </div>
+                  <pre v-else class="m-0 whitespace-pre-wrap break-words p-4 text-xs leading-6 text-gray-800 dark:text-dark-100">{{ payload.display }}</pre>
                 </div>
-                <pre v-else class="m-0 max-h-[28rem] overflow-auto whitespace-pre-wrap break-words bg-gray-50 p-4 text-xs leading-6 text-gray-800 dark:bg-dark-900/70 dark:text-dark-100">{{ payload.display }}</pre>
               </template>
-              <pre v-else class="m-0 max-h-[28rem] overflow-auto whitespace-pre-wrap break-words bg-gray-50 p-4 text-xs leading-6 text-gray-800 dark:bg-dark-900/70 dark:text-dark-100">{{ payload.display }}</pre>
+              <div v-else class="archive-payload-viewer bg-gray-50 dark:bg-dark-900/70">
+                <pre class="m-0 whitespace-pre-wrap break-words p-4 text-xs leading-6 text-gray-800 dark:text-dark-100">{{ payload.display }}</pre>
+              </div>
             </article>
           </div>
         </section>
@@ -1021,3 +1025,32 @@ onBeforeUnmount(() => {
   if (autoRefreshTimer !== undefined) window.clearInterval(autoRefreshTimer)
 })
 </script>
+
+<style scoped>
+.archive-payload-grid {
+  align-items: stretch;
+}
+
+.archive-payload-panel {
+  min-height: 0;
+}
+
+.archive-payload-viewer {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+@media (min-width: 1280px) {
+  .archive-payload-panel {
+    height: min(42rem, calc(100dvh - 14rem));
+  }
+}
+
+@media (max-width: 1279px) {
+  .archive-payload-viewer {
+    max-height: 28rem;
+  }
+}
+</style>
