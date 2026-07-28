@@ -248,6 +248,7 @@ export default {
     lastActivity: '最近使用',
     upstreamQuota: '上游配额',
     cachedQuotaSnapshot: '缓存快照',
+    usageDetailGrantedNoSnapshot: '已授权，当前暂无缓存配额快照',
     leaseAccountCost: '本次分配账号计费',
     leaseUserCost: '本次分配用户计费',
     requests: '请求',
@@ -277,7 +278,7 @@ export default {
     viewDetails: '查看详情',
     showMore: '再显示 {count} 个',
     detailTitle: '账号详情',
-    detailPrivacyNotice: '该详情仅用于查看可用性与用量。专属分配可显示已缓存的上游配额，但不能主动查询或重置；账号控制、凭据、代理、IP、模型列表和健康错误始终隐藏。',
+    detailPrivacyNotice: '该详情仅用于查看可用性与用量。专属分配可显示缓存配额；管理员授权还可显示授权分组内的窗口聚合，但不能主动查询或重置。账号控制、凭据、代理、IP、模型列表和健康错误始终隐藏。',
     unknownPlatform: '未知平台',
     groupTypes: {
       standard: '标准分组',
@@ -290,6 +291,11 @@ export default {
     usageWindows: {
       rolling24h: '24h',
       personalLease: '本次'
+    },
+    usageDetailAccess: {
+      assignment: '专属分配',
+      group: '分组授权',
+      direct: '管理员授权'
     },
     summary: {
       publicGroups: '公开分组',

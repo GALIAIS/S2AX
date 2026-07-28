@@ -248,6 +248,7 @@ export default {
     lastActivity: 'Recent activity',
     upstreamQuota: 'Upstream quota',
     cachedQuotaSnapshot: 'Cached snapshot',
+    usageDetailGrantedNoSnapshot: 'Authorized, but no cached quota snapshot is available',
     leaseAccountCost: 'Lease account cost',
     leaseUserCost: 'Lease user cost',
     requests: 'requests',
@@ -277,7 +278,7 @@ export default {
     viewDetails: 'View details',
     showMore: 'Show {count} more',
     detailTitle: 'Account details',
-    detailPrivacyNotice: 'This detail view is limited to availability and usage. Dedicated assignments may show cached upstream quota, but cannot query or reset it. Account controls, credentials, proxies, IPs, model lists, and health errors remain hidden.',
+    detailPrivacyNotice: 'This detail view is limited to availability and usage. Dedicated assignments may show cached quota; administrator grants may also show group-scoped window aggregates. Neither can query or reset the provider. Account controls, credentials, proxies, IPs, model lists, and health errors remain hidden.',
     unknownPlatform: 'Unknown platform',
     groupTypes: {
       standard: 'Standard group',
@@ -290,6 +291,11 @@ export default {
     usageWindows: {
       rolling24h: '24h',
       personalLease: 'Lease'
+    },
+    usageDetailAccess: {
+      assignment: 'Dedicated assignment',
+      group: 'Group grant',
+      direct: 'Admin grant'
     },
     summary: {
       publicGroups: 'Public groups',

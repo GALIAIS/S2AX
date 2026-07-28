@@ -172,11 +172,16 @@
           <template #cell-usage="{ row }">
             <div class="min-w-[15rem] space-y-1.5">
               <div v-if="row.upstream_quota" class="space-y-1 border-b border-gray-100 pb-1.5 dark:border-dark-700">
+                <div class="flex items-center justify-between gap-2 text-[10px] text-gray-500 dark:text-dark-400">
+                  <span>{{ t('accountAllocations.upstreamQuota') }}</span>
+                  <span class="badge badge-gray">{{ usageDetailAccessLabel(row.usage_detail_access) }}</span>
+                </div>
                 <UsageProgressBar
                   v-if="row.upstream_quota.five_hour"
                   label="5h"
                   :utilization="row.upstream_quota.five_hour.utilization"
                   :resets-at="row.upstream_quota.five_hour.resets_at"
+                  :window-stats="row.upstream_quota.five_hour.window_stats"
                   color="indigo"
                   :show-now-when-idle="true"
                 />
@@ -185,6 +190,7 @@
                   label="7d"
                   :utilization="row.upstream_quota.seven_day.utilization"
                   :resets-at="row.upstream_quota.seven_day.resets_at"
+                  :window-stats="row.upstream_quota.seven_day.window_stats"
                   color="emerald"
                   :show-now-when-idle="true"
                 />
@@ -192,6 +198,9 @@
                   {{ t('accountAllocations.cachedQuotaSnapshot') }} · {{ formatRelativeTime(row.upstream_quota.updated_at) }}
                 </p>
               </div>
+              <p v-else-if="row.usage_detail_access" class="text-[11px] text-gray-500 dark:text-dark-400">
+                {{ usageDetailAccessLabel(row.usage_detail_access) }} · {{ t('accountAllocations.usageDetailGrantedNoSnapshot') }}
+              </p>
               <div class="flex flex-wrap items-center gap-1 text-[11px] text-gray-600 dark:text-dark-300">
                 <span class="badge badge-gray font-medium">{{ usageWindowLabel(row.usage.scope) }}</span>
                 <span class="rounded bg-gray-100 px-1.5 py-0.5 font-mono dark:bg-dark-800">{{ formatCompactNumber(row.usage.request_count, { allowBillions: false }) }} {{ t('accountAllocations.requests') }}</span>
@@ -268,12 +277,16 @@
                 </p>
               </div>
               <div v-if="account.upstream_quota" class="col-span-2 space-y-1 border-t border-gray-100 pt-3 dark:border-dark-700">
-                <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('accountAllocations.upstreamQuota') }}</p>
+                <div class="flex items-center justify-between gap-2">
+                  <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('accountAllocations.upstreamQuota') }}</p>
+                  <span class="badge badge-gray text-[10px]">{{ usageDetailAccessLabel(account.usage_detail_access) }}</span>
+                </div>
                 <UsageProgressBar
                   v-if="account.upstream_quota.five_hour"
                   label="5h"
                   :utilization="account.upstream_quota.five_hour.utilization"
                   :resets-at="account.upstream_quota.five_hour.resets_at"
+                  :window-stats="account.upstream_quota.five_hour.window_stats"
                   color="indigo"
                   :show-now-when-idle="true"
                 />
@@ -282,6 +295,7 @@
                   label="7d"
                   :utilization="account.upstream_quota.seven_day.utilization"
                   :resets-at="account.upstream_quota.seven_day.resets_at"
+                  :window-stats="account.upstream_quota.seven_day.window_stats"
                   color="emerald"
                   :show-now-when-idle="true"
                 />
@@ -289,6 +303,9 @@
                   {{ t('accountAllocations.cachedQuotaSnapshot') }} · {{ formatRelativeTime(account.upstream_quota.updated_at) }}
                 </p>
               </div>
+              <p v-else-if="account.usage_detail_access" class="col-span-2 border-t border-gray-100 pt-3 text-xs text-gray-500 dark:border-dark-700 dark:text-dark-400">
+                {{ usageDetailAccessLabel(account.usage_detail_access) }} · {{ t('accountAllocations.usageDetailGrantedNoSnapshot') }}
+              </p>
             </div>
 
             <div class="flex items-center justify-between border-t border-gray-100 px-4 py-3 text-xs dark:border-dark-700">
@@ -363,14 +380,18 @@
             <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('accountAllocations.coolingUntilLabel') }}</dt>
             <dd class="mt-1 text-sm font-medium text-amber-700 dark:text-amber-300">{{ formatDateTime(selectedAccount.rate_limit_reset_at) }}</dd>
           </div>
-          <div v-if="selectedAccount.upstream_quota" class="sm:col-span-2">
-            <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('accountAllocations.upstreamQuota') }}</dt>
-            <dd class="mt-2 max-w-sm space-y-1.5">
+          <div v-if="selectedAccount.usage_detail_access" class="sm:col-span-2">
+            <dt class="flex items-center gap-2 text-xs text-gray-500 dark:text-dark-400">
+              <span>{{ t('accountAllocations.upstreamQuota') }}</span>
+              <span class="badge badge-gray text-[10px]">{{ usageDetailAccessLabel(selectedAccount.usage_detail_access) }}</span>
+            </dt>
+            <dd v-if="selectedAccount.upstream_quota" class="mt-2 max-w-sm space-y-1.5">
               <UsageProgressBar
                 v-if="selectedAccount.upstream_quota.five_hour"
                 label="5h"
                 :utilization="selectedAccount.upstream_quota.five_hour.utilization"
                 :resets-at="selectedAccount.upstream_quota.five_hour.resets_at"
+                :window-stats="selectedAccount.upstream_quota.five_hour.window_stats"
                 color="indigo"
                 :show-now-when-idle="true"
               />
@@ -379,12 +400,16 @@
                 label="7d"
                 :utilization="selectedAccount.upstream_quota.seven_day.utilization"
                 :resets-at="selectedAccount.upstream_quota.seven_day.resets_at"
+                :window-stats="selectedAccount.upstream_quota.seven_day.window_stats"
                 color="emerald"
                 :show-now-when-idle="true"
               />
               <p class="text-xs text-gray-500 dark:text-dark-400" :title="formatDateTime(selectedAccount.upstream_quota.updated_at)">
                 {{ t('accountAllocations.cachedQuotaSnapshot') }} · {{ formatRelativeTime(selectedAccount.upstream_quota.updated_at) }}
               </p>
+            </dd>
+            <dd v-else class="mt-2 text-sm text-gray-500 dark:text-dark-400">
+              {{ t('accountAllocations.usageDetailGrantedNoSnapshot') }}
             </dd>
           </div>
         </dl>
@@ -409,6 +434,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import accountAllocationsAPI, {
   type AccountAllocationUserStatus,
+  type AccountAllocationUsageDetailAccess,
   type AccountAllocationVisibleSource,
   type AccountAllocationVisibleUsageScope,
   type UserVisibleAccount,
@@ -572,6 +598,13 @@ const usageWindowLabel = (scope: AccountAllocationVisibleUsageScope): string => 
     ? t('accountAllocations.usageWindows.personalLease')
     : t('accountAllocations.usageWindows.rolling24h')
 )
+
+const usageDetailAccessLabel = (access?: AccountAllocationUsageDetailAccess): string => {
+  if (access === 'assignment') return t('accountAllocations.usageDetailAccess.assignment')
+  if (access === 'group') return t('accountAllocations.usageDetailAccess.group')
+  if (access === 'direct') return t('accountAllocations.usageDetailAccess.direct')
+  return ''
+}
 
 const hasLeaseUsage = (account: UserVisibleAccount): boolean => (
   account.usage.scope === 'personal_lease'

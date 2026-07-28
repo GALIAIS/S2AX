@@ -3,6 +3,7 @@ import type { PaginatedResponse } from '@/types'
 
 export type AccountAllocationPolicyStatus = 'active' | 'disabled'
 export type AccountAllocationAssignmentStatus = 'active' | 'released'
+export type AccountUsageVisibilityGrantScope = 'exclusive_group' | 'user_account'
 export type AccountAllocationAccessStatus =
   | 'ready'
   | 'user_unavailable'
@@ -100,6 +101,29 @@ export interface AccountAllocationOverview {
   policies_with_shortage: number
   last_policy_reconciled_at?: string | null
   reconcile_interval_seconds: number
+}
+
+export interface AccountUsageVisibilityGrant {
+  id: number
+  scope: AccountUsageVisibilityGrantScope
+  group_id: number
+  group_name: string
+  user_id?: number | null
+  user_email?: string
+  username?: string
+  account_id?: number | null
+  account_name?: string
+  platform?: string
+  account_type?: string
+  created_by?: number | null
+  created_at: string
+}
+
+export interface AccountUsageVisibilityGrantInput {
+  scope: AccountUsageVisibilityGrantScope
+  group_id: number
+  user_id?: number
+  account_id?: number
 }
 
 export interface AccountAllocationPolicyInput {
@@ -230,6 +254,30 @@ export async function listEvents(
   return data
 }
 
+export async function listUsageVisibilityGrants(): Promise<AccountUsageVisibilityGrant[]> {
+  const { data } = await apiClient.get<{ items: AccountUsageVisibilityGrant[] }>(
+    '/admin/account-allocations/usage-visibility-grants'
+  )
+  return data.items ?? []
+}
+
+export async function createUsageVisibilityGrant(
+  input: AccountUsageVisibilityGrantInput
+): Promise<AccountUsageVisibilityGrant> {
+  const { data } = await apiClient.post<AccountUsageVisibilityGrant>(
+    '/admin/account-allocations/usage-visibility-grants',
+    input
+  )
+  return data
+}
+
+export async function removeUsageVisibilityGrant(id: number): Promise<{ message: string }> {
+  const { data } = await apiClient.delete<{ message: string }>(
+    `/admin/account-allocations/usage-visibility-grants/${id}`
+  )
+  return data
+}
+
 const accountAllocationsAPI = {
   getCapabilities,
   getOverview,
@@ -245,7 +293,10 @@ const accountAllocationsAPI = {
   listCandidates,
   assign,
   release,
-  listEvents
+  listEvents,
+  listUsageVisibilityGrants,
+  createUsageVisibilityGrant,
+  removeUsageVisibilityGrant
 }
 
 export default accountAllocationsAPI

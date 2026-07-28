@@ -69,6 +69,10 @@
             </div>
           </div>
           <div class="flex shrink-0 items-center justify-end gap-3">
+            <button type="button" class="btn btn-secondary" @click="openUsageVisibilityDialog">
+              <Icon name="eye" size="md" />
+              {{ t('admin.accountAllocations.usageVisibility.manage') }}
+            </button>
             <button type="button" class="btn btn-secondary" :disabled="reconcilingAll || listBusy" @click="reconcileAllPolicies">
               <Icon name="refresh" size="md" :class="reconcilingAll ? 'animate-spin' : ''" />
               {{ t('admin.accountAllocations.reconcileAll') }}
@@ -247,6 +251,151 @@
       </template>
     </BaseDialog>
 
+    <BaseDialog
+      :show="showUsageVisibilityDialog"
+      :title="t('admin.accountAllocations.usageVisibility.title')"
+      width="extra-wide"
+      @close="showUsageVisibilityDialog = false"
+    >
+      <div class="space-y-6">
+        <div class="border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-200">
+          <p class="font-medium">{{ t('admin.accountAllocations.usageVisibility.readOnlyNotice') }}</p>
+          <p class="mt-1 text-xs leading-5">{{ t('admin.accountAllocations.usageVisibility.description') }}</p>
+        </div>
+
+        <form id="create-account-usage-visibility-grant" class="space-y-4" @submit.prevent="createUsageVisibilityGrant">
+          <div>
+            <label class="input-label">{{ t('admin.accountAllocations.usageVisibility.scope') }}</label>
+            <div class="grid gap-2 sm:grid-cols-2" role="group" :aria-label="t('admin.accountAllocations.usageVisibility.scope')">
+              <button
+                type="button"
+                :class="['border px-4 py-3 text-left transition-colors', usageVisibilityForm.scope === 'exclusive_group' ? 'border-primary-500 bg-primary-50 text-primary-800 dark:bg-primary-950/30 dark:text-primary-200' : 'border-gray-200 text-gray-700 hover:border-gray-300 dark:border-dark-700 dark:text-dark-200']"
+                @click="setUsageVisibilityScope('exclusive_group')"
+              >
+                <span class="block text-sm font-semibold">{{ t('admin.accountAllocations.usageVisibility.exclusiveGroup') }}</span>
+                <span class="mt-1 block text-xs leading-5 opacity-80">{{ t('admin.accountAllocations.usageVisibility.exclusiveGroupHint') }}</span>
+              </button>
+              <button
+                type="button"
+                :class="['border px-4 py-3 text-left transition-colors', usageVisibilityForm.scope === 'user_account' ? 'border-primary-500 bg-primary-50 text-primary-800 dark:bg-primary-950/30 dark:text-primary-200' : 'border-gray-200 text-gray-700 hover:border-gray-300 dark:border-dark-700 dark:text-dark-200']"
+                @click="setUsageVisibilityScope('user_account')"
+              >
+                <span class="block text-sm font-semibold">{{ t('admin.accountAllocations.usageVisibility.userAccount') }}</span>
+                <span class="mt-1 block text-xs leading-5 opacity-80">{{ t('admin.accountAllocations.usageVisibility.userAccountHint') }}</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="grid gap-4" :class="usageVisibilityForm.scope === 'user_account' ? 'md:grid-cols-3' : 'md:grid-cols-1'">
+            <div>
+              <label class="input-label">{{ t('admin.accountAllocations.group') }}</label>
+              <Select
+                v-model="usageVisibilityForm.group_id"
+                :options="visibilityGroupOptions"
+                :placeholder="t('admin.accountAllocations.selectGroup')"
+                :empty-text="usageVisibilityForm.scope === 'exclusive_group' ? t('admin.accountAllocations.usageVisibility.noExclusiveGroups') : t('common.noGroupsAvailable')"
+                searchable
+                @change="handleUsageVisibilityGroupChange"
+              />
+            </div>
+            <div v-if="usageVisibilityForm.scope === 'user_account'">
+              <label class="input-label">{{ t('admin.accountAllocations.user') }}</label>
+              <Select
+                v-model="usageVisibilityForm.user_id"
+                :options="userOptions"
+                :placeholder="t('admin.accountAllocations.selectUser')"
+                :empty-text="t('admin.accountAllocations.noUsers')"
+                searchable
+                remote-search
+                :loading="usersLoading"
+                @search="queueUserSearch"
+              />
+            </div>
+            <div v-if="usageVisibilityForm.scope === 'user_account'">
+              <label class="input-label">{{ t('admin.accountAllocations.account') }}</label>
+              <Select
+                v-model="usageVisibilityForm.account_id"
+                :options="usageVisibilityAccountOptions"
+                :placeholder="usageVisibilityForm.group_id ? t('admin.accountAllocations.usageVisibility.selectAccount') : t('admin.accountAllocations.usageVisibility.selectGroupFirst')"
+                :empty-text="t('admin.accountAllocations.usageVisibility.noAccounts')"
+                :disabled="!usageVisibilityForm.group_id"
+                :loading="usageVisibilityAccountsLoading"
+                searchable
+                remote-search
+                @search="queueUsageVisibilityAccountSearch"
+              />
+            </div>
+          </div>
+        </form>
+
+        <section>
+          <div class="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.accountAllocations.usageVisibility.activeGrants') }}</h3>
+              <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accountAllocations.usageVisibility.revokeHint') }}</p>
+            </div>
+            <span class="badge badge-gray">{{ usageVisibilityGrants.length }}</span>
+          </div>
+          <div v-if="usageVisibilityGrantsLoading" class="flex items-center justify-center border border-gray-200 py-10 dark:border-dark-700">
+            <Icon name="refresh" size="lg" class="animate-spin text-gray-400" />
+          </div>
+          <div v-else-if="usageVisibilityGrants.length === 0" class="empty-state border border-dashed border-gray-200 py-10 dark:border-dark-700">
+            <Icon name="eye" size="lg" class="text-gray-400 dark:text-dark-500" />
+            <p class="mt-2 text-sm text-gray-500 dark:text-dark-400">{{ t('admin.accountAllocations.usageVisibility.empty') }}</p>
+          </div>
+          <div v-else class="overflow-x-auto border border-gray-200 dark:border-dark-700">
+            <table class="w-full min-w-[760px] text-left text-sm">
+              <thead class="bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-dark-800 dark:text-dark-400">
+                <tr>
+                  <th class="px-4 py-3">{{ t('admin.accountAllocations.usageVisibility.scope') }}</th>
+                  <th class="px-4 py-3">{{ t('admin.accountAllocations.group') }}</th>
+                  <th class="px-4 py-3">{{ t('admin.accountAllocations.usageVisibility.target') }}</th>
+                  <th class="px-4 py-3">{{ t('admin.accountAllocations.usageVisibility.createdAt') }}</th>
+                  <th class="px-4 py-3 text-right">{{ t('common.actions') }}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-200 dark:divide-dark-700">
+                <tr v-for="grant in usageVisibilityGrants" :key="grant.id" class="text-gray-700 dark:text-dark-200">
+                  <td class="px-4 py-3"><span class="badge badge-gray">{{ usageVisibilityScopeLabel(grant.scope) }}</span></td>
+                  <td class="px-4 py-3">
+                    <p class="font-medium text-gray-900 dark:text-white">{{ grant.group_name }}</p>
+                    <p class="font-mono text-xs text-gray-500 dark:text-dark-400">#{{ grant.group_id }}</p>
+                  </td>
+                  <td class="px-4 py-3">
+                    <template v-if="grant.scope === 'user_account'">
+                      <p class="font-medium text-gray-900 dark:text-white">{{ grant.username || grant.user_email }}</p>
+                      <p class="text-xs text-gray-500 dark:text-dark-400">{{ grant.user_email }} · {{ grant.account_name }}</p>
+                      <p class="font-mono text-xs text-gray-400 dark:text-dark-500">{{ grant.platform }} / {{ grant.account_type }} · #{{ grant.account_id }}</p>
+                    </template>
+                    <p v-else class="text-sm text-gray-600 dark:text-dark-300">{{ t('admin.accountAllocations.usageVisibility.allEligibleUsers') }}</p>
+                  </td>
+                  <td class="whitespace-nowrap px-4 py-3 text-xs text-gray-500 dark:text-dark-400">{{ formatDateTime(grant.created_at) }}</td>
+                  <td class="px-4 py-3 text-right">
+                    <button type="button" class="btn btn-ghost btn-sm text-red-600 dark:text-red-400" @click="usageVisibilityDeleteTarget = grant">
+                      {{ t('admin.accountAllocations.usageVisibility.revoke') }}
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-3">
+          <button type="button" class="btn btn-secondary" @click="showUsageVisibilityDialog = false">{{ t('common.close') }}</button>
+          <button
+            type="submit"
+            form="create-account-usage-visibility-grant"
+            class="btn btn-primary"
+            :disabled="creatingUsageVisibilityGrant"
+          >
+            {{ creatingUsageVisibilityGrant ? t('common.submitting') : t('admin.accountAllocations.usageVisibility.create') }}
+          </button>
+        </div>
+      </template>
+    </BaseDialog>
+
     <BaseDialog :show="showDetailsDialog" :title="selectedPolicy ? t('admin.accountAllocations.detailsTitle', { user: selectedPolicy.user_email, group: selectedPolicy.group_name }) : t('admin.accountAllocations.details')" width="extra-wide" @close="showDetailsDialog = false">
       <div v-if="selectedPolicy" class="space-y-6">
         <div
@@ -359,6 +508,16 @@
       @confirm="releaseAssignment"
       @cancel="releaseTarget = null"
     />
+
+    <ConfirmDialog
+      :show="Boolean(usageVisibilityDeleteTarget)"
+      :title="t('admin.accountAllocations.usageVisibility.revoke')"
+      :message="t('admin.accountAllocations.usageVisibility.revokeConfirm')"
+      :confirm-text="t('admin.accountAllocations.usageVisibility.revoke')"
+      danger
+      @confirm="deleteUsageVisibilityGrant"
+      @cancel="usageVisibilityDeleteTarget = null"
+    />
   </AppLayout>
 </template>
 
@@ -373,9 +532,11 @@ import type {
   AccountAllocationEvent,
   AccountAllocationOverview,
   AccountAllocationPolicy,
-  AccountAllocationPolicyStatus
+  AccountAllocationPolicyStatus,
+  AccountUsageVisibilityGrant,
+  AccountUsageVisibilityGrantScope
 } from '@/api/admin/accountAllocations'
-import type { AdminGroup, AdminUser } from '@/types'
+import type { Account, AdminGroup, AdminUser } from '@/types'
 import type { Column } from '@/components/common/types'
 import type { RowActionMenuItem } from '@/components/common/RowActionMenu.vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -414,12 +575,15 @@ let listController: AbortController | null = null
 let listRequestID = 0
 let userSearchController: AbortController | null = null
 let candidateSearchController: AbortController | null = null
+let usageVisibilityAccountSearchController: AbortController | null = null
 let userSearchTimer: ReturnType<typeof setTimeout> | null = null
 let candidateSearchTimer: ReturnType<typeof setTimeout> | null = null
+let usageVisibilityAccountSearchTimer: ReturnType<typeof setTimeout> | null = null
 
 const showCreateDialog = ref(false)
 const showEditDialog = ref(false)
 const showDetailsDialog = ref(false)
+const showUsageVisibilityDialog = ref(false)
 const creating = ref(false)
 const updating = ref(false)
 const assigning = ref(false)
@@ -431,12 +595,18 @@ const selectedPolicy = ref<AccountAllocationPolicy | null>(null)
 const statusTarget = ref<AccountAllocationPolicy | null>(null)
 const deleteTarget = ref<AccountAllocationPolicy | null>(null)
 const releaseTarget = ref<AccountAllocationAssignment | null>(null)
+const usageVisibilityDeleteTarget = ref<AccountUsageVisibilityGrant | null>(null)
 const assignments = ref<AccountAllocationAssignment[]>([])
 const candidates = ref<AccountAllocationCandidate[]>([])
 const events = ref<AccountAllocationEvent[]>([])
 const eventsTotal = ref(0)
 const selectedCandidateID = ref<number | null>(null)
 const maxDesiredCount = ref(50)
+const usageVisibilityGrants = ref<AccountUsageVisibilityGrant[]>([])
+const usageVisibilityAccounts = ref<Account[]>([])
+const usageVisibilityGrantsLoading = ref(false)
+const usageVisibilityAccountsLoading = ref(false)
+const creatingUsageVisibilityGrant = ref(false)
 
 const createForm = reactive({
   user_id: null as number | null,
@@ -452,6 +622,13 @@ const editForm = reactive({
   auto_replenish: false,
   replace_on_401: true,
   replace_on_429: true
+})
+
+const usageVisibilityForm = reactive({
+  scope: 'exclusive_group' as AccountUsageVisibilityGrantScope,
+  group_id: null as number | null,
+  user_id: null as number | null,
+  account_id: null as number | null
 })
 
 const columns = computed<Column[]>(() => [
@@ -479,6 +656,18 @@ const groupOptions = computed(() => groups.value.map((group) => ({
   value: group.id,
   label: `${group.name} · ${group.platform} (#${group.id})`,
   description: `${group.platform} #${group.id}`
+})))
+
+const visibilityGroupOptions = computed(() => (
+  usageVisibilityForm.scope === 'exclusive_group'
+    ? groupOptions.value.filter((option) => groups.value.find((group) => group.id === option.value)?.is_exclusive)
+    : groupOptions.value
+))
+
+const usageVisibilityAccountOptions = computed(() => usageVisibilityAccounts.value.map((account) => ({
+  value: account.id,
+  label: `${account.name} · ${account.platform} / ${account.type}`,
+  description: `#${account.id} · ${t('admin.accountAllocations.capacity')}: ${account.concurrency}`
 })))
 
 const candidateOptions = computed(() => candidates.value.map((candidate) => ({
@@ -532,7 +721,8 @@ const loadReferences = async () => {
 
 const mergeUserSearchResults = (items: AdminUser[]) => {
   const pinnedIDs = new Set(
-    [userFilter.value, createForm.user_id].filter((value): value is number => typeof value === 'number')
+    [userFilter.value, createForm.user_id, usageVisibilityForm.user_id]
+      .filter((value): value is number => typeof value === 'number')
   )
   const merged = new Map<number, AdminUser>()
   for (const user of items) merged.set(user.id, user)
@@ -622,6 +812,88 @@ const queueCandidateSearch = (query: string) => {
     candidateSearchTimer = null
     void loadCandidateSearch(query)
   }, 250)
+}
+
+const usageVisibilityScopeLabel = (scope: AccountUsageVisibilityGrantScope) => (
+  scope === 'exclusive_group'
+    ? t('admin.accountAllocations.usageVisibility.exclusiveGroup')
+    : t('admin.accountAllocations.usageVisibility.userAccount')
+)
+
+const loadUsageVisibilityGrants = async () => {
+  usageVisibilityGrantsLoading.value = true
+  try {
+    usageVisibilityGrants.value = await adminAPI.accountAllocations.listUsageVisibilityGrants()
+  } catch (error: unknown) {
+    appStore.showError(extractApiErrorMessage(error, t('admin.accountAllocations.usageVisibility.loadFailed')))
+  } finally {
+    usageVisibilityGrantsLoading.value = false
+  }
+}
+
+const loadUsageVisibilityAccounts = async (query: string) => {
+  if (!usageVisibilityForm.group_id) {
+    usageVisibilityAccounts.value = []
+    return
+  }
+  usageVisibilityAccountSearchController?.abort()
+  const controller = new AbortController()
+  usageVisibilityAccountSearchController = controller
+  usageVisibilityAccountsLoading.value = true
+  try {
+    const response = await adminAPI.accounts.list(
+      1,
+      50,
+      {
+        group: String(usageVisibilityForm.group_id),
+        search: query.trim() || undefined,
+        lite: 'true',
+        sort_by: 'name',
+        sort_order: 'asc'
+      },
+      { signal: controller.signal }
+    )
+    if (!controller.signal.aborted) {
+      const selected = usageVisibilityAccounts.value.find((account) => account.id === usageVisibilityForm.account_id)
+      const merged = new Map(response.items.map((account) => [account.id, account]))
+      if (selected && !merged.has(selected.id)) merged.set(selected.id, selected)
+      usageVisibilityAccounts.value = Array.from(merged.values())
+    }
+  } catch (error: unknown) {
+    if (!controller.signal.aborted) {
+      appStore.showError(extractApiErrorMessage(error, t('admin.accountAllocations.usageVisibility.accountsLoadFailed')))
+    }
+  } finally {
+    if (usageVisibilityAccountSearchController === controller) {
+      usageVisibilityAccountSearchController = null
+      usageVisibilityAccountsLoading.value = false
+    }
+  }
+}
+
+const queueUsageVisibilityAccountSearch = (query: string) => {
+  if (usageVisibilityAccountSearchTimer) clearTimeout(usageVisibilityAccountSearchTimer)
+  usageVisibilityAccountSearchTimer = setTimeout(() => {
+    usageVisibilityAccountSearchTimer = null
+    void loadUsageVisibilityAccounts(query)
+  }, 250)
+}
+
+const setUsageVisibilityScope = (scope: AccountUsageVisibilityGrantScope) => {
+  if (usageVisibilityForm.scope === scope) return
+  usageVisibilityForm.scope = scope
+  usageVisibilityForm.group_id = null
+  usageVisibilityForm.user_id = null
+  usageVisibilityForm.account_id = null
+  usageVisibilityAccounts.value = []
+}
+
+const handleUsageVisibilityGroupChange = () => {
+  usageVisibilityForm.account_id = null
+  usageVisibilityAccounts.value = []
+  if (usageVisibilityForm.scope === 'user_account' && usageVisibilityForm.group_id) {
+    void loadUsageVisibilityAccounts('')
+  }
 }
 
 const loadCapabilities = async () => {
@@ -750,6 +1022,68 @@ const openCreateDialog = () => {
   resetCreateForm()
   showCreateDialog.value = true
   void loadReferences()
+}
+
+const openUsageVisibilityDialog = () => {
+  Object.assign(usageVisibilityForm, {
+    scope: 'exclusive_group',
+    group_id: null,
+    user_id: null,
+    account_id: null
+  })
+  usageVisibilityAccounts.value = []
+  showUsageVisibilityDialog.value = true
+  void Promise.all([loadReferences(), loadUsageVisibilityGrants()])
+}
+
+const createUsageVisibilityGrant = async () => {
+  if (!usageVisibilityForm.group_id) {
+    appStore.showError(t('admin.accountAllocations.usageVisibility.groupRequired'))
+    return
+  }
+  if (
+    usageVisibilityForm.scope === 'user_account'
+    && (!usageVisibilityForm.user_id || !usageVisibilityForm.account_id)
+  ) {
+    appStore.showError(t('admin.accountAllocations.usageVisibility.userAccountRequired'))
+    return
+  }
+  creatingUsageVisibilityGrant.value = true
+  try {
+    await adminAPI.accountAllocations.createUsageVisibilityGrant({
+      scope: usageVisibilityForm.scope,
+      group_id: usageVisibilityForm.group_id,
+      user_id: usageVisibilityForm.scope === 'user_account' ? usageVisibilityForm.user_id ?? undefined : undefined,
+      account_id: usageVisibilityForm.scope === 'user_account' ? usageVisibilityForm.account_id ?? undefined : undefined
+    })
+    appStore.showSuccess(t('admin.accountAllocations.usageVisibility.created'))
+    const retainedScope = usageVisibilityForm.scope
+    Object.assign(usageVisibilityForm, {
+      scope: retainedScope,
+      group_id: null,
+      user_id: null,
+      account_id: null
+    })
+    usageVisibilityAccounts.value = []
+    await loadUsageVisibilityGrants()
+  } catch (error: unknown) {
+    appStore.showError(extractApiErrorMessage(error, t('admin.accountAllocations.usageVisibility.createFailed')))
+  } finally {
+    creatingUsageVisibilityGrant.value = false
+  }
+}
+
+const deleteUsageVisibilityGrant = async () => {
+  if (!usageVisibilityDeleteTarget.value) return
+  const target = usageVisibilityDeleteTarget.value
+  usageVisibilityDeleteTarget.value = null
+  try {
+    await adminAPI.accountAllocations.removeUsageVisibilityGrant(target.id)
+    usageVisibilityGrants.value = usageVisibilityGrants.value.filter((grant) => grant.id !== target.id)
+    appStore.showSuccess(t('admin.accountAllocations.usageVisibility.revoked'))
+  } catch (error: unknown) {
+    appStore.showError(extractApiErrorMessage(error, t('admin.accountAllocations.usageVisibility.revokeFailed')))
+  }
 }
 
 const createPolicy = async () => {
@@ -952,7 +1286,9 @@ onUnmounted(() => {
   listController?.abort()
   userSearchController?.abort()
   candidateSearchController?.abort()
+  usageVisibilityAccountSearchController?.abort()
   if (userSearchTimer) clearTimeout(userSearchTimer)
   if (candidateSearchTimer) clearTimeout(candidateSearchTimer)
+  if (usageVisibilityAccountSearchTimer) clearTimeout(usageVisibilityAccountSearchTimer)
 })
 </script>

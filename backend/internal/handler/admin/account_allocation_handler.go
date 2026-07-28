@@ -46,6 +46,13 @@ type createAccountAllocationAssignmentRequest struct {
 	AccountID int64 `json:"account_id" binding:"required,gt=0"`
 }
 
+type createAccountUsageVisibilityGrantRequest struct {
+	Scope     service.AccountUsageVisibilityGrantScope `json:"scope" binding:"required,oneof=exclusive_group user_account"`
+	GroupID   int64                                    `json:"group_id" binding:"required,gt=0"`
+	UserID    int64                                    `json:"user_id"`
+	AccountID int64                                    `json:"account_id"`
+}
+
 // GetCapabilities GET /api/v1/admin/account-allocations/capabilities
 // Returns only server-enforced limits, never account pool data.
 func (h *AccountAllocationHandler) GetCapabilities(c *gin.Context) {
@@ -380,6 +387,67 @@ func (h *AccountAllocationHandler) ListEvents(c *gin.Context) {
 		return
 	}
 	response.Paginated(c, items, total, page, pageSize)
+}
+
+// ListUsageVisibilityGrants GET /api/v1/admin/account-allocations/usage-visibility-grants
+func (h *AccountAllocationHandler) ListUsageVisibilityGrants(c *gin.Context) {
+	if h == nil || h.service == nil {
+		response.InternalError(c, "Account allocation service unavailable")
+		return
+	}
+	items, err := h.service.ListAccountUsageVisibilityGrants(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"items": items})
+}
+
+// CreateUsageVisibilityGrant POST /api/v1/admin/account-allocations/usage-visibility-grants
+func (h *AccountAllocationHandler) CreateUsageVisibilityGrant(c *gin.Context) {
+	if h == nil || h.service == nil {
+		response.InternalError(c, "Account allocation service unavailable")
+		return
+	}
+	var req createAccountUsageVisibilityGrantRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid account usage visibility grant request")
+		return
+	}
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok || subject.UserID <= 0 {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	grant, err := h.service.CreateAccountUsageVisibilityGrant(c.Request.Context(), service.AccountUsageVisibilityGrantInput{
+		Scope:       req.Scope,
+		GroupID:     req.GroupID,
+		UserID:      req.UserID,
+		AccountID:   req.AccountID,
+		ActorUserID: subject.UserID,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Created(c, grant)
+}
+
+// DeleteUsageVisibilityGrant DELETE /api/v1/admin/account-allocations/usage-visibility-grants/:id
+func (h *AccountAllocationHandler) DeleteUsageVisibilityGrant(c *gin.Context) {
+	if h == nil || h.service == nil {
+		response.InternalError(c, "Account allocation service unavailable")
+		return
+	}
+	grantID, ok := parsePositivePathID(c, "id")
+	if !ok {
+		return
+	}
+	if err := h.service.DeleteAccountUsageVisibilityGrant(c.Request.Context(), grantID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"message": "deleted"})
 }
 
 func parsePositivePathID(c *gin.Context, key string) (int64, bool) {

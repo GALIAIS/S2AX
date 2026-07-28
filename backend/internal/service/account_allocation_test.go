@@ -146,26 +146,33 @@ func TestListUserVisibleAccountsMasksEmailsAndSeparatesUsageScopes(t *testing.T)
 		"credentials":            "must-not-leak",
 	})
 	require.NoError(t, err)
-	mock.ExpectQuery(`(?s)WITH shared_accounts AS .*FROM user_subscriptions us.*FROM user_allowed_groups uag.*ul\.group_id = aa\.group_id`).
+	mock.ExpectQuery(`(?s)WITH shared_accounts AS .*FROM account_usage_visibility_grants visibility.*FROM user_subscriptions us.*FROM user_allowed_groups uag.*ul\.group_id = aa\.group_id`).
 		WithArgs(int64(7)).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"source", "group_id", "group_name", "subscription_type", "account_name", "platform", "account_type", "concurrency",
+			"source", "usage_detail_access", "account_id", "group_id", "group_name", "subscription_type", "account_name", "platform", "account_type", "concurrency",
 			"account_status", "schedulable", "rate_limit_reset_at", "expires_at", "auto_pause_on_expired", "overload_until",
 			"temp_unschedulable_until", "session_window_end", "account_extra", "assigned_at", "request_count", "total_tokens", "last_activity_at",
 			"account_cost", "user_cost",
 		}).
 			AddRow(
-				"dedicated", int64(4), "team-private", "subscription", "private@example.com", "openai", "oauth", 3,
+				"dedicated", "assignment", int64(104), int64(4), "team-private", "subscription", "private@example.com", "openai", "oauth", 3,
 				StatusActive, true, nil, nil, true, nil, nil, nil, dedicatedExtra, assignedAt, int64(8), int64(1234), lastActivityAt, 2.09, 1.69,
 			).
 			AddRow(
-				"dedicated", int64(6), "subscriber-pool", "subscription", "subscriber@example.com", "openai", "oauth", 4,
-				StatusActive, true, nil, nil, true, nil, nil, nil, []byte(`{}`), nil, int64(13), int64(3456), lastActivityAt, nil, nil,
+				"dedicated", "group", int64(106), int64(6), "subscriber-pool", "subscription", "subscriber@example.com", "openai", "oauth", 4,
+				StatusActive, true, nil, nil, true, nil, nil, nil, dedicatedExtra, nil, int64(13), int64(3456), lastActivityAt, nil, nil,
 			).
 			AddRow(
-				"public", int64(5), "open-pool", "standard", "alice@example.com", "anthropic", "apikey", 2,
+				"public", "direct", int64(105), int64(5), "open-pool", "standard", "alice@example.com", "anthropic", "apikey", 2,
 				StatusActive, true, futureCooldown, nil, true, nil, nil, nil, []byte(`{}`), nil, int64(21), int64(5678), nil, nil, nil,
 			))
+	mock.ExpectQuery(`(?s)FROM unnest\(\$1::BIGINT\[\], \$2::BIGINT\[\], \$3::TIMESTAMPTZ\[\]\).*WITH ORDINALITY.*usage\.group_id = requested\.group_id`).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"ordinality", "requests", "tokens", "cost", "standard_cost", "user_cost",
+		}).
+			AddRow(1, int64(63), int64(1_600_000), 0.65, 0.60, 0.65).
+			AddRow(2, int64(1900), int64(254_000_000), 223.26, 220.10, 223.26))
 
 	svc := NewAccountAllocationService(db, nil)
 	overview, err := svc.ListUserVisibleAccounts(context.Background(), 7)
@@ -176,6 +183,7 @@ func TestListUserVisibleAccountsMasksEmailsAndSeparatesUsageScopes(t *testing.T)
 	require.Equal(t, AccountAllocationVisibleSourceDedicated, dedicated.Source)
 	require.Equal(t, "p***e@example.com", dedicated.AccountName)
 	require.True(t, dedicated.AccountNameMasked)
+	require.Equal(t, AccountAllocationUsageDetailAccessAssignment, dedicated.UsageDetailAccess)
 	require.Equal(t, AccountAllocationVisibleUsageScopePersonalLease, dedicated.Usage.Scope)
 	require.NotNil(t, dedicated.AssignedAt)
 	require.NotNil(t, dedicated.LastActivityAt)
@@ -187,6 +195,7 @@ func TestListUserVisibleAccountsMasksEmailsAndSeparatesUsageScopes(t *testing.T)
 	require.NotNil(t, dedicated.UpstreamQuota)
 	require.NotNil(t, dedicated.UpstreamQuota.FiveHour)
 	require.InDelta(t, 35, dedicated.UpstreamQuota.FiveHour.Utilization, 0.00001)
+	require.Nil(t, dedicated.UpstreamQuota.FiveHour.WindowStats)
 	require.NotNil(t, dedicated.UpstreamQuota.SevenDay)
 	require.Equal(t, quotaSnapshotAt, *dedicated.UpstreamQuota.UpdatedAt)
 	require.Equal(t, "ready", dedicated.Status)
@@ -196,16 +205,28 @@ func TestListUserVisibleAccountsMasksEmailsAndSeparatesUsageScopes(t *testing.T)
 	require.Equal(t, AccountAllocationVisibleSourceDedicated, subscribed.Source)
 	require.Equal(t, "s***r@example.com", subscribed.AccountName)
 	require.True(t, subscribed.AccountNameMasked)
+	require.Equal(t, AccountAllocationUsageDetailAccessGroup, subscribed.UsageDetailAccess)
 	require.Equal(t, AccountAllocationVisibleUsageScopeRolling24h, subscribed.Usage.Scope)
 	require.Nil(t, subscribed.AssignedAt)
 	require.Nil(t, subscribed.Usage.AccountCost)
 	require.Nil(t, subscribed.Usage.UserCost)
-	require.Nil(t, subscribed.UpstreamQuota)
+	require.NotNil(t, subscribed.UpstreamQuota)
+	require.NotNil(t, subscribed.UpstreamQuota.FiveHour)
+	require.NotNil(t, subscribed.UpstreamQuota.FiveHour.WindowStats)
+	require.Equal(t, int64(63), subscribed.UpstreamQuota.FiveHour.WindowStats.Requests)
+	require.Equal(t, int64(1_600_000), subscribed.UpstreamQuota.FiveHour.WindowStats.Tokens)
+	require.InDelta(t, 0.65, subscribed.UpstreamQuota.FiveHour.WindowStats.Cost, 0.00001)
+	require.NotNil(t, subscribed.UpstreamQuota.SevenDay)
+	require.NotNil(t, subscribed.UpstreamQuota.SevenDay.WindowStats)
+	require.Equal(t, int64(1900), subscribed.UpstreamQuota.SevenDay.WindowStats.Requests)
+	require.Equal(t, int64(254_000_000), subscribed.UpstreamQuota.SevenDay.WindowStats.Tokens)
+	require.InDelta(t, 223.26, subscribed.UpstreamQuota.SevenDay.WindowStats.UserCost, 0.00001)
 
 	public := overview.Items[2]
 	require.Equal(t, AccountAllocationVisibleSourcePublic, public.Source)
 	require.Equal(t, "a***e@example.com", public.AccountName)
 	require.True(t, public.AccountNameMasked)
+	require.Equal(t, AccountAllocationUsageDetailAccessDirect, public.UsageDetailAccess)
 	require.Equal(t, AccountAllocationVisibleUsageScopeRolling24h, public.Usage.Scope)
 	require.Nil(t, public.AssignedAt)
 	require.Nil(t, public.LastActivityAt)
@@ -242,7 +263,7 @@ func TestAccountAllocationVisibleUpstreamQuotaUsesCachedSnapshotsOnly(t *testing
 		"codex_usage_updated_at": now.Add(-time.Minute).Format(time.RFC3339),
 	})
 	require.NoError(t, err)
-	openAIQuota := accountAllocationVisibleUpstreamQuota(AccountAllocationVisibleSourceDedicated, PlatformOpenAI, AccountTypeOAuth, nil, openAIExtra, now)
+	openAIQuota := accountAllocationVisibleUpstreamQuota(true, PlatformOpenAI, AccountTypeOAuth, nil, openAIExtra, now)
 	require.NotNil(t, openAIQuota)
 	require.NotNil(t, openAIQuota.FiveHour)
 	require.NotNil(t, openAIQuota.SevenDay)
@@ -255,15 +276,15 @@ func TestAccountAllocationVisibleUpstreamQuotaUsesCachedSnapshotsOnly(t *testing
 		"passive_usage_sampled_at":     now.Add(-2 * time.Minute).Format(time.RFC3339),
 	})
 	require.NoError(t, err)
-	anthropicQuota := accountAllocationVisibleUpstreamQuota(AccountAllocationVisibleSourceDedicated, PlatformAnthropic, AccountTypeOAuth, &fiveHourReset, anthropicExtra, now)
+	anthropicQuota := accountAllocationVisibleUpstreamQuota(true, PlatformAnthropic, AccountTypeOAuth, &fiveHourReset, anthropicExtra, now)
 	require.NotNil(t, anthropicQuota)
 	require.NotNil(t, anthropicQuota.FiveHour)
 	require.NotNil(t, anthropicQuota.SevenDay)
 	require.InDelta(t, 42, anthropicQuota.FiveHour.Utilization, 0.00001)
 	require.InDelta(t, 17, anthropicQuota.SevenDay.Utilization, 0.00001)
 
-	require.Nil(t, accountAllocationVisibleUpstreamQuota(AccountAllocationVisibleSourceDedicated, PlatformGemini, AccountTypeOAuth, nil, openAIExtra, now))
-	require.Nil(t, accountAllocationVisibleUpstreamQuota(AccountAllocationVisibleSourcePublic, PlatformOpenAI, AccountTypeOAuth, nil, openAIExtra, now))
+	require.Nil(t, accountAllocationVisibleUpstreamQuota(true, PlatformGemini, AccountTypeOAuth, nil, openAIExtra, now))
+	require.Nil(t, accountAllocationVisibleUpstreamQuota(false, PlatformOpenAI, AccountTypeOAuth, nil, openAIExtra, now))
 }
 
 func TestMaskAccountAllocationDisplayName(t *testing.T) {

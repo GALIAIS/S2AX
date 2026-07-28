@@ -54,6 +54,10 @@ const messages: Record<string, string> = {
   'accountAllocations.lastActivity': 'Recent activity',
   'accountAllocations.upstreamQuota': 'Upstream quota',
   'accountAllocations.cachedQuotaSnapshot': 'Cached snapshot',
+  'accountAllocations.usageDetailGrantedNoSnapshot': 'Authorized; no cached snapshot',
+  'accountAllocations.usageDetailAccess.assignment': 'Dedicated assignment',
+  'accountAllocations.usageDetailAccess.group': 'Group authorization',
+  'accountAllocations.usageDetailAccess.direct': 'Administrator authorization',
   'accountAllocations.leaseAccountCost': 'Lease account cost',
   'accountAllocations.leaseUserCost': 'Lease user cost',
   'accountAllocations.requests': 'requests',
@@ -102,7 +106,10 @@ vi.mock('vue-i18n', async () => {
 const AppLayoutStub = { template: '<div><slot /></div>' }
 const IconStub = { template: '<span aria-hidden="true" />' }
 const PlatformTypeBadgeStub = { props: ['platform', 'type'], template: '<span>{{ platform }} / {{ type }}</span>' }
-const UsageProgressBarStub = { props: ['label', 'utilization'], template: '<span data-test="quota-window">{{ label }} {{ utilization }}</span>' }
+const UsageProgressBarStub = {
+  props: ['label', 'utilization', 'windowStats'],
+  template: '<span data-test="quota-window">{{ label }} {{ utilization }} {{ windowStats?.requests ?? "" }} {{ windowStats?.tokens ?? "" }}</span>',
+}
 const SelectStub = {
   props: ['modelValue', 'options'],
   template: '<select :value="modelValue"><option v-for="option in options" :key="String(option.value)">{{ option.label }}</option></select>',
@@ -133,6 +140,20 @@ const visibleOverview = {
       status: 'ready',
       last_activity_at: '2026-07-23T11:55:00Z',
       usage: { scope: 'rolling_24h', request_count: 12, total_tokens: 3456 },
+      usage_detail_access: 'direct',
+      upstream_quota: {
+        updated_at: '2026-07-23T11:55:00Z',
+        five_hour: {
+          utilization: 51,
+          resets_at: '2026-07-23T15:00:00Z',
+          window_stats: { requests: 63, tokens: 1600000, cost: 0.65, user_cost: 0.65 },
+        },
+        seven_day: {
+          utilization: 18,
+          resets_at: '2026-07-30T10:00:00Z',
+          window_stats: { requests: 1900, tokens: 254000000, cost: 223.26, user_cost: 223.26 },
+        },
+      },
     },
     {
       view_key: 'visible-dedicated-1',
@@ -149,6 +170,7 @@ const visibleOverview = {
       rate_limit_reset_at: '2026-07-23T12:00:00Z',
       last_activity_at: null,
       usage: { scope: 'personal_lease', request_count: 8, total_tokens: 1234, account_cost: 2.09, user_cost: 1.69 },
+      usage_detail_access: 'assignment',
       upstream_quota: {
         updated_at: '2026-07-23T11:55:00Z',
         five_hour: { utilization: 35, resets_at: '2026-07-23T15:00:00Z' },
@@ -217,15 +239,20 @@ describe('AccountAllocationsView', () => {
     expect(listVisible).toHaveBeenCalledTimes(1)
   })
 
-  it('renders cached upstream quota only for the dedicated account', async () => {
+  it('renders cached upstream quota for direct and assignment authorization', async () => {
     const wrapper = mountView()
     await flushPromises()
 
     const gridButton = wrapper.findAll('button').find((button) => button.attributes('title') === 'Grid view')
     await gridButton!.trigger('click')
-    expect(wrapper.findAll('[data-test="quota-window"]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-test="quota-window"]')).toHaveLength(4)
+    expect(wrapper.text()).toContain('5h 51')
+    expect(wrapper.text()).toContain('63 1600000')
+    expect(wrapper.text()).toContain('1900 254000000')
+    expect(wrapper.text()).toContain('Administrator authorization')
     expect(wrapper.text()).toContain('5h 35')
     expect(wrapper.text()).toContain('7d 12')
+    expect(wrapper.text()).toContain('Dedicated assignment')
     expect(wrapper.text()).toContain('A $2.09')
     expect(wrapper.text()).toContain('U $1.69')
 

@@ -9,6 +9,7 @@
 1. 所有已登录用户都能看到活跃的公开分组及其未被独占租约占用的账号。
 2. 用户只有在具备当前分组访问资格时，才能看到属于自己的专属分配账号；订阅型分组还必须存在有效订阅。
 3. 用户可以像查看账号管理列表一样检索、筛选、切换行/网格视图和查看详情，但页面不存在任何账号操作入口。
+4. 管理员可为一个专属分组的合格用户整体开放缓存用量细节，也可只为一个用户开放一个可见账号的缓存用量细节。
 
 目录仅承担“可见性说明”，不改变 API Key 绑定、请求调度、订阅校验、账号分配或管理员控制面的既有规则。
 
@@ -16,11 +17,12 @@
 
 “能在目录中看到”与“能向该分组发起请求”是不同概念。目录不会授予 API 权限；网关和 API Key 仍按既有分组/订阅规则认证。
 
-| 账号来源 | 目录可见条件 | 用量口径 | 不可见条件 |
+| 账号来源 | 目录可见条件 | 基础用量口径 | 上游缓存用量细节 |
 | --- | --- | --- | --- |
-| 公开分组账号 | 分组活跃、未删除、`is_exclusive=false`、账号未删除且未被任何活跃分配租约占用 | 同一账号在同一分组的近 24 小时聚合 | 分组停用/删除、账号删除、账号正被任何用户独占分配 |
-| 标准专属分组分配 | 当前用户拥有活跃分配，分组和账号仍活跃，且用户仍被允许使用该专属分组 | 当前用户从本次分配开始的个人聚合 | 其他用户的分配、策略停用/删除、分组权限被回收 |
-| 订阅型专属分组分配 | 满足标准专属分配条件，并且当前用户有未过期的活跃订阅 | 当前用户从本次分配开始的个人聚合 | 订阅过期、暂停、删除或被撤销 |
+| 公开分组账号 | 分组活跃、未删除、`is_exclusive=false`、账号未删除且未被任何活跃分配租约占用 | 同一账号在同一分组的近 24 小时聚合 | 仅管理员建立“指定用户 + 分组 + 账号”授权后显示 |
+| 专属分组共享账号 | 用户仍具备专属分组权限或有效订阅，账号未被独占租约占用 | 同一账号在同一分组的近 24 小时聚合 | 专属分组整体授权或“指定用户 + 分组 + 账号”授权后显示 |
+| 标准专属分组分配 | 当前用户拥有活跃分配，分组和账号仍活跃，且用户仍被允许使用该专属分组 | 当前用户从本次分配开始的个人聚合 | 活跃分配自动显示 |
+| 订阅型专属分组分配 | 满足标准专属分配条件，并且当前用户有未过期的活跃订阅 | 当前用户从本次分配开始的个人聚合 | 活跃分配自动显示 |
 
 公开分组即使具有订阅计费属性，仍可作为公开目录条目展示；这满足“所有用户能看到公开分组”的产品定义。未订阅用户依然不能据此绑定 API Key 或绕过网关订阅校验。
 
@@ -46,6 +48,7 @@ GET /api/v1/account-allocations/visible
     {
       "view_key": "visible-dedicated-1",
       "source": "dedicated",
+      "usage_detail_access": "assignment",
       "group_id": 42,
       "group_name": "VIP OpenAI",
       "subscription_type": "subscription",
@@ -59,6 +62,21 @@ GET /api/v1/account-allocations/visible
         "scope": "personal_lease",
         "request_count": 128,
         "total_tokens": 345678
+      },
+      "upstream_quota": {
+        "updated_at": "2026-07-23T11:55:00Z",
+        "five_hour": {
+          "utilization": 35,
+          "resets_at": "2026-07-23T15:00:00Z",
+          "window_stats": {
+            "requests": 63,
+            "tokens": 1600000,
+            "cost": 0.65,
+            "standard_cost": 0.60,
+            "user_cost": 0.65
+          }
+        },
+        "seven_day": { "utilization": 12, "resets_at": "2026-07-30T10:00:00Z" }
       },
       "assigned_at": "2026-07-23T10:00:00Z"
     }
@@ -81,6 +99,14 @@ GET /api/v1/account-allocations/visible
 - 跨分组或跨用户的历史明细。
 
 `view_key` 仅为当前响应的前端渲染键，不包含或映射为账号 ID。
+
+`usage_detail_access` 只可能为：
+
+- `assignment`：当前用户自己的活跃专属分配；
+- `group`：管理员对当前专属分组整体授权；
+- `direct`：管理员对当前用户、分组和账号精确授权。
+
+`upstream_quota` 只投影服务端已经缓存的 5 小时和 7 天窗口，不返回原始供应商载荷，也不会因用户打开目录而请求上游。管理员建立分组或精确授权后，窗口可同时带有请求数、Token、账号口径费用、标准费用和用户口径费用；统计严格限定在授权分组内，由服务端一次批量聚合，不提供用户身份或逐用户拆分。没有缓存快照时仍返回授权来源，但不伪造百分比或窗口统计。
 
 ### 3.3 账号名称脱敏
 
@@ -109,6 +135,23 @@ ab@example.com    -> a***@example.com
 
 - `rolling_24h`：公开账号在**同一分组**内近 24 小时的聚合请求数和 Token 数，避免把该账号在其他分组的流量带入。
 - `personal_lease`：专属账号仅统计当前用户从本次分配开始至今的用量，避免新租约混入旧租约或共享池历史。
+
+### 3.5 管理员用量细节授权
+
+管理员在“账号分配控制 → 用量可见权限”管理两种授权：
+
+1. `exclusive_group`：只允许选择当前活跃的专属分组。授权动态作用于当前及以后获得该分组访问资格的用户；用户失去分组权限或订阅过期后，目录查询会立即停止返回该分组及其细节。
+2. `user_account`：绑定一个活跃用户、一个该用户当前可访问的分组和该分组中的一个账号。账号离开分组、被删除、被独占租约占用或用户失去分组访问资格后，授权不再产生可见结果。
+
+授权只放大“上游缓存用量细节”字段，不放大目录账号集合，也不改变 API Key、计费、路由、调度和订阅权限。删除授权立即生效。数据库使用形状约束和部分唯一索引阻止非法组合及重复授权。
+
+管理员接口：
+
+```text
+GET    /api/v1/admin/account-allocations/usage-visibility-grants
+POST   /api/v1/admin/account-allocations/usage-visibility-grants
+DELETE /api/v1/admin/account-allocations/usage-visibility-grants/:id
+```
 
 ## 4. 查询与一致性要求
 
@@ -190,6 +233,8 @@ ab@example.com    -> a***@example.com
 - 专属账号仅显示自己的分配期与分配时间；
 - 冷却与不可用状态优先级；
 - 不向 DTO 传递账号内部标识。
+- 专属分组整体授权与指定用户账号授权的输入形状、唯一性和访问资格；
+- 未授权账号不投影缓存配额，撤销授权后查询不再命中。
 
 前端验证应覆盖：
 
@@ -198,12 +243,18 @@ ab@example.com    -> a***@example.com
 - 行显示与网格显示切换及本地偏好恢复；
 - 脱敏标识、详情无操作按钮、移动端响应式呈现；
 - 公开账号和专属账号的统计口径标签。
+- 管理员授权入口、授权来源标签和无缓存快照状态。
 
 ## 8. 实现落点
 
 - 服务：`backend/internal/service/account_allocation.go`
+- 授权服务：`backend/internal/service/account_usage_visibility.go`
+- 数据库：`backend/migrations/306_account_usage_visibility_grants.sql`
+- 管理员接口：`backend/internal/handler/admin/account_allocation_handler.go`
 - 用户接口：`backend/internal/handler/account_allocation_handler.go`
 - 路由：`backend/internal/server/routes/user.go`
 - 前端 API：`frontend/src/api/accountAllocations.ts`
+- 管理员 API：`frontend/src/api/admin/accountAllocations.ts`
+- 管理员视图：`frontend/src/views/admin/AccountAllocationsView.vue`
 - 用户视图：`frontend/src/views/user/AccountAllocationsView.vue`
 - 多语言：`frontend/src/i18n/locales/{zh,en}/common.ts`

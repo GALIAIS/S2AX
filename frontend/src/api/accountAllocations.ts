@@ -1,17 +1,20 @@
 import { apiClient } from './client'
-import type { AccountPlatform, AccountType } from '@/types'
+import type { AccountPlatform, AccountType, WindowStats } from '@/types'
 
 export type AccountAllocationUserStatus = 'ready' | 'cooling' | 'unavailable'
 export type AccountAllocationVisibleSource = 'public' | 'dedicated'
 export type AccountAllocationVisibleUsageScope = 'rolling_24h' | 'personal_lease'
+export type AccountAllocationUsageDetailAccess = 'assignment' | 'group' | 'direct'
 
 export interface UserVisibleAccountQuotaWindow {
   utilization: number
   resets_at?: string | null
+  window_stats?: WindowStats | null
 }
 
-// Only active dedicated leases can receive this cached, read-only projection.
-// It is never fetched from the upstream provider by the user-facing page.
+// This cached, read-only projection requires an active dedicated lease or an
+// explicit administrator-managed visibility grant. The user page never probes
+// the upstream provider.
 export interface UserVisibleAccountUpstreamQuota {
   updated_at?: string | null
   five_hour?: UserVisibleAccountQuotaWindow | null
@@ -42,12 +45,13 @@ export interface UserAccountAllocation {
 
 // This is a separate, intentionally safe directory projection. account_name
 // is already masked on the server when it is an email address. Cached upstream
-// quota is included only after the backend proves an active dedicated lease;
+// quota is included only after the backend proves a lease or visibility grant;
 // never use this API to request or infer an account ID, credentials, proxy/IP
-// data, models, health errors, or another user's usage.
+// data, models, health errors, or a per-user usage breakdown.
 export interface UserVisibleAccount {
   view_key: string
   source: AccountAllocationVisibleSource
+  usage_detail_access?: AccountAllocationUsageDetailAccess
   group_id: number
   group_name: string
   subscription_type: string

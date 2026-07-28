@@ -167,6 +167,17 @@ const (
 	AccountAllocationVisibleSourceDedicated AccountAllocationVisibleSource = "dedicated"
 )
 
+// AccountAllocationUsageDetailAccess records the administrator-controlled
+// reason a cached upstream quota snapshot may be shown. It does not grant
+// group access, scheduling rights, or permission to query the provider.
+type AccountAllocationUsageDetailAccess string
+
+const (
+	AccountAllocationUsageDetailAccessAssignment AccountAllocationUsageDetailAccess = "assignment"
+	AccountAllocationUsageDetailAccessGroup      AccountAllocationUsageDetailAccess = "group"
+	AccountAllocationUsageDetailAccessDirect     AccountAllocationUsageDetailAccess = "direct"
+)
+
 // AccountAllocationVisibleUsageScope keeps a number meaningful without
 // exposing another user's individual usage. Public accounts expose an
 // aggregate for the same group in the last 24 hours; dedicated accounts only
@@ -178,12 +189,13 @@ const (
 	AccountAllocationVisibleUsageScopePersonalLease AccountAllocationVisibleUsageScope = "personal_lease"
 )
 
-// AccountAllocationVisibleQuotaWindow is a strictly whitelisted upstream
-// quota snapshot. It is only emitted for an active dedicated lease; public
-// pools never expose per-account quota state because it is a cross-user signal.
+// AccountAllocationVisibleQuotaWindow combines a strictly whitelisted cached
+// provider quota with optional group-scoped local aggregates. Local aggregates
+// are attached only for an explicit administrator-managed visibility grant.
 type AccountAllocationVisibleQuotaWindow struct {
-	Utilization float64    `json:"utilization"`
-	ResetsAt    *time.Time `json:"resets_at,omitempty"`
+	Utilization float64      `json:"utilization"`
+	ResetsAt    *time.Time   `json:"resets_at,omitempty"`
+	WindowStats *WindowStats `json:"window_stats,omitempty"`
 }
 
 // AccountAllocationVisibleUpstreamQuota contains cached, read-only upstream
@@ -199,17 +211,18 @@ type AccountAllocationVisibleUpstreamQuota struct {
 // projection. Account names are masked server-side when they are email
 // addresses. Do not add account IDs, assignment/policy IDs, credentials,
 // proxy/IP metadata, raw health errors, model lists, or cross-group usage.
-// Cached upstream quotas are deliberately limited to active dedicated leases.
+// Cached upstream quotas require an explicit UsageDetailAccess reason.
 type AccountAllocationVisibleAccount struct {
-	ViewKey           string                         `json:"view_key"`
-	Source            AccountAllocationVisibleSource `json:"source"`
-	GroupID           int64                          `json:"group_id"`
-	GroupName         string                         `json:"group_name"`
-	SubscriptionType  string                         `json:"subscription_type"`
-	AccountName       string                         `json:"account_name"`
-	AccountNameMasked bool                           `json:"account_name_masked"`
-	Platform          string                         `json:"platform"`
-	AccountType       string                         `json:"account_type"`
+	ViewKey           string                             `json:"view_key"`
+	Source            AccountAllocationVisibleSource     `json:"source"`
+	UsageDetailAccess AccountAllocationUsageDetailAccess `json:"usage_detail_access,omitempty"`
+	GroupID           int64                              `json:"group_id"`
+	GroupName         string                             `json:"group_name"`
+	SubscriptionType  string                             `json:"subscription_type"`
+	AccountName       string                             `json:"account_name"`
+	AccountNameMasked bool                               `json:"account_name_masked"`
+	Platform          string                             `json:"platform"`
+	AccountType       string                             `json:"account_type"`
 	Capacity          struct {
 		Concurrency int `json:"concurrency"`
 	} `json:"capacity"`
@@ -1133,6 +1146,24 @@ func (s *AccountAllocationService) ListUserVisibleAccounts(ctx context.Context, 
 		WITH shared_accounts AS (
 			SELECT
 				CASE WHEN g.is_exclusive THEN 'dedicated' ELSE 'public' END::text AS source,
+				CASE
+					WHEN EXISTS (
+						SELECT 1
+						FROM account_usage_visibility_grants visibility
+						WHERE visibility.grant_scope = 'user_account'
+							AND visibility.user_id = $1
+							AND visibility.group_id = g.id
+							AND visibility.account_id = a.id
+					) THEN 'direct'
+					WHEN g.is_exclusive = TRUE AND EXISTS (
+						SELECT 1
+						FROM account_usage_visibility_grants visibility
+						WHERE visibility.grant_scope = 'exclusive_group'
+							AND visibility.group_id = g.id
+					) THEN 'group'
+					ELSE ''
+				END::text AS usage_detail_access,
+				a.id AS account_id,
 				g.id AS group_id,
 				g.name AS group_name,
 				COALESCE(g.subscription_type, 'standard') AS subscription_type,
@@ -1211,6 +1242,24 @@ func (s *AccountAllocationService) ListUserVisibleAccounts(ctx context.Context, 
 		dedicated_accounts AS (
 			SELECT
 				'dedicated'::text AS source,
+				CASE
+					WHEN EXISTS (
+						SELECT 1
+						FROM account_usage_visibility_grants visibility
+						WHERE visibility.grant_scope = 'user_account'
+							AND visibility.user_id = $1
+							AND visibility.group_id = g.id
+							AND visibility.account_id = a.id
+					) THEN 'direct'
+					WHEN EXISTS (
+						SELECT 1
+						FROM account_usage_visibility_grants visibility
+						WHERE visibility.grant_scope = 'exclusive_group'
+							AND visibility.group_id = g.id
+					) THEN 'group'
+					ELSE 'assignment'
+				END::text AS usage_detail_access,
+				a.id AS account_id,
 				g.id AS group_id,
 				g.name AS group_name,
 				COALESCE(g.subscription_type, 'standard') AS subscription_type,
@@ -1298,6 +1347,8 @@ func (s *AccountAllocationService) ListUserVisibleAccounts(ctx context.Context, 
 		)
 		SELECT
 			source,
+			usage_detail_access,
+			account_id,
 			group_id,
 			group_name,
 			subscription_type,
@@ -1333,10 +1384,12 @@ func (s *AccountAllocationService) ListUserVisibleAccounts(ctx context.Context, 
 
 	publicGroups := make(map[int64]struct{})
 	dedicatedGroups := make(map[int64]struct{})
+	windowStatsRequests := make([]accountAllocationVisibleWindowStatsRequest, 0)
 	now := time.Now()
 	for rows.Next() {
 		var item AccountAllocationVisibleAccount
-		var source string
+		var accountID int64
+		var source, usageDetailAccess string
 		var accountStatus string
 		var schedulable bool
 		var rateLimitResetAt, expiresAt, overloadUntil, tempUnschedulableUntil, sessionWindowEnd, assignedAt, lastActivityAt sql.NullTime
@@ -1345,6 +1398,8 @@ func (s *AccountAllocationService) ListUserVisibleAccounts(ctx context.Context, 
 		var autoPauseOnExpired bool
 		if err := rows.Scan(
 			&source,
+			&usageDetailAccess,
+			&accountID,
 			&item.GroupID,
 			&item.GroupName,
 			&item.SubscriptionType,
@@ -1375,6 +1430,12 @@ func (s *AccountAllocationService) ListUserVisibleAccounts(ctx context.Context, 
 		if item.Source != AccountAllocationVisibleSourcePublic && item.Source != AccountAllocationVisibleSourceDedicated {
 			return nil, fmt.Errorf("scan user visible account directory: unknown source")
 		}
+		item.UsageDetailAccess = AccountAllocationUsageDetailAccess(usageDetailAccess)
+		switch item.UsageDetailAccess {
+		case "", AccountAllocationUsageDetailAccessAssignment, AccountAllocationUsageDetailAccessGroup, AccountAllocationUsageDetailAccessDirect:
+		default:
+			return nil, fmt.Errorf("scan user visible account directory: unknown usage detail access")
+		}
 		item.AccountName, item.AccountNameMasked = maskAccountAllocationDisplayName(item.AccountName)
 		item.LastActivityAt = timePointerFromNullTime(lastActivityAt)
 		if rateLimitResetAt.Valid {
@@ -1402,14 +1463,6 @@ func (s *AccountAllocationService) ListUserVisibleAccounts(ctx context.Context, 
 				item.Usage.Scope = AccountAllocationVisibleUsageScopePersonalLease
 				item.Usage.AccountCost = floatPointerFromNullFloat64(accountCost)
 				item.Usage.UserCost = floatPointerFromNullFloat64(userCost)
-				item.UpstreamQuota = accountAllocationVisibleUpstreamQuota(
-					item.Source,
-					item.Platform,
-					item.AccountType,
-					timePointerFromNullTime(sessionWindowEnd),
-					rawAccountExtra,
-					now,
-				)
 				value := assignedAt.Time
 				item.AssignedAt = &value
 			} else {
@@ -1422,6 +1475,37 @@ func (s *AccountAllocationService) ListUserVisibleAccounts(ctx context.Context, 
 			overview.Summary.PublicAccountCount++
 			publicGroups[item.GroupID] = struct{}{}
 		}
+		item.UpstreamQuota = accountAllocationVisibleUpstreamQuota(
+			item.UsageDetailAccess != "",
+			item.Platform,
+			item.AccountType,
+			timePointerFromNullTime(sessionWindowEnd),
+			rawAccountExtra,
+			now,
+		)
+		if item.UpstreamQuota != nil &&
+			(item.UsageDetailAccess == AccountAllocationUsageDetailAccessGroup ||
+				item.UsageDetailAccess == AccountAllocationUsageDetailAccessDirect) {
+			itemIndex := len(overview.Items)
+			if item.UpstreamQuota.FiveHour != nil {
+				windowStatsRequests = append(windowStatsRequests, accountAllocationVisibleWindowStatsRequest{
+					ItemIndex: itemIndex,
+					AccountID: accountID,
+					GroupID:   item.GroupID,
+					Window:    "five_hour",
+					StartTime: accountAllocationVisibleWindowStart(item.UpstreamQuota.FiveHour, 5*time.Hour, now),
+				})
+			}
+			if item.UpstreamQuota.SevenDay != nil {
+				windowStatsRequests = append(windowStatsRequests, accountAllocationVisibleWindowStatsRequest{
+					ItemIndex: itemIndex,
+					AccountID: accountID,
+					GroupID:   item.GroupID,
+					Window:    "seven_day",
+					StartTime: accountAllocationVisibleWindowStart(item.UpstreamQuota.SevenDay, 7*24*time.Hour, now),
+				})
+			}
+		}
 		if item.Status == "ready" {
 			overview.Summary.ReadyAccountCount++
 		}
@@ -1432,9 +1516,117 @@ func (s *AccountAllocationService) ListUserVisibleAccounts(ctx context.Context, 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate user visible account directory: %w", err)
 	}
+	if err := s.attachAccountAllocationVisibleWindowStats(ctx, overview.Items, windowStatsRequests); err != nil {
+		return nil, err
+	}
 	overview.Summary.PublicGroupCount = len(publicGroups)
 	overview.Summary.DedicatedGroupCount = len(dedicatedGroups)
 	return overview, nil
+}
+
+type accountAllocationVisibleWindowStatsRequest struct {
+	ItemIndex int
+	AccountID int64
+	GroupID   int64
+	Window    string
+	StartTime time.Time
+}
+
+func accountAllocationVisibleWindowStart(window *AccountAllocationVisibleQuotaWindow, duration time.Duration, now time.Time) time.Time {
+	if window != nil && window.ResetsAt != nil && now.Before(*window.ResetsAt) {
+		return window.ResetsAt.Add(-duration)
+	}
+	return now.Add(-duration)
+}
+
+func (s *AccountAllocationService) attachAccountAllocationVisibleWindowStats(
+	ctx context.Context,
+	items []AccountAllocationVisibleAccount,
+	requests []accountAllocationVisibleWindowStatsRequest,
+) error {
+	if len(requests) == 0 {
+		return nil
+	}
+
+	accountIDs := make([]int64, len(requests))
+	groupIDs := make([]int64, len(requests))
+	startTimes := make([]time.Time, len(requests))
+	for index, request := range requests {
+		accountIDs[index] = request.AccountID
+		groupIDs[index] = request.GroupID
+		startTimes[index] = request.StartTime
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			requested.ordinality,
+			COUNT(usage.id),
+			COALESCE(SUM(
+				usage.input_tokens + usage.output_tokens + usage.cache_creation_tokens + usage.cache_read_tokens
+			), 0),
+			COALESCE(SUM(
+				COALESCE(usage.account_stats_cost, usage.total_cost) * COALESCE(usage.account_rate_multiplier, 1)
+			), 0),
+			COALESCE(SUM(usage.total_cost), 0),
+			COALESCE(SUM(usage.actual_cost), 0)
+		FROM unnest($1::BIGINT[], $2::BIGINT[], $3::TIMESTAMPTZ[])
+			WITH ORDINALITY AS requested(account_id, group_id, start_time, ordinality)
+		LEFT JOIN usage_logs usage
+			ON usage.account_id = requested.account_id
+			AND usage.group_id = requested.group_id
+			AND usage.created_at >= requested.start_time
+		GROUP BY requested.ordinality
+		ORDER BY requested.ordinality`,
+		pq.Array(accountIDs),
+		pq.Array(groupIDs),
+		pq.Array(startTimes),
+	)
+	if err != nil {
+		return fmt.Errorf("load account directory window statistics: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var ordinal int
+		var stats WindowStats
+		if err := rows.Scan(
+			&ordinal,
+			&stats.Requests,
+			&stats.Tokens,
+			&stats.Cost,
+			&stats.StandardCost,
+			&stats.UserCost,
+		); err != nil {
+			return fmt.Errorf("scan account directory window statistics: %w", err)
+		}
+		if ordinal <= 0 || ordinal > len(requests) {
+			return fmt.Errorf("scan account directory window statistics: invalid ordinal")
+		}
+		request := requests[ordinal-1]
+		if request.ItemIndex < 0 || request.ItemIndex >= len(items) {
+			return fmt.Errorf("scan account directory window statistics: invalid item index")
+		}
+		quota := items[request.ItemIndex].UpstreamQuota
+		if quota == nil {
+			continue
+		}
+		switch request.Window {
+		case "five_hour":
+			if quota.FiveHour != nil {
+				quota.FiveHour.WindowStats = &stats
+			}
+		case "seven_day":
+			if quota.SevenDay != nil {
+				quota.SevenDay.WindowStats = &stats
+			}
+		default:
+			return fmt.Errorf("scan account directory window statistics: unknown window")
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate account directory window statistics: %w", err)
+	}
+	return nil
 }
 
 func timePointerFromNullTime(value sql.NullTime) *time.Time {
@@ -1455,17 +1647,17 @@ func floatPointerFromNullFloat64(value sql.NullFloat64) *float64 {
 
 // accountAllocationVisibleUpstreamQuota projects only two rolling windows from
 // an already persisted provider snapshot. Reading the account directory must
-// never trigger an upstream quota probe, and public pools must never expose a
-// per-account signal that could reveal other users' activity.
+// never trigger an upstream quota probe; visibility is decided before this
+// helper is called by an assignment or administrator-managed grant.
 func accountAllocationVisibleUpstreamQuota(
-	source AccountAllocationVisibleSource,
+	allowed bool,
 	platform string,
 	accountType string,
 	sessionWindowEnd *time.Time,
 	rawExtra []byte,
 	now time.Time,
 ) *AccountAllocationVisibleUpstreamQuota {
-	if source != AccountAllocationVisibleSourceDedicated || len(rawExtra) == 0 {
+	if !allowed || len(rawExtra) == 0 {
 		return nil
 	}
 

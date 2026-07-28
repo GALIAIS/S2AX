@@ -19,8 +19,12 @@ const api = vi.hoisted(() => ({
   assign: vi.fn(),
   release: vi.fn(),
   listEvents: vi.fn(),
+  listUsageVisibilityGrants: vi.fn(),
+  createUsageVisibilityGrant: vi.fn(),
+  removeUsageVisibilityGrant: vi.fn(),
   listUsers: vi.fn(),
   listGroups: vi.fn(),
+  listAccounts: vi.fn(),
 }))
 
 const notifications = vi.hoisted(() => ({
@@ -46,9 +50,13 @@ vi.mock('@/api/admin', () => ({
       assign: api.assign,
       release: api.release,
       listEvents: api.listEvents,
+      listUsageVisibilityGrants: api.listUsageVisibilityGrants,
+      createUsageVisibilityGrant: api.createUsageVisibilityGrant,
+      removeUsageVisibilityGrant: api.removeUsageVisibilityGrant,
     },
     users: { list: api.listUsers },
     groups: { getAll: api.listGroups },
+    accounts: { list: api.listAccounts },
   },
 }))
 
@@ -180,8 +188,10 @@ describe('Admin AccountAllocationsView', () => {
     api.listAssignments.mockResolvedValue([])
     api.listCandidates.mockResolvedValue([])
     api.listEvents.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 })
+    api.listUsageVisibilityGrants.mockResolvedValue([])
     api.listUsers.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 50 })
     api.listGroups.mockResolvedValue([])
+    api.listAccounts.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 50 })
     api.reconcileAll.mockResolvedValue({
       processed: 2,
       items: [
@@ -262,5 +272,37 @@ describe('Admin AccountAllocationsView', () => {
     resolveSecondRequest?.({ items: [], total: 21, page: 2, page_size: 20 })
     await flushPromises()
     expect(wrapper.findAll('[data-test="policy-row"]')).toHaveLength(0)
+  })
+
+  it('opens the usage visibility control and lists active grants', async () => {
+    api.listGroups.mockResolvedValue([
+      { id: 12, name: 'Dedicated pool', platform: 'openai', is_exclusive: true },
+    ])
+    api.listUsageVisibilityGrants.mockResolvedValue([
+      {
+        id: 71,
+        scope: 'exclusive_group',
+        group_id: 12,
+        group_name: 'Dedicated pool',
+        created_by: 1,
+        created_at: '2026-07-28T10:00:00Z',
+      },
+    ])
+
+    const wrapper = mountView()
+    await flushPromises()
+    const manageButton = wrapper.findAll('button').find((button) =>
+      button.text().includes('admin.accountAllocations.usageVisibility.manage')
+    )
+    expect(manageButton).toBeDefined()
+
+    await manageButton!.trigger('click')
+    await flushPromises()
+
+    expect(api.listUsageVisibilityGrants).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-test="dialog"]').text()).toContain('Dedicated pool')
+    expect(wrapper.get('[data-test="dialog"]').text()).toContain(
+      'admin.accountAllocations.usageVisibility.allEligibleUsers'
+    )
   })
 })
