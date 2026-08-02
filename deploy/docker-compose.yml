@@ -19,6 +19,8 @@ services:
     image: ${SUB2API_IMAGE:-ghcr.io/galiais/s2ax:edge}
     container_name: sub2api
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     ulimits:
       nofile:
         soft: 100000

@@ -104,6 +104,20 @@ account_allocation:
   max_desired_count: 50
 
 # =============================================================================
+# WebAuthn / Passkey Configuration
+# WebAuthn / 通行密钥配置
+# =============================================================================
+webauthn:
+  enabled: false
+  rp_display_name: "Sub2API"
+  # Relying Party ID, normally the site's domain without scheme or port.
+  # 依赖方 ID，通常为不含协议和端口的网站域名。
+  rp_id: ""
+  # Allowed browser origins, for example ["https://api.example.com"].
+  # 允许的浏览器来源，例如 ["https://api.example.com"]。
+  rp_origins: []
+
+# =============================================================================
 # Run Mode Configuration
 # 运行模式配置
 # =============================================================================
@@ -158,6 +172,8 @@ security:
       - "api.openai.com"
       - "api.anthropic.com"
       - "api.kimi.com"
+      - "api.moonshot.ai"
+      - "api.moonshot.cn"
       - "open.bigmodel.cn"
       - "api.minimaxi.com"
       - "generativelanguage.googleapis.com"
@@ -436,7 +452,10 @@ gateway:
     fallback_window_seconds: 60
     fallback_ttl_seconds: 600
   # OpenAI Responses SSE 代理断流熔断；按 proxy_id 跨账号隔离，仅影响下一次调度。
+  # 隔离是偏好而非硬闸：当全部候选账号都在被隔离代理下时自动放行（fail-open），
+  # 不会因熔断而返回"无可用账号"。3 秒内的并发断流合并为一次失败事件。
   openai_proxy_stream_circuit:
+    disabled: false
     failure_threshold: 2
     window_seconds: 60
     ttl_seconds: 600

@@ -2,7 +2,9 @@
   <div class="mb-4 flex min-h-12 flex-wrap items-stretch justify-between gap-3 rounded-lg bg-primary-50 p-3 sm:items-center dark:bg-primary-900/20">
     <div class="flex min-w-0 flex-wrap items-center gap-2">
       <span class="text-sm font-medium text-primary-900 dark:text-primary-100">
-        {{ selectedIds.length > 0
+        {{ allResultsSelected
+          ? t('admin.accounts.bulkActions.selectedAll', { count: selectedIds.length })
+          : selectedIds.length > 0
           ? t('admin.accounts.bulkActions.selected', { count: selectedIds.length })
           : t('admin.accounts.bulkEdit.title') }}
       </span>
@@ -13,6 +15,19 @@
         <span class="text-primary-300 dark:text-primary-700" aria-hidden="true">·</span>
         <button type="button" class="text-xs font-medium text-primary-700 hover:text-primary-800 dark:text-primary-300 dark:hover:text-primary-200" @click="emit('clear')">
           {{ t('admin.accounts.bulkActions.clear') }}
+        </button>
+      </template>
+      <template v-if="!allResultsSelected && totalResults > selectedIds.length">
+        <span v-if="selectedIds.length > 0" class="text-primary-300 dark:text-primary-700" aria-hidden="true">·</span>
+        <button
+          type="button"
+          class="text-xs font-medium text-primary-700 hover:text-primary-800 disabled:cursor-not-allowed disabled:opacity-60 dark:text-primary-300 dark:hover:text-primary-200"
+          :disabled="selectingAll"
+          @click="emit('select-all-results')"
+        >
+          {{ selectingAll
+            ? t('admin.accounts.bulkActions.selectingAll')
+            : t('admin.accounts.bulkActions.selectAllResults', { count: totalResults }) }}
         </button>
       </template>
     </div>
@@ -71,13 +86,19 @@ import { onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 
-defineProps<{ selectedIds: number[] }>()
+defineProps<{
+  selectedIds: number[]
+  totalResults: number
+  selectingAll: boolean
+  allResultsSelected: boolean
+}>()
 const emit = defineEmits<{
   (e: 'delete'): void
   (e: 'edit-selected'): void
   (e: 'edit-filtered'): void
   (e: 'clear'): void
   (e: 'select-page'): void
+  (e: 'select-all-results'): void
   (e: 'toggle-schedulable', value: boolean): void
   (e: 'reset-status'): void
   (e: 'refresh-token'): void

@@ -77,21 +77,22 @@ type StorageEndpoint struct {
 }
 
 type storageConfig struct {
-	Enabled         bool              `json:"enabled"`
-	BlockingEnabled bool              `json:"blocking_enabled"`
-	StorePassEvents bool              `json:"store_pass_events"`
-	FailureMode     FailureMode       `json:"failure_mode"`
-	Strategy        string            `json:"strategy"`
-	WorkerCount     int               `json:"worker_count"`
-	QueueCapacity   int               `json:"queue_capacity"`
-	Scanners        []string          `json:"scanners"`
-	AllGroups       bool              `json:"all_groups"`
-	GroupIDs        []int64           `json:"group_ids"`
-	Endpoints       []StorageEndpoint `json:"endpoints"`
-	ConfigVersion   int64             `json:"config_version"`
-	UpdatedAt       time.Time         `json:"updated_at"`
-	UpdatedBy       int64             `json:"updated_by"`
-	ChangeSummary   string            `json:"change_summary"`
+	Enabled                bool              `json:"enabled"`
+	BlockingEnabled        bool              `json:"blocking_enabled"`
+	BlockingLatestTurnOnly bool              `json:"blocking_latest_turn_only"`
+	StorePassEvents        bool              `json:"store_pass_events"`
+	FailureMode            FailureMode       `json:"failure_mode"`
+	Strategy               string            `json:"strategy"`
+	WorkerCount            int               `json:"worker_count"`
+	QueueCapacity          int               `json:"queue_capacity"`
+	Scanners               []string          `json:"scanners"`
+	AllGroups              bool              `json:"all_groups"`
+	GroupIDs               []int64           `json:"group_ids"`
+	Endpoints              []StorageEndpoint `json:"endpoints"`
+	ConfigVersion          int64             `json:"config_version"`
+	UpdatedAt              time.Time         `json:"updated_at"`
+	UpdatedBy              int64             `json:"updated_by"`
+	ChangeSummary          string            `json:"change_summary"`
 }
 
 type ActiveEndpoint struct {
@@ -106,25 +107,27 @@ type ActiveEndpoint struct {
 	TimeoutMS    int
 	InputLimit   int
 	Enabled      bool
+	TokenInvalid bool
 }
 
 type ActiveConfig struct {
-	RiskControlEnabled bool
-	Enabled            bool
-	BlockingEnabled    bool
-	StorePassEvents    bool
-	FailureMode        FailureMode
-	Strategy           string
-	WorkerCount        int
-	QueueCapacity      int
-	Scanners           []string
-	AllGroups          bool
-	GroupIDs           []int64
-	Endpoints          []ActiveEndpoint
-	ConfigVersion      int64
-	UpdatedAt          time.Time
-	UpdatedBy          int64
-	ChangeSummary      string
+	RiskControlEnabled     bool
+	Enabled                bool
+	BlockingEnabled        bool
+	BlockingLatestTurnOnly bool
+	StorePassEvents        bool
+	FailureMode            FailureMode
+	Strategy               string
+	WorkerCount            int
+	QueueCapacity          int
+	Scanners               []string
+	AllGroups              bool
+	GroupIDs               []int64
+	Endpoints              []ActiveEndpoint
+	ConfigVersion          int64
+	UpdatedAt              time.Time
+	UpdatedBy              int64
+	ChangeSummary          string
 }
 
 type PublicEndpoint struct {
@@ -143,22 +146,23 @@ type PublicEndpoint struct {
 }
 
 type PublicConfig struct {
-	Enabled         bool             `json:"enabled"`
-	BlockingEnabled bool             `json:"blocking_enabled"`
-	StorePassEvents bool             `json:"store_pass_events"`
-	FailureMode     FailureMode      `json:"failure_mode"`
-	EffectiveMode   Mode             `json:"effective_mode"`
-	Strategy        string           `json:"strategy"`
-	WorkerCount     int              `json:"worker_count"`
-	QueueCapacity   int              `json:"queue_capacity"`
-	Scanners        []string         `json:"scanners"`
-	AllGroups       bool             `json:"all_groups"`
-	GroupIDs        []int64          `json:"group_ids"`
-	Endpoints       []PublicEndpoint `json:"endpoints"`
-	ConfigVersion   int64            `json:"config_version"`
-	UpdatedAt       time.Time        `json:"updated_at"`
-	UpdatedBy       int64            `json:"updated_by"`
-	ChangeSummary   string           `json:"change_summary"`
+	Enabled                bool             `json:"enabled"`
+	BlockingEnabled        bool             `json:"blocking_enabled"`
+	BlockingLatestTurnOnly bool             `json:"blocking_latest_turn_only"`
+	StorePassEvents        bool             `json:"store_pass_events"`
+	FailureMode            FailureMode      `json:"failure_mode"`
+	EffectiveMode          Mode             `json:"effective_mode"`
+	Strategy               string           `json:"strategy"`
+	WorkerCount            int              `json:"worker_count"`
+	QueueCapacity          int              `json:"queue_capacity"`
+	Scanners               []string         `json:"scanners"`
+	AllGroups              bool             `json:"all_groups"`
+	GroupIDs               []int64          `json:"group_ids"`
+	Endpoints              []PublicEndpoint `json:"endpoints"`
+	ConfigVersion          int64            `json:"config_version"`
+	UpdatedAt              time.Time        `json:"updated_at"`
+	UpdatedBy              int64            `json:"updated_by"`
+	ChangeSummary          string           `json:"change_summary"`
 }
 
 type UpdateEndpoint struct {
@@ -177,34 +181,36 @@ type UpdateEndpoint struct {
 }
 
 type UpdateConfigRequest struct {
-	ExpectedConfigVersion int64            `json:"expected_config_version" binding:"required"`
-	Enabled               bool             `json:"enabled"`
-	BlockingEnabled       bool             `json:"blocking_enabled"`
-	StorePassEvents       bool             `json:"store_pass_events"`
-	FailureMode           FailureMode      `json:"failure_mode"`
-	Strategy              string           `json:"strategy"`
-	WorkerCount           int              `json:"worker_count"`
-	QueueCapacity         int              `json:"queue_capacity"`
-	Scanners              []string         `json:"scanners"`
-	AllGroups             bool             `json:"all_groups"`
-	GroupIDs              []int64          `json:"group_ids"`
-	Endpoints             []UpdateEndpoint `json:"endpoints"`
+	ExpectedConfigVersion  int64            `json:"expected_config_version" binding:"required"`
+	Enabled                bool             `json:"enabled"`
+	BlockingEnabled        bool             `json:"blocking_enabled"`
+	BlockingLatestTurnOnly bool             `json:"blocking_latest_turn_only"`
+	StorePassEvents        bool             `json:"store_pass_events"`
+	FailureMode            FailureMode      `json:"failure_mode"`
+	Strategy               string           `json:"strategy"`
+	WorkerCount            int              `json:"worker_count"`
+	QueueCapacity          int              `json:"queue_capacity"`
+	Scanners               []string         `json:"scanners"`
+	AllGroups              bool             `json:"all_groups"`
+	GroupIDs               []int64          `json:"group_ids"`
+	Endpoints              []UpdateEndpoint `json:"endpoints"`
 }
 
 func DefaultStorageConfig() storageConfig {
 	return storageConfig{
-		Enabled:         false,
-		BlockingEnabled: false,
-		StorePassEvents: false,
-		FailureMode:     DefaultFailureMode,
-		Strategy:        "priority",
-		WorkerCount:     DefaultWorkerCount,
-		QueueCapacity:   DefaultQueueCapacity,
-		Scanners:        append([]string(nil), AllScannerIDs...),
-		AllGroups:       true,
-		GroupIDs:        []int64{},
-		Endpoints:       []StorageEndpoint{},
-		ConfigVersion:   1,
+		Enabled:                false,
+		BlockingEnabled:        false,
+		BlockingLatestTurnOnly: false,
+		StorePassEvents:        false,
+		FailureMode:            DefaultFailureMode,
+		Strategy:               "priority",
+		WorkerCount:            DefaultWorkerCount,
+		QueueCapacity:          DefaultQueueCapacity,
+		Scanners:               append([]string(nil), AllScannerIDs...),
+		AllGroups:              true,
+		GroupIDs:               []int64{},
+		Endpoints:              []StorageEndpoint{},
+		ConfigVersion:          1,
 	}
 }
 
@@ -404,7 +410,23 @@ func (cfg ActiveConfig) EnabledEndpoints() []ActiveEndpoint {
 	return result
 }
 
-func PublicFromStorage(cfg storageConfig, riskControlEnabled bool) PublicConfig {
+// InvalidTokenEndpointIDs lists endpoints whose stored token could not be
+// decrypted with the current encryption key.
+func (cfg ActiveConfig) InvalidTokenEndpointIDs() []string {
+	ids := make([]string, 0)
+	for _, ep := range cfg.Endpoints {
+		if ep.TokenInvalid {
+			ids = append(ids, ep.ID)
+		}
+	}
+	return ids
+}
+
+func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenEndpointIDs []string) PublicConfig {
+	invalid := make(map[string]struct{}, len(invalidTokenEndpointIDs))
+	for _, id := range invalidTokenEndpointIDs {
+		invalid[id] = struct{}{}
+	}
 	scanners := append([]string{}, cfg.Scanners...)
 	groupIDs := append([]int64{}, cfg.GroupIDs...)
 	endpoints := make([]PublicEndpoint, 0, len(cfg.Endpoints))
@@ -413,6 +435,9 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool) PublicConfig 
 		status := "missing"
 		if hasToken {
 			status = "configured"
+			if _, ok := invalid[ep.ID]; ok {
+				status = "invalid"
+			}
 		}
 		endpoints = append(endpoints, PublicEndpoint{
 			ID: ep.ID, Name: ep.Name, Protocol: ep.Protocol, Adapter: normalizeDetectorAdapter(ep.Adapter), BaseURL: ep.BaseURL,
@@ -423,7 +448,7 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool) PublicConfig 
 	}
 	active := ActiveConfig{RiskControlEnabled: riskControlEnabled, Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled}
 	return PublicConfig{
-		Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled, StorePassEvents: cfg.StorePassEvents,
+		Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled, BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly, StorePassEvents: cfg.StorePassEvents,
 		FailureMode: cfg.FailureMode, EffectiveMode: active.EffectiveMode(), Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: scanners, AllGroups: cfg.AllGroups,
 		GroupIDs: groupIDs, Endpoints: endpoints, ConfigVersion: cfg.ConfigVersion,
@@ -434,7 +459,8 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool) PublicConfig 
 func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor SecretEncryptor) (ActiveConfig, error) {
 	active := ActiveConfig{
 		RiskControlEnabled: riskControlEnabled, Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled,
-		StorePassEvents: cfg.StorePassEvents, FailureMode: cfg.FailureMode, Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
+		BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly,
+		StorePassEvents:        cfg.StorePassEvents, FailureMode: cfg.FailureMode, Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: append([]string(nil), cfg.Scanners...), AllGroups: cfg.AllGroups,
 		GroupIDs: append([]int64(nil), cfg.GroupIDs...), ConfigVersion: cfg.ConfigVersion,
 		UpdatedAt: cfg.UpdatedAt, UpdatedBy: cfg.UpdatedBy, ChangeSummary: cfg.ChangeSummary,
@@ -442,20 +468,28 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 	}
 	for _, ep := range cfg.Endpoints {
 		token := ""
+		tokenInvalid := false
 		if ep.TokenCiphertext != "" {
 			if encryptor == nil {
 				return ActiveConfig{}, fmt.Errorf("prompt audit secret encryptor unavailable")
 			}
 			plain, err := encryptor.Decrypt(ep.TokenCiphertext)
 			if err != nil {
-				return ActiveConfig{}, fmt.Errorf("decrypt prompt audit endpoint token %q: %w", ep.ID, err)
+				// An undecryptable token (encryption key changed or regenerated)
+				// must not take the whole config down: admins would otherwise be
+				// locked out of the real config version and unable to recover
+				// (issue #4887). Keep the ciphertext persisted, but exclude the
+				// endpoint from runtime use until the token is re-entered.
+				tokenInvalid = true
+			} else {
+				token = plain
 			}
-			token = plain
 		}
 		active.Endpoints = append(active.Endpoints, ActiveEndpoint{
 			ID: ep.ID, Name: ep.Name, Protocol: ep.Protocol, Adapter: normalizeDetectorAdapter(ep.Adapter), BaseURL: ep.BaseURL, Model: ep.Model,
 			NetworkScope: ep.NetworkScope,
-			Token:        token, TimeoutMS: ep.TimeoutMS, InputLimit: ep.InputLimit, Enabled: ep.Enabled,
+			Token:        token, TimeoutMS: ep.TimeoutMS, InputLimit: ep.InputLimit,
+			Enabled: ep.Enabled && !tokenInvalid, TokenInvalid: tokenInvalid,
 		})
 	}
 	return active, nil
@@ -509,15 +543,16 @@ func defaultDetectorModel(adapter string) string {
 
 func changeSummary(cfg storageConfig) string {
 	summary := struct {
-		Enabled         bool   `json:"enabled"`
-		BlockingEnabled bool   `json:"blocking_enabled"`
-		StorePassEvents bool   `json:"store_pass_events"`
-		EndpointCount   int    `json:"endpoint_count"`
-		ScannerCount    int    `json:"scanner_count"`
-		AllGroups       bool   `json:"all_groups"`
-		GroupCount      int    `json:"group_count"`
-		GroupHash       string `json:"group_hash"`
-	}{cfg.Enabled, cfg.BlockingEnabled, cfg.StorePassEvents, len(cfg.Endpoints), len(cfg.Scanners), cfg.AllGroups, len(cfg.GroupIDs), ""}
+		Enabled                bool   `json:"enabled"`
+		BlockingEnabled        bool   `json:"blocking_enabled"`
+		BlockingLatestTurnOnly bool   `json:"blocking_latest_turn_only"`
+		StorePassEvents        bool   `json:"store_pass_events"`
+		EndpointCount          int    `json:"endpoint_count"`
+		ScannerCount           int    `json:"scanner_count"`
+		AllGroups              bool   `json:"all_groups"`
+		GroupCount             int    `json:"group_count"`
+		GroupHash              string `json:"group_hash"`
+	}{cfg.Enabled, cfg.BlockingEnabled, cfg.BlockingLatestTurnOnly, cfg.StorePassEvents, len(cfg.Endpoints), len(cfg.Scanners), cfg.AllGroups, len(cfg.GroupIDs), ""}
 	rawGroups, _ := json.Marshal(cfg.GroupIDs)
 	digest := sha256.Sum256(rawGroups)
 	summary.GroupHash = hex.EncodeToString(digest[:])

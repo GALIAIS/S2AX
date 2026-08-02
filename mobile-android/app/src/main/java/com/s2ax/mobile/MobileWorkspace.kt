@@ -83,7 +83,6 @@ enum class MobileDataArea(
 ) {
     Service("服务与用量", "请求、模型、可用渠道与配额", MobileGlyph.Usage),
     Assets("资产与订阅", "余额、兑换、订单与订阅状态", MobileGlyph.Wallet),
-    City("城市模拟", "共享世界、角色与实时运行态", MobileGlyph.City),
     Operations("运营监控", "实时流量、告警、日志与审计", MobileGlyph.Operations),
     Resources("资源调度", "账号、用户、分组与上游资源", MobileGlyph.Resources),
     Commerce("计费与增长", "货币、订单、订阅与邀请返利", MobileGlyph.Commerce),
@@ -94,7 +93,6 @@ enum class MobileGlyph {
     Overview,
     Usage,
     Wallet,
-    City,
     Operations,
     Resources,
     Commerce,
@@ -139,15 +137,6 @@ data class ExplorerPayload(
 }
 
 object MobileDataModules {
-    val cityWorlds = MobileDataModule(
-        id = "city-worlds",
-        title = "共享世界",
-        description = "选择可进入的城市世界，查看时间、角色和运行态。",
-        area = MobileDataArea.City,
-        path = "/city/worlds",
-        glyph = MobileGlyph.City,
-    )
-
     private val common = listOf(
         MobileDataModule("usage-snapshot", "使用快照", "请求、Token、耗时与模型使用概览。", MobileDataArea.Service, "/usage/dashboard/snapshot-v2", MobileGlyph.Overview),
         MobileDataModule("usage-records", "使用记录", "分页查看自己的请求、模型、费用与处理状态。", MobileDataArea.Service, "/usage", MobileGlyph.Usage, paged = true),
@@ -173,7 +162,6 @@ object MobileDataModules {
         MobileDataModule("payment-orders", "我的订单", "查看支付、取消与退款状态。", MobileDataArea.Assets, "/payment/orders/my", MobileGlyph.Commerce, paged = true),
         MobileDataModule("redeem-history", "兑换记录", "查看已经提交的兑换码和结果。", MobileDataArea.Assets, "/redeem/history", MobileGlyph.Wallet, paged = true),
         MobileDataModule("affiliate", "邀请返利", "查看邀请链接、返利与可转余额。", MobileDataArea.Assets, "/user/aff", MobileGlyph.Commerce),
-        cityWorlds,
     )
 
     private val admin = listOf(
@@ -245,102 +233,20 @@ object MobileDataModules {
         MobileDataModule("compliance", "部署合规", "当前部署确认与合规状态。", MobileDataArea.Governance, "/admin/compliance", MobileGlyph.Governance, adminOnly = true),
         MobileDataModule("system-version", "版本信息", "当前部署版本和构建信息。", MobileDataArea.Governance, "/admin/system/version", MobileGlyph.Governance, adminOnly = true),
         MobileDataModule("system-updates", "版本更新", "当前项目更新源的可用版本。", MobileDataArea.Governance, "/admin/system/check-updates", MobileGlyph.Governance, adminOnly = true),
-        MobileDataModule("city-clock-health", "城市时钟健康", "NTP 对齐、世界时钟和实时服务健康。", MobileDataArea.City, "/admin/city/clock-health", MobileGlyph.City, adminOnly = true),
-        MobileDataModule("city-visual-packs", "城市视觉包", "像素世界素材包、版本和发布状态。", MobileDataArea.City, "/admin/city/visual-packs", MobileGlyph.City, adminOnly = true),
-        MobileDataModule("city-visual-policies", "视觉发布策略", "世界视觉包的生效策略与范围。", MobileDataArea.City, "/admin/city/visual-release-policies", MobileGlyph.City, adminOnly = true),
     )
 
     fun visible(isAdmin: Boolean): List<MobileDataModule> = if (isAdmin) common + admin else common
 
     fun byId(id: String, isAdmin: Boolean): MobileDataModule? = visible(isAdmin).firstOrNull { it.id == id }
 
-    fun cityWorldModules(worldID: Long, isAdmin: Boolean): List<MobileDataModule> {
-        val prefix = "/city/worlds/$worldID"
-        val modules = listOf(
-            MobileDataModule("city-$worldID-summary", "世界总览", "世界设定、成员和当前经济摘要。", MobileDataArea.City, prefix, MobileGlyph.City, section = "世界总览"),
-            MobileDataModule("city-$worldID-clock", "实时日历", "原子时间、世界时钟和日历状态。", MobileDataArea.City, "$prefix/clock", MobileGlyph.City, section = "世界总览"),
-            MobileDataModule("city-$worldID-timeline", "时间线", "当前世界的时间帧、阶段和实时推进状态。", MobileDataArea.City, "$prefix/timeline", MobileGlyph.City, section = "世界总览"),
-            MobileDataModule("city-$worldID-members", "世界成员", "可进入当前共享世界的成员与角色权限。", MobileDataArea.City, "$prefix/members", MobileGlyph.People, section = "世界总览"),
-            MobileDataModule("city-$worldID-state", "物理状态", "地形、建筑、实体和空间状态。", MobileDataArea.City, "$prefix/state", MobileGlyph.City, section = "世界总览"),
-            MobileDataModule("city-$worldID-calendar", "城市日历", "城市日期、天气周期和公共时段状态。", MobileDataArea.City, "$prefix/calendar", MobileGlyph.City, section = "世界总览"),
-            MobileDataModule("city-$worldID-population", "人口与家庭", "人口、迁移、家庭和就业摘要。", MobileDataArea.City, "$prefix/population", MobileGlyph.People, section = "世界总览"),
-            MobileDataModule("city-$worldID-markets", "城市市场", "市场、资源、价格和结算状态。", MobileDataArea.City, "$prefix/markets", MobileGlyph.Commerce, section = "世界总览"),
-            MobileDataModule("city-$worldID-land", "土地与分区", "土地属性、地块分区和使用状态。", MobileDataArea.City, "$prefix/land", MobileGlyph.City, section = "世界总览"),
-            MobileDataModule("city-$worldID-development", "城市发展", "建筑开发、升级和空间演化状态。", MobileDataArea.City, "$prefix/development", MobileGlyph.City, section = "世界总览"),
-            MobileDataModule("city-$worldID-trial-balance", "经济试算", "世界经济试算与平衡状态。", MobileDataArea.City, "$prefix/trial-balance", MobileGlyph.Commerce, section = "世界总览"),
-
-            MobileDataModule("city-$worldID-ruleset", "空间规则集", "当前世界适用的空间生成规则和参数。", MobileDataArea.City, "$prefix/spatial/ruleset", MobileGlyph.Governance, section = "地图与空间"),
-            MobileDataModule("city-$worldID-overmap", "区域总览地图", "城市区域、道路、地标与宏观空间布局。", MobileDataArea.City, "$prefix/spatial/overmap", MobileGlyph.City, section = "地图与空间"),
-            MobileDataModule("city-$worldID-map", "开放世界地图", "道路、地块、建筑和空间生成验证。", MobileDataArea.City, "$prefix/open-world/map", MobileGlyph.City, section = "地图与空间"),
-            MobileDataModule("city-$worldID-generation", "世界生成报告", "生成器版本、地形风格和规划结果。", MobileDataArea.City, "$prefix/open-world/generation", MobileGlyph.City, section = "地图与空间"),
-            MobileDataModule("city-$worldID-verification", "地图校验", "道路、建筑、服务和空间约束的校验结果。", MobileDataArea.City, "$prefix/open-world/verification", MobileGlyph.Governance, section = "地图与空间"),
-            MobileDataModule("city-$worldID-chunks", "空间区块", "当前世界已生成区块及其层级状态。", MobileDataArea.City, "$prefix/spatial/chunks", MobileGlyph.City, paged = true, section = "地图与空间"),
-            MobileDataModule("city-$worldID-spatial-changes", "空间变更", "地图、地块与设施的空间变更流水。", MobileDataArea.City, "$prefix/spatial/changes", MobileGlyph.City, paged = true, section = "地图与空间"),
-            MobileDataModule("city-$worldID-portals", "通行节点", "建筑入口、传送节点和可达状态。", MobileDataArea.City, "$prefix/navigation/portals", MobileGlyph.City, section = "地图与空间"),
-            MobileDataModule("city-$worldID-navigation-intents", "导航意图", "角色移动意图、目标与路径状态。", MobileDataArea.City, "$prefix/navigation/intents", MobileGlyph.People, paged = true, section = "地图与空间"),
-            MobileDataModule("city-$worldID-navigation-reservations", "路径预约", "通道、道路与空间资源预约状态。", MobileDataArea.City, "$prefix/navigation/reservations", MobileGlyph.City, paged = true, section = "地图与空间"),
-
-            MobileDataModule("city-$worldID-services", "公共服务总览", "设施、需求、连接和服务供给。", MobileDataArea.City, "$prefix/open-world/services", MobileGlyph.Resources, section = "服务与基础设施"),
-            MobileDataModule("city-$worldID-service-catalog", "服务目录", "当前世界可用的公共服务类型与规则。", MobileDataArea.City, "$prefix/services/catalog", MobileGlyph.Resources, section = "服务与基础设施"),
-            MobileDataModule("city-$worldID-facilities", "服务设施", "设施容量、状态、位置和服务范围。", MobileDataArea.City, "$prefix/services/facilities", MobileGlyph.Resources, paged = true, section = "服务与基础设施"),
-            MobileDataModule("city-$worldID-demands", "服务需求", "居民、企业与区域的服务需求。", MobileDataArea.City, "$prefix/services/demands", MobileGlyph.Resources, paged = true, section = "服务与基础设施"),
-            MobileDataModule("city-$worldID-connections", "服务连接", "服务网络连接、覆盖和传输状态。", MobileDataArea.City, "$prefix/services/connections", MobileGlyph.Resources, paged = true, section = "服务与基础设施"),
-            MobileDataModule("city-$worldID-service-network", "物理服务网络", "网络节点、边、流量和当前运行态。", MobileDataArea.City, "$prefix/services/networks", MobileGlyph.Resources, paged = true, section = "服务与基础设施"),
-            MobileDataModule("city-$worldID-network-diagnostics", "网络诊断", "服务网络容量、拥塞和异常诊断。", MobileDataArea.City, "$prefix/services/networks/diagnostics", MobileGlyph.Operations, section = "服务与基础设施"),
-            MobileDataModule("city-$worldID-infrastructure", "基础设施", "道路、管网、能源等基础设施状态。", MobileDataArea.City, "$prefix/open-world/infrastructure", MobileGlyph.Resources, section = "服务与基础设施"),
-            MobileDataModule("city-$worldID-capacity", "有效容量", "基础设施和服务的有效可用容量。", MobileDataArea.City, "$prefix/open-world/effective-capacity", MobileGlyph.Resources, section = "服务与基础设施"),
-            MobileDataModule("city-$worldID-service-operations", "设施运行", "设施运营、排班、事件和预算动作。", MobileDataArea.City, "$prefix/services/lifecycle/operations", MobileGlyph.Operations, paged = true, section = "服务与基础设施"),
-            MobileDataModule("city-$worldID-service-incidents", "设施事件", "服务中断、事故和处置记录。", MobileDataArea.City, "$prefix/services/lifecycle/incidents", MobileGlyph.Operations, paged = true, section = "服务与基础设施"),
-
-            MobileDataModule("city-$worldID-mobility", "通勤与流动", "出行、到达、OD 与通勤生命周期。", MobileDataArea.City, "$prefix/open-world/mobility", MobileGlyph.Operations, section = "交通与经济"),
-            MobileDataModule("city-$worldID-mobility-arrivals", "到达状态", "出行到达、等待和拥堵状态。", MobileDataArea.City, "$prefix/open-world/mobility/arrivals", MobileGlyph.Operations, section = "交通与经济"),
-            MobileDataModule("city-$worldID-mobility-od", "OD 流向", "起终点、交通需求和路径流向。", MobileDataArea.City, "$prefix/open-world/mobility/od", MobileGlyph.Operations, section = "交通与经济"),
-            MobileDataModule("city-$worldID-commutes", "通勤记录", "角色通勤、出行方式和工作地匹配。", MobileDataArea.City, "$prefix/open-world/commutes", MobileGlyph.People, paged = true, section = "交通与经济"),
-            MobileDataModule("city-$worldID-supply", "供应链", "企业货运、结算和承运恢复。", MobileDataArea.City, "$prefix/open-world/supply-chain", MobileGlyph.Resources, section = "交通与经济"),
-            MobileDataModule("city-$worldID-freight", "企业货运", "企业货运任务、运输进度和收货状态。", MobileDataArea.City, "$prefix/open-world/enterprise-freight", MobileGlyph.Resources, paged = true, section = "交通与经济"),
-            MobileDataModule("city-$worldID-freight-batches", "货运批次", "批次、装载、运力和配送状态。", MobileDataArea.City, "$prefix/open-world/freight-batches", MobileGlyph.Resources, paged = true, section = "交通与经济"),
-            MobileDataModule("city-$worldID-freight-settlements", "货运结算", "货运成本、结算与状态变更。", MobileDataArea.City, "$prefix/open-world/freight-settlements", MobileGlyph.Commerce, paged = true, section = "交通与经济"),
-            MobileDataModule("city-$worldID-carrier-recovery", "承运恢复", "承运资源恢复、失败重试和可用性。", MobileDataArea.City, "$prefix/open-world/carrier-recovery", MobileGlyph.Operations, paged = true, section = "交通与经济"),
-            MobileDataModule("city-$worldID-carrier-commerce", "承运商业", "承运订单、收益和交易状态。", MobileDataArea.City, "$prefix/open-world/carrier-commerce", MobileGlyph.Commerce, paged = true, section = "交通与经济"),
-            MobileDataModule("city-$worldID-resource-operations", "资源操作", "城市资源生产、消耗和调拨流水。", MobileDataArea.City, "$prefix/resource-operations", MobileGlyph.Resources, paged = true, section = "交通与经济"),
-            MobileDataModule("city-$worldID-market-settlements", "市场结算", "市场成交、价格和资源结算流水。", MobileDataArea.City, "$prefix/market-settlements", MobileGlyph.Commerce, paged = true, section = "交通与经济"),
-            MobileDataModule("city-$worldID-population-movements", "人口流动", "居民移动、迁移和生活地点变更。", MobileDataArea.City, "$prefix/population-movements", MobileGlyph.People, paged = true, section = "交通与经济"),
-            MobileDataModule("city-$worldID-population-migrations", "人口迁移", "迁入、迁出和迁移原因。", MobileDataArea.City, "$prefix/population-migrations", MobileGlyph.People, paged = true, section = "交通与经济"),
-            MobileDataModule("city-$worldID-household-movements", "家庭变动", "家庭搬迁、合并、分离和住房变化。", MobileDataArea.City, "$prefix/household-movements", MobileGlyph.People, paged = true, section = "交通与经济"),
-
-            MobileDataModule("city-$worldID-runtime-catalog", "角色运行目录", "当前世界的 Agent、角色类型和运行能力。", MobileDataArea.City, "$prefix/runtime/catalog", MobileGlyph.People, section = "角色与规则"),
-            MobileDataModule("city-$worldID-actors", "世界角色", "NPC、用户角色和 Agent 运行状态。", MobileDataArea.City, "$prefix/runtime/actors", MobileGlyph.People, paged = true, section = "角色与规则"),
-            MobileDataModule("city-$worldID-rules", "城市规则", "法规、案件和当前执行状态。", MobileDataArea.City, "$prefix/runtime/rules", MobileGlyph.Governance, paged = true, section = "角色与规则"),
-            MobileDataModule("city-$worldID-cases", "规则案件", "规则命中、调查、处罚与复核状态。", MobileDataArea.City, "$prefix/runtime/cases", MobileGlyph.Governance, paged = true, section = "角色与规则"),
-            MobileDataModule("city-$worldID-events", "共享角色事件", "共享世界发生的角色事件和公共影响。", MobileDataArea.City, "$prefix/realtime/events", MobileGlyph.Notices, paged = true, section = "角色与规则"),
-            MobileDataModule("city-$worldID-character", "我的角色", "当前角色、人格 Agent 和生活状态。", MobileDataArea.City, "$prefix/realtime/character", MobileGlyph.People, section = "角色与规则"),
-            MobileDataModule("city-$worldID-character-events", "角色事件", "角色的经历、奖励和待处理事件。", MobileDataArea.City, "$prefix/realtime/character/events", MobileGlyph.Notices, paged = true, section = "角色与规则"),
-            MobileDataModule("city-$worldID-character-relations", "角色关系", "关系网络、亲密度、信任和社交事件。", MobileDataArea.City, "$prefix/realtime/character/relations", MobileGlyph.People, paged = true, section = "角色与规则"),
-            MobileDataModule("city-$worldID-character-case-reviews", "案件复核", "与当前角色有关的案件复核和裁定。", MobileDataArea.City, "$prefix/realtime/character/case-reviews", MobileGlyph.Governance, paged = true, section = "角色与规则"),
-            MobileDataModule("city-$worldID-character-case-process", "案件流程", "当前角色案件的执行流程与阶段。", MobileDataArea.City, "$prefix/realtime/character/case-process", MobileGlyph.Governance, paged = true, section = "角色与规则"),
-            MobileDataModule("city-$worldID-character-tasks", "角色任务", "角色 Agent 的当前任务与完成状态。", MobileDataArea.City, "$prefix/realtime/character/tasks", MobileGlyph.People, paged = true, section = "角色与规则"),
-
-            MobileDataModule("city-$worldID-events-history", "世界事件记录", "系统事件、经济变化和公共影响的历史记录。", MobileDataArea.City, "$prefix/events", MobileGlyph.Notices, paged = true, section = "历史与审计"),
-            MobileDataModule("city-$worldID-journals", "世界日志", "城市世界的决策、变更和实时日志。", MobileDataArea.City, "$prefix/journals", MobileGlyph.Notices, paged = true, section = "历史与审计"),
-            MobileDataModule("city-$worldID-snapshots", "世界快照", "可复查的世界状态快照和时间点。", MobileDataArea.City, "$prefix/snapshots", MobileGlyph.City, paged = true, section = "历史与审计"),
-        )
-        return if (isAdmin) modules + listOf(
-            MobileDataModule("city-$worldID-engine", "世界引擎", "引擎版本、实时调度、升级和回放基础信息。", MobileDataArea.City, "$prefix/engine", MobileGlyph.Operations, adminOnly = true, section = "管理员运行控制"),
-            MobileDataModule("city-$worldID-commands", "世界命令", "管理员提交的模拟命令与执行结果。", MobileDataArea.City, "$prefix/commands", MobileGlyph.Operations, adminOnly = true, paged = true, section = "管理员运行控制"),
-            MobileDataModule("city-$worldID-upgrades", "升级任务", "世界版本升级和迁移任务状态。", MobileDataArea.City, "$prefix/upgrade-runs", MobileGlyph.Operations, adminOnly = true, paged = true, section = "管理员运行控制"),
-            MobileDataModule("city-$worldID-replays", "回放任务", "世界回放和恢复任务运行记录。", MobileDataArea.City, "$prefix/replay-runs", MobileGlyph.Operations, adminOnly = true, paged = true, section = "管理员运行控制"),
-            MobileDataModule("city-$worldID-recoveries", "恢复任务", "世界状态恢复、校验和执行记录。", MobileDataArea.City, "$prefix/recovery-runs", MobileGlyph.Operations, adminOnly = true, paged = true, section = "管理员运行控制"),
-        ) else modules
-    }
 }
 
 @Composable
 internal fun WorkspaceScreen(viewModel: MainViewModel) {
     var route by rememberSaveable { mutableStateOf<String?>(null) }
-    BackHandler(enabled = route != null && route != "city") { route = null }
+    BackHandler(enabled = route != null) { route = null }
     when (route) {
         "account" -> AccountCenterScreen(viewModel, onBack = { route = null })
-        "city" -> CityWorkspace(viewModel, onBack = { route = null })
         null -> WorkspaceHome(viewModel, onOpen = { route = it })
         else -> {
             val module = MobileDataModules.byId(route.orEmpty(), viewModel.isAdmin)
@@ -376,7 +282,7 @@ private fun WorkspaceHome(viewModel: MainViewModel, onOpen: (String) -> Unit) {
                     onValueChange = { search = it },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("搜索功能或数据") },
-                    placeholder = { Text("如：订单、风控、模型、城市…") },
+                    placeholder = { Text("如：订单、风控、模型…") },
                     singleLine = true,
                     trailingIcon = {
                         Text(
@@ -388,34 +294,21 @@ private fun WorkspaceHome(viewModel: MainViewModel, onOpen: (String) -> Unit) {
                 )
             }
             MobileDataArea.entries.forEach { area ->
-                val areaModules = matchedModules.filter { it.area == area && it.id != MobileDataModules.cityWorlds.id }
-                val showCityEntry = area == MobileDataArea.City && (search.isBlank() || listOf("共享城市", "城市模拟", "世界").any { it.contains(search.trim(), ignoreCase = true) })
-                if (areaModules.isNotEmpty() || showCityEntry) {
+                val areaModules = matchedModules.filter { it.area == area }
+                if (areaModules.isNotEmpty()) {
                     item { AreaHeader(area) }
-                    if (showCityEntry) {
-                        item {
-                            ModuleCard(
-                                module = MobileDataModules.cityWorlds,
-                                onClick = { onOpen("city") },
-                                highlight = true,
-                            )
-                        }
-                    }
                     items(areaModules, key = { it.id }) { module ->
                         ModuleCard(module = module, onClick = { onOpen(module.id) })
                     }
                 }
             }
-            if (matchedModules.isEmpty() && !showCitySearchMatch(search)) {
+            if (matchedModules.isEmpty()) {
                 item { WorkspaceEmpty("没有匹配的数据模块") }
             }
             item { Spacer(Modifier.height(8.dp)) }
         }
     }
 }
-
-private fun showCitySearchMatch(search: String): Boolean = search.isBlank() || listOf("共享城市", "城市模拟", "世界")
-    .any { it.contains(search.trim(), ignoreCase = true) }
 
 @Composable
 private fun WorkspaceHero(user: UserSummary, isAdmin: Boolean) {
@@ -470,7 +363,6 @@ private fun WorkspaceQuickAccess(onOpen: (String) -> Unit) {
             Text("常用操作", modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             WorkspaceQuickRow("账户与公告", "查看个人资料、公告并安全退出", MobileGlyph.Notices) { onOpen("account") }
             WorkspaceQuickRow("使用快照", "快速检查当前请求、费用与模型使用", MobileGlyph.Overview) { onOpen("usage-snapshot") }
-            WorkspaceQuickRow("共享城市", "进入可参与的城市世界和角色数据", MobileGlyph.City) { onOpen("city") }
         }
     }
 }
@@ -1019,144 +911,10 @@ private fun WorkspaceEmpty(message: String) {
     }
 }
 
-@Composable
-private fun CityWorkspace(viewModel: MainViewModel, onBack: () -> Unit) {
-    var selectedWorldID by rememberSaveable { mutableStateOf<Long?>(null) }
-    var selectedWorldName by rememberSaveable { mutableStateOf("") }
-    var selectedModuleID by rememberSaveable { mutableStateOf<String?>(null) }
-    BackHandler(enabled = selectedModuleID != null) { selectedModuleID = null }
-    BackHandler(enabled = selectedWorldID != null && selectedModuleID == null) {
-        selectedWorldID = null
-        selectedWorldName = ""
-    }
-    BackHandler(enabled = selectedWorldID == null) { onBack() }
-    when {
-        selectedWorldID == null -> CityWorldPicker(viewModel, onBack) { id, name ->
-            selectedWorldID = id
-            selectedWorldName = name
-        }
-        selectedModuleID == null -> CityWorldHub(
-            worldID = selectedWorldID ?: return,
-            worldName = selectedWorldName,
-            isAdmin = viewModel.isAdmin,
-            onBack = { selectedWorldID = null },
-            onOpen = { selectedModuleID = it },
-        )
-        else -> {
-            val module = MobileDataModules.cityWorldModules(selectedWorldID ?: return, viewModel.isAdmin)
-                .firstOrNull { it.id == selectedModuleID }
-            if (module == null) selectedModuleID = null
-            else DataExplorerScreen(viewModel, module, onBack = { selectedModuleID = null })
-        }
-    }
-}
-
-@Composable
-private fun CityWorldPicker(viewModel: MainViewModel, onBack: () -> Unit, onSelect: (Long, String) -> Unit) {
-    LaunchedEffect(Unit) { viewModel.loadExplorer(MobileDataModules.cityWorlds) }
-    val state = viewModel.explorer
-    val data = state.data?.takeIf { it.module.id == MobileDataModules.cityWorlds.id }
-    val worlds = data?.let { previewRows(it.payload) }.orEmpty().mapNotNull { row ->
-        val id = row.longValue("id") ?: row.longValue("world_id") ?: return@mapNotNull null
-        id to (row.stringValue("name") ?: row.stringValue("world_name") ?: "世界 #$id")
-    }
-    val edge = responsiveEdgePadding()
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-        LazyColumn(
-            modifier = Modifier.fillMaxWidth().widthIn(max = 900.dp),
-            contentPadding = PaddingValues(horizontal = edge, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item {
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
-                    Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("共享城市世界", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                        Text("所有成员进入同一实时世界。选择世界后可查看城市、角色与 Agent 状态。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.74f))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            TextButton(onClick = onBack) { Text("返回工作台") }
-                            TextButton(onClick = { viewModel.loadExplorer(MobileDataModules.cityWorlds, force = true) }) { Text("刷新世界") }
-                        }
-                    }
-                }
-            }
-            if (state.loading && data == null) item { WorkspaceLoading("正在读取可进入的世界…") }
-            state.error?.let { item { WorkspaceError(it) } }
-            if (data != null && worlds.isEmpty()) item { WorkspaceEmpty("当前账号尚未加入任何城市世界") }
-            items(worlds, key = { it.first }) { (id, name) ->
-                Card(modifier = Modifier.fillMaxWidth().clickable { onSelect(id, name) }) {
-                    Row(Modifier.fillMaxWidth().padding(17.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Icon(Icons.Outlined.Home, null, tint = MaterialTheme.colorScheme.primary)
-                        Column(Modifier.weight(1f)) {
-                            Text(name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                            Text("世界编号 $id · 共享实时模拟", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Text("进入", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CityWorldHub(worldID: Long, worldName: String, isAdmin: Boolean, onBack: () -> Unit, onOpen: (String) -> Unit) {
-    val modules = remember(worldID, isAdmin) { MobileDataModules.cityWorldModules(worldID, isAdmin) }
-    var search by rememberSaveable(worldID) { mutableStateOf("") }
-    val matchedModules = remember(modules, search) {
-        if (search.isBlank()) modules else modules.filter { module ->
-            listOf(module.title, module.description, module.section)
-                .any { value -> value.contains(search.trim(), ignoreCase = true) }
-        }
-    }
-    val sections = matchedModules.groupBy { it.section.ifBlank { "世界数据" } }
-    val edge = responsiveEdgePadding()
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-        LazyColumn(
-            modifier = Modifier.fillMaxWidth().widthIn(max = 900.dp),
-            contentPadding = PaddingValues(horizontal = edge, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item {
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-                    Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(worldName.ifBlank { "城市世界 #$worldID" }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                        Text("世界 #$worldID · 数据将来自同一实时模拟实例。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f))
-                        TextButton(onClick = onBack, modifier = Modifier.align(Alignment.Start)) { Text("切换世界") }
-                    }
-                }
-            }
-            item {
-                OutlinedTextField(
-                    value = search,
-                    onValueChange = { search = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("搜索世界数据") },
-                    placeholder = { Text("地图、角色、市场、服务、回放…") },
-                    singleLine = true,
-                    trailingIcon = { Text("${matchedModules.size}", style = MaterialTheme.typography.labelMedium) },
-                )
-            }
-            sections.forEach { (section, sectionModules) ->
-                item {
-                    Text(
-                        section,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                }
-                items(sectionModules, key = { it.id }) { module -> ModuleCard(module, onClick = { onOpen(module.id) }) }
-            }
-            if (matchedModules.isEmpty()) item { WorkspaceEmpty("没有匹配的世界数据") }
-        }
-    }
-}
-
 private fun MobileGlyph.icon(): ImageVector = when (this) {
     MobileGlyph.Overview -> Icons.Outlined.Home
     MobileGlyph.Usage -> Icons.Outlined.QueryStats
     MobileGlyph.Wallet -> Icons.Outlined.AccountBalanceWallet
-    MobileGlyph.City -> Icons.Outlined.Home
     MobileGlyph.Operations -> Icons.Outlined.WarningAmber
     MobileGlyph.Resources -> Icons.Outlined.AccountTree
     MobileGlyph.Commerce -> Icons.Outlined.AccountBalanceWallet
@@ -1257,7 +1015,7 @@ private fun previewEntries(obj: JSONObject): List<Pair<String, Any?>> {
     return entries.sortedWith(compareBy({ preferred.indexOf(it.first).let { index -> if (index < 0) Int.MAX_VALUE else index } }, { it.first }))
 }
 
-private fun previewRecordTitle(row: JSONObject, index: Int): String = listOf("name", "title", "email", "username", "model", "code", "world_name", "id")
+private fun previewRecordTitle(row: JSONObject, index: Int): String = listOf("name", "title", "email", "username", "model", "code", "id")
     .firstNotNullOfOrNull { row.stringValue(it) }
     ?: "记录 #${index + 1}"
 
@@ -1443,8 +1201,6 @@ private val fieldLabels = mapOf(
     "enabled" to "已启用",
     "currency_code" to "货币代码",
     "currency_name" to "货币名称",
-    "world_id" to "世界编号",
-    "world_name" to "世界名称",
     "request_id" to "请求编号",
     "account_id" to "账号编号",
     "user_id" to "用户编号",
@@ -1534,7 +1290,6 @@ private val fieldLabels = mapOf(
     "started_at" to "开始时间",
     "finished_at" to "完成时间",
     "occurred_at" to "发生时间",
-    "world_time" to "世界时间",
     "population" to "人口",
     "market" to "市场",
     "price" to "价格",

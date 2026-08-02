@@ -29,7 +29,6 @@ class ExplorerPayloadTest {
         assertEquals(adminModules.size, adminModules.map { it.id }.toSet().size)
         assertTrue(adminModules.all { it.path.startsWith('/') && it.title.isNotBlank() && it.description.isNotBlank() })
         assertFalse(userModules.any { it.adminOnly })
-        assertTrue(MobileDataModules.cityWorldModules(worldID = 42, isAdmin = true).all { it.section.isNotBlank() })
     }
 
     @Test
@@ -49,7 +48,6 @@ class ExplorerPayloadTest {
             "/admin/risk-control/status",
             "/admin/settings",
             "/admin/system/version",
-            "/admin/city/visual-packs",
         )
 
         assertTrue(expectedPaths.all(availablePaths::contains))

@@ -27,6 +27,7 @@ type contentModerationConfigRequest struct {
 	Model                *string             `json:"model"`
 	AuditPrompt          *string             `json:"audit_prompt"`
 	ConfidenceThreshold  *float64            `json:"confidence_threshold"`
+	ProxyID              *int64              `json:"proxy_id"`
 	APIKey               *string             `json:"api_key"`
 	APIKeys              *[]string           `json:"api_keys"`
 	APIKeysMode          string              `json:"api_keys_mode"`
@@ -72,6 +73,7 @@ type contentModerationAPIKeyTestRequest struct {
 	AuditPrompt         string   `json:"audit_prompt"`
 	ConfidenceThreshold float64  `json:"confidence_threshold"`
 	TimeoutMS           int      `json:"timeout_ms"`
+	ProxyID             *int64   `json:"proxy_id"`
 	Prompt              string   `json:"prompt"`
 	Images              []string `json:"images"`
 }
@@ -103,6 +105,7 @@ func (h *ContentModerationHandler) UpdateConfig(c *gin.Context) {
 		Model:                          req.Model,
 		AuditPrompt:                    req.AuditPrompt,
 		ConfidenceThreshold:            req.ConfidenceThreshold,
+		ProxyID:                        req.ProxyID,
 		APIKey:                         req.APIKey,
 		APIKeys:                        req.APIKeys,
 		APIKeysMode:                    req.APIKeysMode,
@@ -158,6 +161,7 @@ func (h *ContentModerationHandler) TestAPIKeys(c *gin.Context) {
 		AuditPrompt:         req.AuditPrompt,
 		ConfidenceThreshold: req.ConfidenceThreshold,
 		TimeoutMS:           req.TimeoutMS,
+		ProxyID:             req.ProxyID,
 		Prompt:              req.Prompt,
 		Images:              req.Images,
 	})

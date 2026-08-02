@@ -125,7 +125,7 @@ func TestParseContentModerationConfig_BuiltinRegexDefaultsAndNormalization(t *te
 
 func TestContentModerationUpdateConfig_LegacyDisabledBuiltinRegexRulesRemainReversible(t *testing.T) {
 	settingRepo := &contentModerationTestSettingRepo{values: map[string]string{}}
-	svc := NewContentModerationService(settingRepo, nil, nil, nil, nil, nil, nil)
+	svc := NewContentModerationService(settingRepo, nil, nil, nil, nil, nil, nil, nil)
 	disabled := []string{"license_cracking"}
 
 	view, err := svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{DisabledBuiltinRegexRules: &disabled})
@@ -148,7 +148,7 @@ func TestContentModerationUpdateConfig_LegacyDisabledBuiltinRegexRulesRemainReve
 
 func TestContentModerationUpdateConfig_PersistsEditableBuiltinRegexRules(t *testing.T) {
 	settingRepo := &contentModerationTestSettingRepo{values: map[string]string{}}
-	svc := NewContentModerationService(settingRepo, nil, nil, nil, nil, nil, nil)
+	svc := NewContentModerationService(settingRepo, nil, nil, nil, nil, nil, nil, nil)
 	enabled := false
 	threshold := 70
 	strictThreshold := 110
@@ -181,7 +181,7 @@ func TestContentModerationUpdateConfig_PersistsEditableBuiltinRegexRules(t *test
 
 func TestContentModerationUpdateConfig_AllowsDeletingAllBuiltinRegexRules(t *testing.T) {
 	settingRepo := &contentModerationTestSettingRepo{values: map[string]string{}}
-	svc := NewContentModerationService(settingRepo, nil, nil, nil, nil, nil, nil)
+	svc := NewContentModerationService(settingRepo, nil, nil, nil, nil, nil, nil, nil)
 	rules := []ContentModerationRegexRule{}
 
 	view, err := svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{BuiltinRegexRules: &rules})
@@ -212,7 +212,7 @@ func TestContentModerationUpdateConfig_RejectsInvalidBuiltinRegexRules(t *testin
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			settingRepo := &contentModerationTestSettingRepo{values: map[string]string{}}
-			svc := NewContentModerationService(settingRepo, nil, nil, nil, nil, nil, nil)
+			svc := NewContentModerationService(settingRepo, nil, nil, nil, nil, nil, nil, nil)
 
 			_, err := svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{BuiltinRegexRules: &tt.rules})
 
@@ -246,6 +246,7 @@ func TestContentModerationCheck_PreBlockBuiltinRegexHitSkipsAuditAPI(t *testing.
 		}},
 		repo,
 		&contentModerationTestHashCache{},
+		nil,
 		nil,
 		nil,
 		nil,
@@ -295,6 +296,7 @@ func TestContentModerationCheck_APIOnlySkipsBuiltinRegex(t *testing.T) {
 		}},
 		&contentModerationTestRepo{},
 		&contentModerationTestHashCache{},
+		nil,
 		nil,
 		nil,
 		nil,

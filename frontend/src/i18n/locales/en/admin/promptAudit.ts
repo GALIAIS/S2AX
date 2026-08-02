@@ -148,9 +148,9 @@ export default {
     pool: {
       title: 'Audit pool', description: 'Enabled OpenAI-compatible nodes are tried in order. Probes run from the server network.',
       add: 'Add node', edit: 'Edit node', empty: 'No audit nodes configured.', node: 'Node', model: 'Model', limits: 'Timeout / chunk limit', credential: 'Credential and probe',
-      configured: 'API Key configured', missing: 'API Key missing', probe: 'Test connection', probing: 'Probing…',
+      configured: 'API Key configured', missing: 'API Key missing', invalid: 'API Key cannot be decrypted; re-enter it', probe: 'Test connection', probing: 'Probing…',
       probeProgress: 'Config validated ✓ · request sent · awaiting service response…', probeResult: 'Config ✓ · request ✓ · HTTP {http} · {status} · {latency} ms',
-      name: 'Node name', id: 'Stable node ID', adapter: 'Detector contract', baseUrl: 'Base URL', apiKey: 'API Key', keepSecret: 'Leave blank to keep the saved API Key',
+      name: 'Node name', id: 'Stable node ID', adapter: 'Detector contract', baseUrl: 'Base URL', apiKey: 'API Key', keepSecret: 'Leave blank to keep the saved API Key', reenterSecret: 'The saved API Key cannot be decrypted (encryption key changed); enter a new one',
       adapters: { qwen3guard_chat: 'Qwen3Guard classification output', openai_moderations: 'Moderations category scoring', strict_json_chat: 'Strict-JSON Chat Completions audit' },
       adapterHints: {
         qwen3guard_chat: 'Parses Qwen3Guard’s two-line Safety / Categories contract.',
@@ -183,7 +183,7 @@ export default {
       asyncDeploymentHint: 'For CPU or small VPS deployments, keep asynchronous audit: first-token latency does not wait for the model. Use blocking only with a low-latency remote guard endpoint.',
       blockingDeploymentHint: 'Blocking adds guard latency to every request. Use a low-latency remote endpoint, short timeouts, and failover; switch CPU-local models back to async mode.',
     },
-    saveBar: { enabled: 'Enable prompt audit', blocking: 'Synchronous blocking', storePass: 'Store safe events', dirty: 'Unsaved changes', synced: 'Configuration synced' },
+    saveBar: { enabled: 'Enable prompt audit', blocking: 'Synchronous blocking', blockingLatestTurnOnly: 'Only latest input and prior output', storePass: 'Store safe events', dirty: 'Unsaved changes', synced: 'Configuration synced' },
     blockingConfirm: {
       title: 'Enable synchronous blocking?',
       message: 'Applicable requests wait for Guard before account selection, billing, or upstream access. Block, unavailable Guard, and invalid responses all prevent upstream access.',
@@ -288,6 +288,7 @@ export default {
     errors: {
       loadConfig: 'Unable to load Prompt Audit configuration.', loadRuntime: 'Unable to load Prompt Audit runtime.', loadGroups: 'Unable to load groups.', loadEvents: 'Unable to load audit events.', loadDetail: 'Unable to load event details.', revealEvidence: 'Unable to reveal source evidence. It may be outside its retention window.', saveConfig: 'Unable to save the configuration.', probe: 'Node probe failed.', delete: 'Unable to delete events.', previewDelete: 'Unable to create a deletion preview. Check the time range.', deleteConfirmation: 'The deletion confirmation is invalid or expired. Preview again.',
       prompt_audit_config_conflict: 'Another administrator updated this configuration. Reload the server version before deciding how to merge your draft.',
+      prompt_audit_encryption_key_required: 'No fixed encryption key is configured, so audit node API Keys would be lost on restart. Set the TOTP_ENCRYPTION_KEY environment variable and restart the service first.',
       prompt_guard_requires_audit_enabled: 'Enable Prompt Audit before synchronous blocking.', prompt_audit_invalid_endpoint: 'The audit node configuration is invalid.', prompt_audit_endpoint_required: 'Enable at least one audit node before enabling Prompt Audit.', prompt_audit_groups_required: 'Select at least one group in selected-group mode.', prompt_audit_scanners_required: 'Enable at least one risk category.',
       prompt_audit_https_required: 'Public audit nodes must use HTTPS.', prompt_audit_network_scope_mismatch: 'The node address does not match the selected network scope.', prompt_audit_destination_blocked: 'The node destination is blocked by the network policy.', prompt_audit_invalid_failure_mode: 'The audit failure-handling mode is invalid.',
     },

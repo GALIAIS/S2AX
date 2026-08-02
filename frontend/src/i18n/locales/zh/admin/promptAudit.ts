@@ -148,9 +148,9 @@ export default {
     pool: {
       title: '审计池', description: '按顺序使用启用的 OpenAI 兼容节点；探测由服务端真实网络环境发起。',
       add: '新增节点', edit: '编辑节点', empty: '尚未配置审计节点。', node: '节点', model: '模型', limits: '超时 / 单片上限', credential: '凭据与探测',
-      configured: 'API Key 已配置', missing: '未配置 API Key', probe: '连接测试', probing: '探测中…',
+      configured: 'API Key 已配置', missing: '未配置 API Key', invalid: 'API Key 无法解密，请重新输入', probe: '连接测试', probing: '探测中…',
       probeProgress: '配置校验 ✓ · 请求已发送 · 等待服务响应…', probeResult: '配置校验 ✓ · 请求 ✓ · HTTP {http} · {status} · {latency} ms',
-      name: '节点名称', id: '稳定节点 ID', adapter: '审核接口类型', baseUrl: 'Base URL', apiKey: 'API Key', keepSecret: '留空以保留已保存的 API Key',
+      name: '节点名称', id: '稳定节点 ID', adapter: '审核接口类型', baseUrl: 'Base URL', apiKey: 'API Key', keepSecret: '留空以保留已保存的 API Key', reenterSecret: '已保存的 API Key 无法解密（加密密钥已变更），请重新输入',
       adapters: { qwen3guard_chat: 'Qwen3Guard 分类输出', openai_moderations: 'Moderations 分类评分', strict_json_chat: 'Chat Completions 严格 JSON 审核' },
       adapterHints: {
         qwen3guard_chat: '解析 Qwen3Guard 的 Safety / Categories 两行输出。',
@@ -183,7 +183,7 @@ export default {
       asyncDeploymentHint: 'CPU 或低配 VPS 请保持“异步只审计”：请求首字不等待模型。同步阻止仅适合低延迟远端审计节点。',
       blockingDeploymentHint: '同步阻止会把审计模型耗时加入每次请求。请使用低延迟远端节点、短超时和故障切换；CPU 本地模型建议改为异步。',
     },
-    saveBar: { enabled: '启用提示词审计', blocking: '同步阻止', storePass: '保存安全事件', dirty: '有未保存的更改', synced: '配置已同步' },
+    saveBar: { enabled: '启用提示词审计', blocking: '同步阻止', blockingLatestTurnOnly: '仅审最新输入和上一轮输出', storePass: '保存安全事件', dirty: '有未保存的更改', synced: '配置已同步' },
     blockingConfirm: {
       title: '开启同步阻止？',
       message: '适用请求会在账号选择、计费和访问上游之前等待 Guard。命中 Block、Guard 不可用或响应非法时，请求都不会访问上游。',
@@ -288,6 +288,7 @@ export default {
     errors: {
       loadConfig: '无法加载提示词审计配置。', loadRuntime: '无法加载提示词审计运行态。', loadGroups: '无法加载分组列表。', loadEvents: '无法加载审计事件。', loadDetail: '无法加载事件详情。', revealEvidence: '无法查看审计原文，请确认原文仍在保留期内。', saveConfig: '配置保存失败。', probe: '节点探测失败。', delete: '事件删除失败。', previewDelete: '无法生成删除预览，请检查时间范围。', deleteConfirmation: '删除确认无效或已过期，请重新预览。',
       prompt_audit_config_conflict: '配置已被其他管理员更新。请重新加载服务端配置，再决定如何合并本地草稿。',
+      prompt_audit_encryption_key_required: '未配置固定加密密钥，审计节点 API Key 将在服务重启后失效。请先设置 TOTP_ENCRYPTION_KEY 环境变量并重启服务。',
       prompt_guard_requires_audit_enabled: '开启同步阻止前必须先启用提示词审计。', prompt_audit_invalid_endpoint: '审计节点配置无效。', prompt_audit_endpoint_required: '启用审计前至少需要一个启用节点。', prompt_audit_groups_required: '指定分组模式至少需要选择一个分组。', prompt_audit_scanners_required: '至少需要启用一个风险分类。',
       prompt_audit_https_required: '公网审计节点必须使用 HTTPS。', prompt_audit_network_scope_mismatch: '节点地址与所选网络范围不匹配。', prompt_audit_destination_blocked: '节点目标地址被安全策略阻止。', prompt_audit_invalid_failure_mode: '审计失败处置模式无效。',
     },
