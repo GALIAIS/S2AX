@@ -171,13 +171,6 @@ func ProvideSettingHandler(settingService *service.SettingService, buildInfo Bui
 	return h
 }
 
-func ProvideCityEconomyHandler(
-	cityEconomy *service.CityEconomyService,
-	realtimeLifecycle *service.CityRealtimeLifecycleController,
-) *CityEconomyHandler {
-	return NewCityEconomyHandler(cityEconomy, realtimeLifecycle)
-}
-
 // ProvideAdminSettingHandler creates admin.SettingHandler with notification template APIs.
 func ProvideAdminSettingHandler(settingService *service.SettingService, emailService *service.EmailService, turnstileService *service.TurnstileService, opsService *service.OpsService, paymentConfigService *service.PaymentConfigService, paymentService *service.PaymentService, userAttributeService *service.UserAttributeService, notificationEmailService *service.NotificationEmailService, totpService *service.TotpService, userService *service.UserService) *admin.SettingHandler {
 	h := admin.NewSettingHandler(settingService, emailService, turnstileService, opsService, paymentConfigService, paymentService, userAttributeService)
@@ -202,7 +195,6 @@ func ProvideHandlers(
 	settingHandler *SettingHandler,
 	totpHandler *TotpHandler,
 	paymentHandler *PaymentHandler,
-	cityEconomyHandler *CityEconomyHandler,
 	virtualCurrencyHandler *VirtualCurrencyHandler,
 	virtualCurrencyIntegrationHandler *VirtualCurrencyIntegrationHandler,
 	paymentWebhookHandler *PaymentWebhookHandler,
@@ -229,7 +221,6 @@ func ProvideHandlers(
 		Setting:                    settingHandler,
 		Totp:                       totpHandler,
 		Payment:                    paymentHandler,
-		CityEconomy:                cityEconomyHandler,
 		VirtualCurrency:            virtualCurrencyHandler,
 		VirtualCurrencyIntegration: virtualCurrencyIntegrationHandler,
 		PaymentWebhook:             paymentWebhookHandler,
@@ -257,7 +248,6 @@ var ProviderSet = wire.NewSet(
 	NewTotpHandler,
 	ProvideSettingHandler,
 	NewPaymentHandler,
-	ProvideCityEconomyHandler,
 	NewVirtualCurrencyHandler,
 	NewVirtualCurrencyIntegrationHandler,
 	NewPaymentWebhookHandler,

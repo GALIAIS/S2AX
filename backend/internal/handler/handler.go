@@ -64,7 +64,6 @@ type Handlers struct {
 	Setting                    *SettingHandler
 	Totp                       *TotpHandler
 	Payment                    *PaymentHandler
-	CityEconomy                *CityEconomyHandler
 	VirtualCurrency            *VirtualCurrencyHandler
 	VirtualCurrencyIntegration *VirtualCurrencyIntegrationHandler
 	PaymentWebhook             *PaymentWebhookHandler

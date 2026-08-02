@@ -12,7 +12,6 @@ export { useAnnouncementStore } from './announcements'
 export { useSecurityNotificationStore } from './securityNotifications'
 export { usePaymentStore } from './payment'
 export { useAdminComplianceStore } from './adminCompliance'
-export { useCitySpatialStore } from './citySpatial'
 
 // Re-export types for convenience
 export type { User, LoginRequest, RegisterRequest, AuthResponse } from '@/types'

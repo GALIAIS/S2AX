@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -492,69 +491,6 @@ func ProvideVirtualCurrencyHoldCleanupService(virtualCurrency *VirtualCurrencySe
 	return svc
 }
 
-func ProvideCityTickScheduler(db *sql.DB, cityEconomy *CityEconomyService, settingService *SettingService) *CityTickScheduler {
-	svc := NewCityTickScheduler(db, cityEconomy, defaultCityTickSchedulerInterval, defaultCityTickSchedulerBatch)
-	svc.SetCitySimulationEnabledChecker(settingService)
-	svc.Start()
-	return svc
-}
-
-// ProvideCityRealtimeScheduler wires the independent Temporal Frame worker.
-// It starts only when a host clock has been explicitly trusted at deployment
-// time; its per-sweep database feature switches remain fail-closed and can be
-// toggled without restarting the process.
-func ProvideCityRealtimeScheduler(
-	db *sql.DB,
-	cityEconomy *CityEconomyService,
-	clockAuthority *CityRealtimeHostClockAuthority,
-	settingService *SettingService,
-) *CityRealtimeScheduler {
-	svc := NewCityRealtimeScheduler(
-		db,
-		cityEconomy,
-		clockAuthority,
-		defaultCityRealtimeSchedulerInterval,
-		defaultCityRealtimeSchedulerBatch,
-	)
-	svc.SetFeatureChecker(settingService)
-	if clockAuthority != nil && clockAuthority.IsOperational() {
-		svc.Start()
-	}
-	return svc
-}
-
-// ProvideCityRealtimeAgentDecisionWorker wires the independently-gated
-// outbox dispatcher. It starts with the application but remains inert until
-// the city simulation and Agent worker switches are both explicitly enabled.
-// No browser endpoint can start it or supply model transport configuration.
-func ProvideCityRealtimeAgentDecisionWorker(
-	db *sql.DB,
-	cityEconomy *CityEconomyService,
-	settingService *SettingService,
-) *CityRealtimeAgentDecisionWorker {
-	svc := NewCityRealtimeAgentDecisionWorker(
-		db,
-		cityEconomy,
-		defaultCityRealtimeAgentDecisionWorkerInterval,
-		defaultCityRealtimeAgentDecisionWorkerBatch,
-	)
-	svc.SetFeatureChecker(settingService)
-	svc.Start()
-	return svc
-}
-
-// ProvideCityEconomyService installs the one bounded production gateway
-// adapter at process bootstrap. Direct NewCityEconomyService construction is
-// intentionally left transport-free for isolated reducers and integration
-// fixtures; only the server composition receives the system identity adapter.
-func ProvideCityEconomyService(db *sql.DB, gateway *GatewayService) (*CityEconomyService, error) {
-	service := NewCityEconomyService(db)
-	if err := service.RegisterRealtimeAgentDecisionProvider(NewCityRealtimeAgentGatewayDecisionProvider(gateway)); err != nil {
-		return nil, fmt.Errorf("register city realtime agent gateway provider: %w", err)
-	}
-	return service, nil
-}
-
 // ProvideScheduledTestService creates ScheduledTestService.
 func ProvideScheduledTestService(
 	planRepo ScheduledTestPlanRepository,
@@ -921,12 +857,6 @@ var ProviderSet = wire.NewSet(
 	NewAntigravityQuotaFetcher,
 	NewGrokQuotaFetcher,
 	NewUserAttributeService,
-	ProvideCityEconomyService,
-	ProvideCityTickScheduler,
-	NewCityRealtimeHostClockAuthority,
-	NewCityRealtimeLifecycleController,
-	ProvideCityRealtimeScheduler,
-	ProvideCityRealtimeAgentDecisionWorker,
 	NewVirtualCurrencyService,
 	NewVirtualCurrencyIntegrationService,
 	NewUsageCache,

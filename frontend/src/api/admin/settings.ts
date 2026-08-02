@@ -606,11 +606,6 @@ export interface SystemSettings {
   // Payment configuration
   payment_enabled: boolean;
   risk_control_enabled: boolean;
-  city_simulation_enabled: boolean;
-  city_pixel_renderer_enabled: boolean;
-  city_visual_pack_publish_enabled: boolean;
-  city_realtime_scheduler_enabled: boolean;
-  city_realtime_agent_decision_worker_enabled: boolean;
 
   // Cyber session block
   cyber_session_block_enabled: boolean;
@@ -894,11 +889,6 @@ export interface UpdateSettingsRequest {
   // Payment configuration
   payment_enabled?: boolean;
   risk_control_enabled?: boolean;
-  city_simulation_enabled?: boolean;
-  city_pixel_renderer_enabled?: boolean;
-  city_visual_pack_publish_enabled?: boolean;
-  city_realtime_scheduler_enabled?: boolean;
-  city_realtime_agent_decision_worker_enabled?: boolean;
 
   // Cyber session block
   cyber_session_block_enabled?: boolean;

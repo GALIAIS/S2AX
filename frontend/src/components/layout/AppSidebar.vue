@@ -685,7 +685,6 @@ const flagPayment = makeSidebarFlag(FeatureFlags.payment)
 const flagAvailableChannels = makeSidebarFlag(FeatureFlags.availableChannels)
 const flagAffiliate = makeSidebarFlag(FeatureFlags.affiliate)
 const flagRiskControl = makeSidebarFlag(FeatureFlags.riskControl)
-const flagCitySimulation = makeSidebarFlag(FeatureFlags.citySimulation)
 const flagOpsMonitoring = () => adminSettingsStore.opsMonitoringEnabled
 const flagAdminPayment = () => adminSettingsStore.paymentEnabled
 const flagBatchImageAccess = () => canUseBatchImage.value
@@ -709,7 +708,6 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/subscriptions', label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
     { path: '/currencies', label: t('nav.virtualCurrency'), icon: CreditCardIcon, hideInSimpleMode: true },
     { path: '/account-allocations', label: t('nav.accountDirectory'), icon: ServerIcon, hideInSimpleMode: true },
-    { path: '/city', label: t('nav.citySimulation'), icon: GlobeIcon, hideInSimpleMode: true, featureFlag: flagCitySimulation },
     { path: '/purchase', label: t('nav.buySubscription'), icon: RechargeSubscriptionIcon, hideInSimpleMode: true, featureFlag: flagPayment },
     { path: '/orders', label: t('nav.myOrders'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
     { path: '/redeem', label: t('nav.redeem'), icon: GiftIcon, hideInSimpleMode: true },
@@ -760,8 +758,6 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring },
     { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true },
     { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, hideInSimpleMode: true },
-    { path: '/admin/city/visual-packs', label: t('nav.cityVisualPacks'), icon: BatchImageIcon, hideInSimpleMode: true, featureFlag: flagCitySimulation },
-    { path: '/admin/city/agent-runtime', label: t('nav.cityAgentRuntime'), icon: ShieldIcon, hideInSimpleMode: true, featureFlag: flagCitySimulation },
     { path: '/admin/currencies', label: t('nav.virtualCurrencies'), icon: CreditCardIcon, hideInSimpleMode: true },
     { path: '/admin/currency-integrations', label: t('nav.virtualCurrencyIntegrations'), icon: KeyIcon, hideInSimpleMode: true },
     {

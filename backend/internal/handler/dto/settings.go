@@ -290,16 +290,6 @@ type SystemSettings struct {
 	// 风控中心功能开关
 	RiskControlEnabled bool `json:"risk_control_enabled"`
 
-	// 城市模拟功能开关
-	CitySimulationEnabled bool `json:"city_simulation_enabled"`
-	// 共享实时像素渲染与视觉包发布均为城市模拟的受控子功能。
-	CityPixelRendererEnabled     bool `json:"city_pixel_renderer_enabled"`
-	CityVisualPackPublishEnabled bool `json:"city_visual_pack_publish_enabled"`
-	// realtime scheduler 仅影响服务端生产 worker，不向普通用户公开。
-	CityRealtimeSchedulerEnabled bool `json:"city_realtime_scheduler_enabled"`
-	// Agent 模型决策 worker 仅影响服务端已封存 outbox，不向普通用户公开。
-	CityRealtimeAgentDecisionWorkerEnabled bool `json:"city_realtime_agent_decision_worker_enabled"`
-
 	// cyber 会话屏蔽开关 + TTL
 	CyberSessionBlockEnabled    bool `json:"cyber_session_block_enabled"`
 	CyberSessionBlockTTLSeconds int  `json:"cyber_session_block_ttl_seconds"`
@@ -384,9 +374,6 @@ type PublicSettings struct {
 	AffiliateEnabled bool `json:"affiliate_enabled"`
 
 	RiskControlEnabled bool `json:"risk_control_enabled"`
-
-	CitySimulationEnabled    bool `json:"city_simulation_enabled"`
-	CityPixelRendererEnabled bool `json:"city_pixel_renderer_enabled"`
 
 	AllowUserViewErrorRequests bool `json:"allow_user_view_error_requests"`
 }

@@ -294,13 +294,6 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	handlerSettingHandler := handler.ProvideSettingHandler(settingService, buildInfo, notificationEmailService)
 	totpHandler := handler.NewTotpHandler(totpService)
 	handlerPaymentHandler := handler.NewPaymentHandler(paymentService, paymentConfigService)
-	cityEconomyService, err := service.ProvideCityEconomyService(db, gatewayService)
-	if err != nil {
-		return nil, err
-	}
-	cityRealtimeHostClockAuthority := service.NewCityRealtimeHostClockAuthority(configConfig)
-	cityRealtimeLifecycleController := service.NewCityRealtimeLifecycleController(cityEconomyService, cityRealtimeHostClockAuthority)
-	cityEconomyHandler := handler.ProvideCityEconomyHandler(cityEconomyService, cityRealtimeLifecycleController)
 	handlerVirtualCurrencyHandler := handler.NewVirtualCurrencyHandler(virtualCurrencyService)
 	handlerVirtualCurrencyIntegrationHandler := handler.NewVirtualCurrencyIntegrationHandler(virtualCurrencyIntegrationService)
 	paymentWebhookHandler := handler.NewPaymentWebhookHandler(paymentService, registry)
@@ -320,7 +313,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	handlerAccountAllocationHandler := handler.NewAccountAllocationHandler(accountAllocationService)
 	idempotencyCoordinator := service.ProvideIdempotencyCoordinator(idempotencyRepository, configConfig)
 	idempotencyCleanupService := service.ProvideIdempotencyCleanupService(idempotencyRepository, configConfig)
-	handlers := handler.ProvideHandlers(authHandler, userHandler, apiKeyHandler, usageHandler, redeemHandler, subscriptionHandler, announcementHandler, channelMonitorUserHandler, adminHandlers, gatewayHandler, openAIGatewayHandler, handlerSettingHandler, totpHandler, handlerPaymentHandler, cityEconomyHandler, handlerVirtualCurrencyHandler, handlerVirtualCurrencyIntegrationHandler, paymentWebhookHandler, availableChannelHandler, asyncImageHandler, batchImageHandler, ipGeolocationHandler, handlerAccountAllocationHandler, idempotencyCoordinator, idempotencyCleanupService)
+	handlers := handler.ProvideHandlers(authHandler, userHandler, apiKeyHandler, usageHandler, redeemHandler, subscriptionHandler, announcementHandler, channelMonitorUserHandler, adminHandlers, gatewayHandler, openAIGatewayHandler, handlerSettingHandler, totpHandler, handlerPaymentHandler, handlerVirtualCurrencyHandler, handlerVirtualCurrencyIntegrationHandler, paymentWebhookHandler, availableChannelHandler, asyncImageHandler, batchImageHandler, ipGeolocationHandler, handlerAccountAllocationHandler, idempotencyCoordinator, idempotencyCleanupService)
 	jwtAuthMiddleware := middleware.NewJWTAuthMiddleware(authService, userService, settingService, auditLogService)
 	adminAuthMiddleware := middleware.NewAdminAuthMiddleware(authService, userService, settingService, auditLogService)
 	apiKeyAuthMiddleware := middleware.NewAPIKeyAuthMiddleware(apiKeyService, subscriptionService, configConfig)
@@ -338,15 +331,12 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	proxyExpiryService := service.ProvideProxyExpiryService(proxyRepository)
 	subscriptionExpiryService := service.ProvideSubscriptionExpiryService(userSubscriptionRepository, settingRepository, notificationEmailService, leaderLockCache, db)
 	virtualCurrencyHoldCleanupService := service.ProvideVirtualCurrencyHoldCleanupService(virtualCurrencyService)
-	cityTickScheduler := service.ProvideCityTickScheduler(db, cityEconomyService, settingService)
-	cityRealtimeScheduler := service.ProvideCityRealtimeScheduler(db, cityEconomyService, cityRealtimeHostClockAuthority, settingService)
-	cityRealtimeAgentDecisionWorker := service.ProvideCityRealtimeAgentDecisionWorker(db, cityEconomyService, settingService)
 	batchImageWorkerRuntime := service.ProvideBatchImageWorkerRuntime(batchImageRepository, accountRepository, batchImageQueue, usageBillingRepository, usageLogRepository, batchImageModelPricingResolver, apiKeyAuthCacheInvalidator, configConfig)
 	scheduledTestRunnerService := service.ProvideScheduledTestRunnerService(scheduledTestPlanRepository, scheduledTestService, accountTestService, rateLimitService, configConfig)
 	paymentOrderExpiryService := service.ProvidePaymentOrderExpiryService(paymentService, leaderLockCache, db)
 	channelMonitorRunner := service.ProvideChannelMonitorRunner(channelMonitorService, settingService)
 	userPlatformQuotaUsageFlusher := service.ProvideUserPlatformQuotaUsageFlusher(configConfig, billingCache, serviceUserPlatformQuotaRepository, timingWheelService)
-	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, opsService, opsIngressRejectAggregator, apiKeyService, authCacheInvalidationWorker, schedulerSnapshotService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, virtualCurrencyHoldCleanupService, cityTickScheduler, cityRealtimeScheduler, cityRealtimeAgentDecisionWorker, batchImageCleanupService, batchImageWorkerRuntime, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, userPlatformQuotaUsageFlusher, upstreamBillingProbeService, ollamaCloudUsageService, auditLogService, promptService, invocationarchiveService, ipGeolocationService, accountAllocationService)
+	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, opsService, opsIngressRejectAggregator, apiKeyService, authCacheInvalidationWorker, schedulerSnapshotService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, virtualCurrencyHoldCleanupService, batchImageCleanupService, batchImageWorkerRuntime, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, userPlatformQuotaUsageFlusher, upstreamBillingProbeService, ollamaCloudUsageService, auditLogService, promptService, invocationarchiveService, ipGeolocationService, accountAllocationService)
 	application := &Application{
 		Server:            httpServer,
 		PromptAudit:       promptService,
@@ -397,9 +387,6 @@ func provideCleanup(
 	usageCleanup *service.UsageCleanupService,
 	idempotencyCleanup *service.IdempotencyCleanupService,
 	virtualCurrencyHoldCleanup *service.VirtualCurrencyHoldCleanupService,
-	cityTickScheduler *service.CityTickScheduler,
-	cityRealtimeScheduler *service.CityRealtimeScheduler,
-	cityRealtimeAgentDecisionWorker *service.CityRealtimeAgentDecisionWorker,
 	batchImageCleanup *service.BatchImageCleanupService,
 	batchImageWorker *service.BatchImageWorkerRuntime,
 	pricing *service.PricingService,
@@ -547,24 +534,6 @@ func provideCleanup(
 			{"VirtualCurrencyHoldCleanupService", func() error {
 				if virtualCurrencyHoldCleanup != nil {
 					virtualCurrencyHoldCleanup.Stop()
-				}
-				return nil
-			}},
-			{"CityTickScheduler", func() error {
-				if cityTickScheduler != nil {
-					cityTickScheduler.Stop()
-				}
-				return nil
-			}},
-			{"CityRealtimeScheduler", func() error {
-				if cityRealtimeScheduler != nil {
-					cityRealtimeScheduler.Stop()
-				}
-				return nil
-			}},
-			{"CityRealtimeAgentDecisionWorker", func() error {
-				if cityRealtimeAgentDecisionWorker != nil {
-					cityRealtimeAgentDecisionWorker.Stop()
 				}
 				return nil
 			}},

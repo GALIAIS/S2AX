@@ -104,31 +104,6 @@ account_allocation:
   max_desired_count: 50
 
 # =============================================================================
-# Shared Realtime World Clock
-# 共享 realtime 世界时钟
-# =============================================================================
-# Disabled by default. Enable only after the host itself is continuously
-# synchronized by the selected NTP/NTS service; this adapter never accepts
-# browser-provided time. The city realtime scheduler also requires its
-# separate database setting to be enabled.
-# 默认关闭。仅在宿主机已持续由所选 NTP/NTS 服务校时时启用；该适配器绝不
-# 接受浏览器时间。城市 realtime 调度器还需要单独在数据库设置中开启。
-city_realtime_clock:
-  enabled: false
-  # Explicit operator attestation that this host clock is NTP/NTS disciplined.
-  # 对宿主机时钟已经由 NTP/NTS 校时的显式运维确认。
-  trust_host_clock: false
-  node_id: "realtime-host"
-  # system_ntp or system_nts. It must match each production clock profile.
-  # system_ntp 或 system_nts，必须与每个 production clock profile 一致。
-  source_clock_mode: "system_ntp"
-  # Declared source uncertainty in microseconds.
-  uncertainty_us: 500000
-  # Fail closed if wall time diverges from monotonic elapsed time beyond this.
-  # 当墙钟时间与单调时钟的经过时间偏差超过该值时，立即拒绝推进。
-  maximum_wall_clock_step_us: 5000000
-
-# =============================================================================
 # Run Mode Configuration
 # 运行模式配置
 # =============================================================================

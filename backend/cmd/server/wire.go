@@ -96,9 +96,6 @@ func provideCleanup(
 	usageCleanup *service.UsageCleanupService,
 	idempotencyCleanup *service.IdempotencyCleanupService,
 	virtualCurrencyHoldCleanup *service.VirtualCurrencyHoldCleanupService,
-	cityTickScheduler *service.CityTickScheduler,
-	cityRealtimeScheduler *service.CityRealtimeScheduler,
-	cityRealtimeAgentDecisionWorker *service.CityRealtimeAgentDecisionWorker,
 	batchImageCleanup *service.BatchImageCleanupService,
 	batchImageWorker *service.BatchImageWorkerRuntime,
 	pricing *service.PricingService,
@@ -247,24 +244,6 @@ func provideCleanup(
 			{"VirtualCurrencyHoldCleanupService", func() error {
 				if virtualCurrencyHoldCleanup != nil {
 					virtualCurrencyHoldCleanup.Stop()
-				}
-				return nil
-			}},
-			{"CityTickScheduler", func() error {
-				if cityTickScheduler != nil {
-					cityTickScheduler.Stop()
-				}
-				return nil
-			}},
-			{"CityRealtimeScheduler", func() error {
-				if cityRealtimeScheduler != nil {
-					cityRealtimeScheduler.Stop()
-				}
-				return nil
-			}},
-			{"CityRealtimeAgentDecisionWorker", func() error {
-				if cityRealtimeAgentDecisionWorker != nil {
-					cityRealtimeAgentDecisionWorker.Stop()
 				}
 				return nil
 			}},

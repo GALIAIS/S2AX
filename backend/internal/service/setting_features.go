@@ -77,64 +77,6 @@ func (s *SettingService) IsAffiliateEnabled(ctx context.Context) bool {
 	return value == "true"
 }
 
-// IsCitySimulationEnabled reports whether the optional city simulation is
-// available. This is deliberately fail-closed so an unavailable settings store
-// cannot expose an unfinished gameplay surface.
-func (s *SettingService) IsCitySimulationEnabled(ctx context.Context) bool {
-	if s == nil || s.settingRepo == nil {
-		return false
-	}
-	value, err := s.settingRepo.GetValue(ctx, SettingKeyCitySimulationEnabled)
-	return err == nil && value == "true"
-}
-
-// IsCityPixelRendererEnabled reports whether the member-facing shared realtime
-// pixel rendering surface is available. It is intentionally fail-closed and
-// requires the parent city simulation feature as well, so a stale child value
-// can never revive a retired experimental renderer by itself.
-func (s *SettingService) IsCityPixelRendererEnabled(ctx context.Context) bool {
-	if s == nil || s.settingRepo == nil || !s.IsCitySimulationEnabled(ctx) {
-		return false
-	}
-	value, err := s.settingRepo.GetValue(ctx, SettingKeyCityPixelRendererEnabled)
-	return err == nil && value == "true"
-}
-
-// IsCityVisualPackPublishEnabled reports whether the administrator-only visual
-// pack publication workflow is open. Publishing remains closed unless both
-// the city simulation and its pixel renderer are explicitly enabled.
-func (s *SettingService) IsCityVisualPackPublishEnabled(ctx context.Context) bool {
-	if s == nil || s.settingRepo == nil || !s.IsCityPixelRendererEnabled(ctx) {
-		return false
-	}
-	value, err := s.settingRepo.GetValue(ctx, SettingKeyCityVisualPackPublishEnabled)
-	return err == nil && value == "true"
-}
-
-// IsCityRealtimeSchedulerEnabled reports whether the production realtime
-// worker may acquire leases. It is intentionally independent from the city
-// entry-point switch and fail-closed: both flags must be true before a worker
-// can process a world, and a verified Clock Authority is still required.
-func (s *SettingService) IsCityRealtimeSchedulerEnabled(ctx context.Context) bool {
-	if s == nil || s.settingRepo == nil {
-		return false
-	}
-	value, err := s.settingRepo.GetValue(ctx, SettingKeyCityRealtimeSchedulerEnabled)
-	return err == nil && value == "true"
-}
-
-// IsCityRealtimeAgentDecisionWorkerEnabled reports whether the background
-// Agent-model dispatcher may consume already-sealed decision requests. It is
-// deliberately independent from the Clock Authority scheduler: deployments
-// may keep time advancement online while retaining all model execution closed.
-func (s *SettingService) IsCityRealtimeAgentDecisionWorkerEnabled(ctx context.Context) bool {
-	if s == nil || s.settingRepo == nil || !s.IsCitySimulationEnabled(ctx) {
-		return false
-	}
-	value, err := s.settingRepo.GetValue(ctx, SettingKeyCityRealtimeAgentDecisionWorkerEnabled)
-	return err == nil && value == "true"
-}
-
 // IsAffiliateAdminRechargeEnabled reports whether admin balance
 // deposits should participate in the affiliate rebate program.
 func (s *SettingService) IsAffiliateAdminRechargeEnabled(ctx context.Context) bool {

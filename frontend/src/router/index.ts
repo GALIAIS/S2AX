@@ -315,19 +315,6 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/city',
-    name: 'CitySpatial',
-    component: () => import('@/views/user/CitySpatialView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: false,
-      requiresCitySimulation: true,
-      title: 'City Simulation',
-      titleKey: 'citySpatial.title',
-      descriptionKey: 'citySpatial.description'
-    }
-  },
-  {
     path: '/purchase',
     name: 'PurchaseSubscription',
     component: () => import('@/views/user/PaymentView.vue'),
@@ -486,32 +473,6 @@ const routes: RouteRecordRaw[] = [
       title: 'Group Management',
       titleKey: 'admin.groups.title',
       descriptionKey: 'admin.groups.description'
-    }
-  },
-  {
-    path: '/admin/city/visual-packs',
-    name: 'AdminCityVisualPacks',
-    component: () => import('@/views/admin/CityVisualPacksView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      requiresCitySimulation: true,
-      title: 'City Visual Packs',
-      titleKey: 'admin.cityVisualPacks.title',
-      descriptionKey: 'admin.cityVisualPacks.description'
-    }
-  },
-  {
-    path: '/admin/city/agent-runtime',
-    name: 'AdminCityAgentRuntime',
-    component: () => import('@/views/admin/CityAgentRuntimeView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      requiresCitySimulation: true,
-      title: 'City Agent Runtime',
-      titleKey: 'admin.cityAgentRuntime.title',
-      descriptionKey: 'admin.cityAgentRuntime.description'
     }
   },
   {
@@ -965,7 +926,7 @@ router.beforeEach(async (to, _from, next) => {
   // 公共设置可能尚未加载（App.vue 的 onMounted 异步拉取晚于首次导航，且纯静态部署
   // 无 __APP_CONFIG__ 注入）。此时 cachedPublicSettings 为空会把 payment/risk_control
   // 误判为“未启用”而错误拦截，故这里先确保设置加载完成。
-  if ((to.meta.requiresPayment || to.meta.requiresRiskControl || to.meta.requiresCitySimulation) && !appStore.publicSettingsLoaded) {
+  if ((to.meta.requiresPayment || to.meta.requiresRiskControl) && !appStore.publicSettingsLoaded) {
     try {
       await appStore.fetchPublicSettings()
     } catch (error) {
@@ -988,15 +949,6 @@ router.beforeEach(async (to, _from, next) => {
     to.meta.requiresRiskControl &&
     appStore.publicSettingsLoaded &&
     appStore.cachedPublicSettings?.risk_control_enabled === false
-  ) {
-    next(authStore.isAdmin ? '/admin/settings' : '/dashboard')
-    return
-  }
-
-  if (
-    to.meta.requiresCitySimulation &&
-    appStore.publicSettingsLoaded &&
-    appStore.cachedPublicSettings?.city_simulation_enabled === false
   ) {
     next(authStore.isAdmin ? '/admin/settings' : '/dashboard')
     return

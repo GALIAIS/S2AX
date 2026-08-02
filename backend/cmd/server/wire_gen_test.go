@@ -70,9 +70,6 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		&service.UsageCleanupService{},
 		idempotencyCleanupSvc,
 		nil, // virtualCurrencyHoldCleanup
-		nil, // cityTickScheduler
-		nil, // cityRealtimeScheduler
-		nil, // cityRealtimeAgentDecisionWorker
 		&service.BatchImageCleanupService{},
 		nil, // batchImageWorker
 		pricingSvc,

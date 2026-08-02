@@ -53,6 +53,5 @@
 - PostgreSQL+Redis 安全审计集成套件通过；迁移可重复执行，行为信号、shadow、breaker、动作/Outbox、例外撤销和证据保护均在真实数据库方言上验证。
 - 前端 8 个安全审计测试文件共 36 个测试、typecheck 和生产构建通过。
 - 新增回归覆盖：通知所有权隔离、例外 detector/category 匹配、统一处置不直接改用户、无执行器动作拒绝、迁移语义。
-- 扩大范围后端测试发现的唯一失败为既有城市模拟 UTC 窗口断言：`TestCityRealtimeAgentDecisionNextBudgetWindowUsesNextUTCHour` 期望 04:00:01、实际 03:00:01；未修改该非安全审计模块。
 - 后端全包编译、相关包 `go vet` 和 diff 检查通过；diff 检查仅报告工作区既有的 LF/CRLF 转换提示。
 - 真实部署故障演练和容量基准不能由本地单测替代，按 `docs/SECURITY_AUDIT_OPERATIONS_CN.md` 执行。

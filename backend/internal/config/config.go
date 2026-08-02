@@ -66,7 +66,6 @@ type Config struct {
 	Server                  ServerConfig                  `mapstructure:"server"`
 	IPGeolocation           IPGeolocationConfig           `mapstructure:"ip_geolocation"`
 	AccountAllocation       AccountAllocationConfig       `mapstructure:"account_allocation"`
-	CityRealtimeClock       CityRealtimeClockConfig       `mapstructure:"city_realtime_clock"`
 	Log                     LogConfig                     `mapstructure:"log"`
 	CORS                    CORSConfig                    `mapstructure:"cors"`
 	Security                SecurityConfig                `mapstructure:"security"`
@@ -697,24 +696,6 @@ type AccountAllocationConfig struct {
 	ReconcileIntervalSeconds int `mapstructure:"reconcile_interval_seconds"`
 	PolicyBatchSize          int `mapstructure:"policy_batch_size"`
 	MaxDesiredCount          int `mapstructure:"max_desired_count"`
-}
-
-// CityRealtimeClockConfig is an explicit trust boundary for the independent
-// shared-world realtime scheduler. It is disabled by default. Enabling it
-// means an operator attests that the host clock is actively disciplined by
-// the selected NTP/NTS deployment; the runtime additionally enforces a
-// monotonic-drift guard and database-skew bound before committing a frame.
-//
-// This does not configure an unauthenticated browser/manual clock. Future
-// private time-service adapters remain a separate provider rather than a URL
-// field here, so this compact configuration cannot become an SSRF surface.
-type CityRealtimeClockConfig struct {
-	Enabled                bool   `mapstructure:"enabled"`
-	TrustHostClock         bool   `mapstructure:"trust_host_clock"`
-	NodeID                 string `mapstructure:"node_id"`
-	SourceClockMode        string `mapstructure:"source_clock_mode"`
-	UncertaintyUS          int64  `mapstructure:"uncertainty_us"`
-	MaximumWallClockStepUS int64  `mapstructure:"maximum_wall_clock_step_us"`
 }
 
 // H2CConfig HTTP/2 Cleartext 配置
@@ -1674,22 +1655,6 @@ func NormalizeRunMode(value string) string {
 	}
 }
 
-func validCityRealtimeClockNodeID(value string) bool {
-	if len(value) < 2 || len(value) > 128 || value[0] < 'a' || value[0] > 'z' {
-		return false
-	}
-	for index := 1; index < len(value); index++ {
-		character := value[index]
-		if (character >= 'a' && character <= 'z') ||
-			(character >= '0' && character <= '9') ||
-			character == '_' || character == '.' || character == '-' {
-			continue
-		}
-		return false
-	}
-	return true
-}
-
 // Load 读取并校验完整配置（要求 jwt.secret 已显式提供）。
 func Load() (*Config, error) {
 	return load(false)
@@ -1774,8 +1739,6 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	cfg.IPGeolocation.IPv4XDBPath = strings.TrimSpace(cfg.IPGeolocation.IPv4XDBPath)
 	cfg.IPGeolocation.IPv6XDBPath = strings.TrimSpace(cfg.IPGeolocation.IPv6XDBPath)
 	cfg.IPGeolocation.CachePolicy = strings.ToLower(strings.TrimSpace(cfg.IPGeolocation.CachePolicy))
-	cfg.CityRealtimeClock.NodeID = strings.ToLower(strings.TrimSpace(cfg.CityRealtimeClock.NodeID))
-	cfg.CityRealtimeClock.SourceClockMode = strings.ToLower(strings.TrimSpace(cfg.CityRealtimeClock.SourceClockMode))
 	cfg.JWT.Secret = strings.TrimSpace(cfg.JWT.Secret)
 	cfg.LinuxDo.ClientID = strings.TrimSpace(cfg.LinuxDo.ClientID)
 	cfg.LinuxDo.ClientSecret = strings.TrimSpace(cfg.LinuxDo.ClientSecret)
@@ -1940,15 +1903,6 @@ func setDefaults() {
 	viper.SetDefault("account_allocation.reconcile_interval_seconds", 15)
 	viper.SetDefault("account_allocation.policy_batch_size", 100)
 	viper.SetDefault("account_allocation.max_desired_count", 50)
-	// The independent realtime world worker remains fail-closed until an
-	// operator explicitly trusts a host clock disciplined by NTP/NTS and also
-	// enables the separate runtime setting.
-	viper.SetDefault("city_realtime_clock.enabled", false)
-	viper.SetDefault("city_realtime_clock.trust_host_clock", false)
-	viper.SetDefault("city_realtime_clock.node_id", "realtime-host")
-	viper.SetDefault("city_realtime_clock.source_clock_mode", "system_ntp")
-	viper.SetDefault("city_realtime_clock.uncertainty_us", int64(500_000))
-	viper.SetDefault("city_realtime_clock.maximum_wall_clock_step_us", int64(5_000_000))
 	// H2C 默认配置
 	viper.SetDefault("server.h2c.enabled", false)
 	viper.SetDefault("server.h2c.max_concurrent_streams", uint32(50))      // 50 个并发流
@@ -2642,23 +2596,6 @@ func (c *Config) Validate() error {
 	}
 	if c.AccountAllocation.MaxDesiredCount != 0 && (c.AccountAllocation.MaxDesiredCount < 1 || c.AccountAllocation.MaxDesiredCount > 1000) {
 		return fmt.Errorf("account_allocation.max_desired_count must be between 1 and 1000")
-	}
-	if c.CityRealtimeClock.Enabled {
-		if !c.CityRealtimeClock.TrustHostClock {
-			return fmt.Errorf("city_realtime_clock.trust_host_clock must be true when city_realtime_clock.enabled=true")
-		}
-		if !validCityRealtimeClockNodeID(c.CityRealtimeClock.NodeID) {
-			return fmt.Errorf("city_realtime_clock.node_id must be a lowercase service identifier")
-		}
-		if c.CityRealtimeClock.SourceClockMode != "system_ntp" && c.CityRealtimeClock.SourceClockMode != "system_nts" {
-			return fmt.Errorf("city_realtime_clock.source_clock_mode must be system_ntp or system_nts")
-		}
-		if c.CityRealtimeClock.UncertaintyUS < 0 || c.CityRealtimeClock.UncertaintyUS > 60_000_000 {
-			return fmt.Errorf("city_realtime_clock.uncertainty_us must be between 0 and 60000000")
-		}
-		if c.CityRealtimeClock.MaximumWallClockStepUS < 1_000 || c.CityRealtimeClock.MaximumWallClockStepUS > 60_000_000 {
-			return fmt.Errorf("city_realtime_clock.maximum_wall_clock_step_us must be between 1000 and 60000000")
-		}
 	}
 	if c.Server.H2C.Enabled {
 		if c.Server.H2C.MaxConcurrentStreams == 0 {

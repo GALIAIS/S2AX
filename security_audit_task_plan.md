@@ -40,6 +40,5 @@
 - 前端 typecheck：通过。
 - 前端生产构建、安全审计 PostgreSQL+Redis 集成套件和相关后端范围测试：通过。
 - 真实 PostgreSQL 已覆盖行为信号聚合/评估/幂等、shadow 无副作用、端点 breaker 全生命周期、action/outbox 执行与撤销、例外失效归属约束。
-- 扩大范围后端测试只保留已登记的非安全审计失败：`TestCityRealtimeAgentDecisionNextBudgetWindowUsesNextUTCHour` 期望 04:00:01、实际 03:00:01。
 - 后端全包编译、相关包 `go vet` 和 `git diff --check`：通过；仅有工作区既有行尾转换提示。
 - 真实环境故障演练与容量基准：必须在目标部署执行，不能由本地单元测试替代。

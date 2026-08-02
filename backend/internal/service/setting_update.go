@@ -403,24 +403,6 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	// 风控中心功能开关
 	updates[SettingKeyRiskControlEnabled] = strconv.FormatBool(settings.RiskControlEnabled)
 
-	// 城市模拟功能开关
-	updates[SettingKeyCitySimulationEnabled] = strconv.FormatBool(settings.CitySimulationEnabled)
-	// 共享实时像素渲染与视觉包发布是层级受控功能。父开关关闭时
-	// 同步持久化为 false，避免遗留设置在以后意外重新暴露内容面。
-	updates[SettingKeyCityPixelRendererEnabled] = strconv.FormatBool(
-		settings.CitySimulationEnabled && settings.CityPixelRendererEnabled,
-	)
-	updates[SettingKeyCityVisualPackPublishEnabled] = strconv.FormatBool(
-		settings.CitySimulationEnabled && settings.CityPixelRendererEnabled && settings.CityVisualPackPublishEnabled,
-	)
-	// realtime scheduler 仅由生产 Clock Authority 使用；上层关闭时强制关闭该子开关。
-	updates[SettingKeyCityRealtimeSchedulerEnabled] = strconv.FormatBool(
-		settings.CitySimulationEnabled && settings.CityRealtimeSchedulerEnabled,
-	)
-	updates[SettingKeyCityRealtimeAgentDecisionWorkerEnabled] = strconv.FormatBool(
-		settings.CitySimulationEnabled && settings.CityRealtimeAgentDecisionWorkerEnabled,
-	)
-
 	// cyber 会话屏蔽开关 + TTL
 	updates[SettingKeyCyberSessionBlockEnabled] = strconv.FormatBool(settings.CyberSessionBlockEnabled)
 	if settings.CyberSessionBlockTTLSeconds > 0 {

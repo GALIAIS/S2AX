@@ -114,16 +114,6 @@ export const FeatureFlags = {
     mode: 'opt-in',
     label: 'Risk Control',
   }),
-  citySimulation: defineFlag({
-    key: 'city_simulation_enabled',
-    mode: 'opt-in',
-    label: 'City Simulation',
-  }),
-  cityPixelRenderer: defineFlag({
-    key: 'city_pixel_renderer_enabled',
-    mode: 'opt-in',
-    label: 'City Realtime Pixel Renderer',
-  }),
   affiliate: defineFlag({
     key: 'affiliate_enabled',
     mode: 'opt-in',

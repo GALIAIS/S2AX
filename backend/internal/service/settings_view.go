@@ -147,24 +147,19 @@ type SystemSettings struct {
 	CustomMenuItems             string // JSON array of custom menu items
 	CustomEndpoints             string // JSON array of custom endpoints
 
-	DefaultConcurrency                     int
-	DefaultBalance                         float64
-	RiskControlEnabled                     bool
-	CitySimulationEnabled                  bool
-	CityPixelRendererEnabled               bool
-	CityVisualPackPublishEnabled           bool
-	CityRealtimeSchedulerEnabled           bool
-	CityRealtimeAgentDecisionWorkerEnabled bool
-	CyberSessionBlockEnabled               bool
-	CyberSessionBlockTTLSeconds            int
-	AffiliateEnabled                       bool
-	AffiliateRebateRate                    float64
-	AffiliateRebateFreezeHours             int
-	AffiliateRebateDurationDays            int
-	AffiliateRebatePerInviteeCap           float64
-	AdminRechargeRebateEnabled             bool
-	DefaultUserRPMLimit                    int
-	DefaultSubscriptions                   []DefaultSubscriptionSetting
+	DefaultConcurrency           int
+	DefaultBalance               float64
+	RiskControlEnabled           bool
+	CyberSessionBlockEnabled     bool
+	CyberSessionBlockTTLSeconds  int
+	AffiliateEnabled             bool
+	AffiliateRebateRate          float64
+	AffiliateRebateFreezeHours   int
+	AffiliateRebateDurationDays  int
+	AffiliateRebatePerInviteeCap float64
+	AdminRechargeRebateEnabled   bool
+	DefaultUserRPMLimit          int
+	DefaultSubscriptions         []DefaultSubscriptionSetting
 
 	// Model fallback configuration
 	EnableModelFallback      bool   `json:"enable_model_fallback"`
@@ -345,12 +340,6 @@ type PublicSettings struct {
 
 	// 风控中心功能开关
 	RiskControlEnabled bool `json:"risk_control_enabled"`
-
-	// 城市模拟功能开关
-	CitySimulationEnabled bool `json:"city_simulation_enabled"`
-	// 共享实时像素渲染是城市模拟的受控子功能。关闭后视觉投影与
-	// semantic-pixel chunk API 均 fail closed，标准城市世界不受影响。
-	CityPixelRendererEnabled bool `json:"city_pixel_renderer_enabled"`
 
 	// 允许终端用户在用量页查看自己的失败请求
 	AllowUserViewErrorRequests bool `json:"allow_user_view_error_requests"`
