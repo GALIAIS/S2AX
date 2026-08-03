@@ -2,6 +2,8 @@ package securityaudit
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -64,6 +66,23 @@ func TestBlockingLatestTurnOnlyConfigRoundTrip(t *testing.T) {
 	require.True(t, active.BlockingLatestTurnOnly)
 	public := PublicFromStorage(next, true, nil)
 	require.True(t, public.BlockingLatestTurnOnly)
+}
+
+func TestPromptAuditConfigDigestAcceptsPreLatestTurnSchema(t *testing.T) {
+	storage := DefaultStorageConfig()
+	digest, raw, err := promptAuditConfigDigest(storage)
+	require.NoError(t, err)
+	legacyRaw := strings.Replace(string(raw), `"blocking_latest_turn_only":false,`, "", 1)
+	require.NotEqual(t, string(raw), legacyRaw)
+	legacyDigest := sha256.Sum256([]byte(legacyRaw))
+	legacyDigestHex := hex.EncodeToString(legacyDigest[:])
+	require.Equal(t, "244b8115bbe0bccad60bbccd61a029b8af4c0ab6c7f9e77540533a7193ae4701", legacyDigestHex)
+	require.True(t, promptAuditConfigDigestMatches(storage, digest, raw, legacyDigestHex))
+
+	storage.BlockingLatestTurnOnly = true
+	digest, raw, err = promptAuditConfigDigest(storage)
+	require.NoError(t, err)
+	require.False(t, promptAuditConfigDigestMatches(storage, digest, raw, legacyDigestHex))
 }
 
 func TestConfigValidatesFailureModeAndPersistsLegacyDefault(t *testing.T) {

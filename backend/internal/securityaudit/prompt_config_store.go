@@ -220,11 +220,11 @@ WHERE config_version=$1`, version).Scan(&raw, &expectedDigest)
 	if storage.ConfigVersion != version {
 		return ActiveConfig{}, false, errors.New("prompt audit config snapshot version mismatch")
 	}
-	actualDigest, _, err := promptAuditConfigDigest(storage)
+	actualDigest, rawConfig, err := promptAuditConfigDigest(storage)
 	if err != nil {
 		return ActiveConfig{}, false, err
 	}
-	if strings.TrimSpace(expectedDigest) == "" || !strings.EqualFold(expectedDigest, actualDigest) {
+	if strings.TrimSpace(expectedDigest) == "" || !promptAuditConfigDigestMatches(storage, actualDigest, rawConfig, expectedDigest) {
 		return ActiveConfig{}, false, errors.New("prompt audit config snapshot digest mismatch")
 	}
 	active, err := ActiveFromStorage(storage, true, m.encryptor)
@@ -468,10 +468,28 @@ FROM prompt_audit_config_versions
 WHERE config_version=$1`, cfg.ConfigVersion).Scan(&storedDigest); err != nil {
 		return err
 	}
-	if !strings.EqualFold(storedDigest, digest) {
+	if !promptAuditConfigDigestMatches(cfg, digest, raw, storedDigest) {
 		return errors.New("prompt audit config version already exists with different content")
 	}
 	return nil
+}
+
+func promptAuditConfigDigestMatches(cfg storageConfig, digest string, raw []byte, expected string) bool {
+	if strings.EqualFold(expected, digest) {
+		return true
+	}
+	if cfg.BlockingLatestTurnOnly {
+		return false
+	}
+	// Config history predates blocking_latest_turn_only. Its false default is
+	// semantically identical, so accept the digest produced before that field
+	// was added without weakening checks for true or any other config change.
+	legacyRaw := strings.Replace(string(raw), `"blocking_latest_turn_only":false,`, "", 1)
+	if len(legacyRaw) == len(raw) {
+		return false
+	}
+	legacyDigest := sha256.Sum256([]byte(legacyRaw))
+	return strings.EqualFold(expected, hex.EncodeToString(legacyDigest[:]))
 }
 
 func promptAuditConfigDigest(cfg storageConfig) (string, []byte, error) {
