@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -181,6 +182,7 @@ func ContentModerationCategories() []string {
 }
 
 type ContentModerationConfig struct {
+	ConfigVersion               int64                        `json:"config_version"`
 	Enabled                     bool                         `json:"enabled"`
 	Mode                        string                       `json:"mode"`
 	EndpointType                string                       `json:"endpoint_type"`
@@ -215,6 +217,7 @@ type ContentModerationConfig struct {
 	BuiltinRegexEnabled         bool                         `json:"builtin_regex_enabled"`
 	BuiltinRegexThreshold       int                          `json:"builtin_regex_threshold"`
 	BuiltinRegexStrictThreshold int                          `json:"builtin_regex_strict_threshold"`
+	BuiltinRegexDefaultsVersion int                          `json:"builtin_regex_defaults_version"`
 	BuiltinRegexRules           []ContentModerationRegexRule `json:"builtin_regex_rules"`
 	// DisabledBuiltinRegexRules 仅用于兼容旧版按名称停用规则的配置。
 	DisabledBuiltinRegexRules []string                     `json:"disabled_builtin_regex_rules"`
@@ -226,6 +229,7 @@ type ContentModerationConfig struct {
 }
 
 type ContentModerationConfigView struct {
+	ConfigVersion                  int64                           `json:"config_version"`
 	Enabled                        bool                            `json:"enabled"`
 	Mode                           string                          `json:"mode"`
 	EndpointType                   string                          `json:"endpoint_type"`
@@ -308,7 +312,7 @@ type TestContentModerationAPIKeysInput struct {
 	BaseURL             string   `json:"base_url"`
 	Model               string   `json:"model"`
 	AuditPrompt         string   `json:"audit_prompt"`
-	ConfidenceThreshold float64  `json:"confidence_threshold"`
+	ConfidenceThreshold *float64 `json:"confidence_threshold"`
 	TimeoutMS           int      `json:"timeout_ms"`
 	ProxyID             *int64   `json:"proxy_id"`
 	Prompt              string   `json:"prompt"`
@@ -334,6 +338,7 @@ type ContentModerationTestAuditResult struct {
 }
 
 type UpdateContentModerationConfigInput struct {
+	ExpectedConfigVersion          *int64                        `json:"expected_config_version"`
 	Enabled                        *bool                         `json:"enabled"`
 	Mode                           *string                       `json:"mode"`
 	EndpointType                   *string                       `json:"endpoint_type"`
@@ -406,8 +411,20 @@ func (in *ContentModerationInput) Normalize() {
 	if in == nil {
 		return
 	}
-	in.Text = trimRunes(normalizeContentModerationText(in.Text), maxModerationInputRunes)
+	in.Text = limitContentModerationText(normalizeContentModerationText(in.Text))
 	in.Images = normalizeModerationImages(in.Images)
+}
+
+func limitContentModerationText(text string) string {
+	runes := []rune(text)
+	if len(runes) <= maxModerationInputRunes {
+		return text
+	}
+	separator := []rune("\n…\n")
+	contentLimit := maxModerationInputRunes - len(separator)
+	head := contentLimit / 2
+	tail := contentLimit - head
+	return string(runes[:head]) + string(separator) + string(runes[len(runes)-tail:])
 }
 
 func (in ContentModerationInput) IsEmpty() bool {
@@ -452,6 +469,8 @@ type ContentModerationDecision struct {
 	Allowed         bool               `json:"allowed"`
 	Blocked         bool               `json:"blocked"`
 	Flagged         bool               `json:"flagged"`
+	LocalEvaluated  bool               `json:"local_evaluated"`
+	LocalFlagged    bool               `json:"local_flagged"`
 	Message         string             `json:"message"`
 	StatusCode      int                `json:"status_code"`
 	InputHash       string             `json:"input_hash,omitempty"`
@@ -620,6 +639,13 @@ type ContentModerationHashCache interface {
 	CountFlaggedInputHashes(ctx context.Context) (int64, error)
 }
 
+// contentModerationConfigCASRepository is implemented by the database-backed
+// settings repository so concurrent administrators cannot silently overwrite
+// each other's complete JSON configuration.
+type contentModerationConfigCASRepository interface {
+	CompareAndSet(ctx context.Context, key string, expectedValue *string, value string) (bool, error)
+}
+
 type ContentModerationService struct {
 	settingRepo              SettingRepository
 	repo                     ContentModerationRepository
@@ -650,6 +676,7 @@ type ContentModerationService struct {
 	lastCleanupDeletedNonHit atomic.Int64
 	runtimeSnapshot          atomic.Pointer[contentModerationRuntimeSnapshot]
 	runtimeRefreshMu         sync.Mutex
+	configUpdateMu           sync.Mutex
 	runtimeCacheTTL          time.Duration
 	runtimeRefreshRetryAt    atomic.Int64
 	keyHealthMu              sync.Mutex
@@ -736,9 +763,18 @@ func (s *ContentModerationService) GetConfig(ctx context.Context) (*ContentModer
 }
 
 func (s *ContentModerationService) UpdateConfig(ctx context.Context, input UpdateContentModerationConfigInput) (*ContentModerationConfigView, error) {
-	cfg, err := s.loadConfig(ctx)
+	if s == nil || s.settingRepo == nil {
+		return nil, errors.New("content moderation setting repository unavailable")
+	}
+	s.configUpdateMu.Lock()
+	defer s.configUpdateMu.Unlock()
+
+	cfg, previousRaw, existed, err := s.loadConfigState(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if input.ExpectedConfigVersion != nil && *input.ExpectedConfigVersion != cfg.ConfigVersion {
+		return nil, infraerrors.Conflict("CONTENT_MODERATION_CONFIG_CONFLICT", "内容审计配置已被其他管理员更新，请刷新后重试")
 	}
 	if input.Enabled != nil {
 		cfg.Enabled = *input.Enabled
@@ -879,12 +915,25 @@ func (s *ContentModerationService) UpdateConfig(ctx context.Context, input Updat
 	if err := s.validateConfig(ctx, cfg); err != nil {
 		return nil, err
 	}
+	cfg.ConfigVersion++
 	cfg.normalize()
 	raw, err := json.Marshal(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("marshal content moderation config: %w", err)
 	}
-	if err := s.settingRepo.Set(ctx, SettingKeyContentModerationConfig, string(raw)); err != nil {
+	if casRepo, ok := s.settingRepo.(contentModerationConfigCASRepository); ok {
+		var expected *string
+		if existed {
+			expected = &previousRaw
+		}
+		saved, err := casRepo.CompareAndSet(ctx, SettingKeyContentModerationConfig, expected, string(raw))
+		if err != nil {
+			return nil, fmt.Errorf("save content moderation config: %w", err)
+		}
+		if !saved {
+			return nil, infraerrors.Conflict("CONTENT_MODERATION_CONFIG_CONFLICT", "内容审计配置已被其他管理员更新，请刷新后重试")
+		}
+	} else if err := s.settingRepo.Set(ctx, SettingKeyContentModerationConfig, string(raw)); err != nil {
 		return nil, fmt.Errorf("save content moderation config: %w", err)
 	}
 	s.replaceRuntimeConfig(cfg, raw)
@@ -916,8 +965,8 @@ func (s *ContentModerationService) TestAPIKeys(ctx context.Context, input TestCo
 	if strings.TrimSpace(input.AuditPrompt) != "" {
 		cfg.AuditPrompt = input.AuditPrompt
 	}
-	if input.ConfidenceThreshold > 0 {
-		cfg.ConfidenceThreshold = input.ConfidenceThreshold
+	if input.ConfidenceThreshold != nil {
+		cfg.ConfidenceThreshold = *input.ConfidenceThreshold
 	}
 	if input.TimeoutMS > 0 {
 		cfg.TimeoutMS = input.TimeoutMS
@@ -930,7 +979,13 @@ func (s *ContentModerationService) TestAPIKeys(ctx context.Context, input TestCo
 			cfg.ProxyID = nil
 		}
 	}
-	cfg.normalize()
+	// Test the same normalized remote contract that can be saved, without
+	// requiring the current policy to be active or fully keyed.
+	cfg.Enabled = false
+	cfg.Mode = ContentModerationModeOff
+	if err := s.validateConfig(ctx, cfg); err != nil {
+		return nil, err
+	}
 	testInput, imageCount, err := buildModerationTestInput(input.Prompt, input.Images)
 	if err != nil {
 		return nil, err
@@ -1091,83 +1146,90 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 		"text_runes", len([]rune(content.Text)),
 		"image_count", len(content.Images))
 	hashText := content.Hash()
-	if cfg.Mode == ContentModerationModePreBlock {
-		if cfg.KeywordBlockingMode != ContentModerationKeywordModeAPIOnly && len(cfg.BlockedKeywords) > 0 {
-			if keyword, hit := runtimeSnapshot.matchBlockedKeyword(content.Text); hit {
+	if cfg.KeywordBlockingMode != ContentModerationKeywordModeAPIOnly && len(cfg.BlockedKeywords) > 0 {
+		allow.LocalEvaluated = true
+		if keyword, hit := runtimeSnapshot.matchBlockedKeyword(content.Text); hit {
+			blocked := cfg.Mode == ContentModerationModePreBlock
+			action := ContentModerationActionAllow
+			if blocked {
+				action = ContentModerationActionKeywordBlock
 				s.recordPreBlockSyncMetric(0, ContentModerationActionKeywordBlock)
-				slog.Info("content_moderation.keyword_block",
-					"user_id", input.UserID,
-					"api_key_id", input.APIKeyID,
-					"group_id", contentModerationLogGroupID(input.GroupID),
-					"endpoint", input.Endpoint,
-					"protocol", input.Protocol,
-					"keyword_blocking_mode", cfg.KeywordBlockingMode,
-					"keyword", keyword)
-				scores := map[string]float64{contentModerationKeywordCategory: 1.0}
-				log := s.buildLog(input, cfg, ContentModerationActionKeywordBlock, true, contentModerationKeywordCategory, 1.0, scores, content.ExcerptText(), nil, nil, "")
-				log.MatchedKeyword = keyword
-				s.enqueueRecord(input, cfg, log, hashText, false, true)
-				return &ContentModerationDecision{
-					Allowed:         false,
-					Blocked:         true,
-					Flagged:         true,
-					Message:         cfg.BlockMessage,
-					StatusCode:      cfg.BlockStatus,
-					HighestCategory: contentModerationKeywordCategory,
-					HighestScore:    1.0,
-					CategoryScores:  scores,
-					Action:          ContentModerationActionKeywordBlock,
-				}, nil
 			}
-		}
-		if cfg.KeywordBlockingMode != ContentModerationKeywordModeAPIOnly {
-			if verdict, matched := runtimeSnapshot.matchBuiltinRegex(content.Text); matched && verdict.Blocked {
-				s.recordPreBlockSyncMetric(0, ContentModerationActionPatternBlock)
-				matchedRules := contentModerationBuiltinRegexMatchedRules(verdict.Matches)
-				slog.Info("content_moderation.pattern_block",
-					"user_id", input.UserID,
-					"api_key_id", input.APIKeyID,
-					"group_id", contentModerationLogGroupID(input.GroupID),
-					"endpoint", input.Endpoint,
-					"protocol", input.Protocol,
-					"score", verdict.Score,
-					"raw_score", verdict.RawScore,
-					"strict_score", verdict.StrictScore,
-					"context_discount", verdict.ContextDiscount,
-					"matched_rules", matchedRules)
-				highestScore := normalizedContentModerationRegexScore(verdict.Score)
-				log := s.buildLog(input, cfg, ContentModerationActionPatternBlock, true, verdict.HighestCategory, highestScore, verdict.CategoryScores, content.ExcerptText(), nil, nil, "")
-				log.MatchedKeyword = matchedRules
-				log.Reason = verdict.Reason
-				log.ThresholdSnapshot["builtin_regex_score"] = float64(cfg.BuiltinRegexThreshold)
-				log.ThresholdSnapshot["builtin_regex_strict_score"] = float64(cfg.BuiltinRegexStrictThreshold)
-				s.enqueueRecord(input, cfg, log, hashText, false, true)
-				return &ContentModerationDecision{
-					Allowed:         false,
-					Blocked:         true,
-					Flagged:         true,
-					Message:         cfg.BlockMessage,
-					StatusCode:      cfg.BlockStatus,
-					HighestCategory: verdict.HighestCategory,
-					HighestScore:    highestScore,
-					CategoryScores:  cloneFloatMap(verdict.CategoryScores),
-					Reason:          verdict.Reason,
-					Action:          ContentModerationActionPatternBlock,
-				}, nil
-			}
-		}
-		if cfg.KeywordBlockingMode == ContentModerationKeywordModeKeywordOnly {
-			s.recordPreBlockSyncMetric(0, ContentModerationActionAllow)
-			slog.Info("content_moderation.skip_api_keyword_only",
+			slog.Info("content_moderation.keyword_match",
 				"user_id", input.UserID,
 				"api_key_id", input.APIKeyID,
 				"group_id", contentModerationLogGroupID(input.GroupID),
 				"endpoint", input.Endpoint,
-				"protocol", input.Protocol)
-			return allow, nil
+				"protocol", input.Protocol,
+				"mode", cfg.Mode,
+				"keyword_blocking_mode", cfg.KeywordBlockingMode,
+				"keyword", keyword)
+			scores := map[string]float64{contentModerationKeywordCategory: 1.0}
+			log := s.buildLog(input, cfg, action, true, contentModerationKeywordCategory, 1.0, scores, content.ExcerptText(), nil, nil, "")
+			log.MatchedKeyword = keyword
+			s.enqueueRecord(input, cfg, log, hashText, false, blocked)
+			return &ContentModerationDecision{
+				Allowed:         !blocked,
+				Blocked:         blocked,
+				Flagged:         true,
+				LocalEvaluated:  true,
+				LocalFlagged:    true,
+				Message:         cfg.BlockMessage,
+				StatusCode:      cfg.BlockStatus,
+				HighestCategory: contentModerationKeywordCategory,
+				HighestScore:    1.0,
+				CategoryScores:  scores,
+				Action:          action,
+			}, nil
+		}
+	}
+	if runtimeSnapshot.builtinRegexMatcher != nil {
+		allow.LocalEvaluated = true
+		if verdict, matched := runtimeSnapshot.matchBuiltinRegex(content.Text); matched && verdict.Blocked {
+			blocked := cfg.Mode == ContentModerationModePreBlock
+			action := ContentModerationActionAllow
+			if blocked {
+				action = ContentModerationActionPatternBlock
+				s.recordPreBlockSyncMetric(0, ContentModerationActionPatternBlock)
+			}
+			matchedRules := contentModerationBuiltinRegexMatchedRules(verdict.Matches)
+			slog.Info("content_moderation.pattern_match",
+				"user_id", input.UserID,
+				"api_key_id", input.APIKeyID,
+				"group_id", contentModerationLogGroupID(input.GroupID),
+				"endpoint", input.Endpoint,
+				"protocol", input.Protocol,
+				"mode", cfg.Mode,
+				"score", verdict.Score,
+				"raw_score", verdict.RawScore,
+				"strict_score", verdict.StrictScore,
+				"context_discount", verdict.ContextDiscount,
+				"matched_rules", matchedRules)
+			highestScore := normalizedContentModerationRegexScore(verdict.Score)
+			log := s.buildLog(input, cfg, action, true, verdict.HighestCategory, highestScore, verdict.CategoryScores, content.ExcerptText(), nil, nil, "")
+			log.MatchedKeyword = matchedRules
+			log.Reason = verdict.Reason
+			log.ThresholdSnapshot["builtin_regex_score"] = float64(cfg.BuiltinRegexThreshold)
+			log.ThresholdSnapshot["builtin_regex_strict_score"] = float64(cfg.BuiltinRegexStrictThreshold)
+			s.enqueueRecord(input, cfg, log, hashText, false, blocked)
+			return &ContentModerationDecision{
+				Allowed:         !blocked,
+				Blocked:         blocked,
+				Flagged:         true,
+				LocalEvaluated:  true,
+				LocalFlagged:    true,
+				Message:         cfg.BlockMessage,
+				StatusCode:      cfg.BlockStatus,
+				HighestCategory: verdict.HighestCategory,
+				HighestScore:    highestScore,
+				CategoryScores:  cloneFloatMap(verdict.CategoryScores),
+				Reason:          verdict.Reason,
+				Action:          action,
+			}, nil
 		}
 	}
 	if cfg.Mode == ContentModerationModePreBlock && cfg.PreHashCheckEnabled && s.hashCache != nil {
+		allow.LocalEvaluated = true
 		matched, err := s.hashCache.HasFlaggedInputHash(ctx, hashText)
 		if err != nil {
 			slog.Warn("content_moderation.hash_check_failed", "user_id", input.UserID, "endpoint", input.Endpoint, "error", err)
@@ -1191,15 +1253,29 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 			log := s.buildLog(input, cfg, ContentModerationActionHashBlock, true, "hash", 1.0, scores, content.ExcerptText(), nil, nil, "")
 			s.enqueueRecord(input, cfg, log, hashText, false, false)
 			return &ContentModerationDecision{
-				Allowed:    false,
-				Blocked:    true,
-				Flagged:    true,
-				Message:    message,
-				StatusCode: cfg.BlockStatus,
-				InputHash:  hashText,
-				Action:     ContentModerationActionHashBlock,
+				Allowed:        false,
+				Blocked:        true,
+				Flagged:        true,
+				LocalEvaluated: true,
+				LocalFlagged:   true,
+				Message:        message,
+				StatusCode:     cfg.BlockStatus,
+				InputHash:      hashText,
+				Action:         ContentModerationActionHashBlock,
 			}, nil
 		}
+	}
+	if cfg.KeywordBlockingMode == ContentModerationKeywordModeKeywordOnly {
+		if cfg.Mode == ContentModerationModePreBlock {
+			s.recordPreBlockSyncMetric(0, ContentModerationActionAllow)
+		}
+		slog.Info("content_moderation.skip_api_local_only",
+			"user_id", input.UserID,
+			"api_key_id", input.APIKeyID,
+			"group_id", contentModerationLogGroupID(input.GroupID),
+			"endpoint", input.Endpoint,
+			"protocol", input.Protocol)
+		return allow, nil
 	}
 	if !cfg.shouldSample(hashText) {
 		if cfg.Mode == ContentModerationModePreBlock {
@@ -1238,7 +1314,10 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 		return allow, nil
 	}
 
-	return s.checkSync(ctx, input, cfg, content, hashText, nil, true), nil
+	decision := s.checkSync(ctx, input, cfg, content, hashText, nil, true)
+	decision.LocalEvaluated = allow.LocalEvaluated
+	decision.LocalFlagged = allow.LocalFlagged
+	return decision, nil
 }
 
 func (s *ContentModerationService) checkSync(ctx context.Context, input ContentModerationCheckInput, cfg *ContentModerationConfig, content ContentModerationInput, hashText string, queueDelay *int, allowBlock bool) *ContentModerationDecision {
@@ -1689,14 +1768,21 @@ func (s *ContentModerationService) runCleanupOnce() {
 }
 
 func (s *ContentModerationService) loadConfig(ctx context.Context) (*ContentModerationConfig, error) {
+	cfg, _, _, err := s.loadConfigState(ctx)
+	return cfg, err
+}
+
+func (s *ContentModerationService) loadConfigState(ctx context.Context) (*ContentModerationConfig, string, bool, error) {
 	raw, err := s.settingRepo.GetValue(ctx, SettingKeyContentModerationConfig)
 	if err != nil {
 		if errors.Is(err, ErrSettingNotFound) {
-			return parseContentModerationConfig("")
+			cfg, parseErr := parseContentModerationConfig("")
+			return cfg, "", false, parseErr
 		}
-		return nil, fmt.Errorf("get content moderation config: %w", err)
+		return nil, "", false, fmt.Errorf("get content moderation config: %w", err)
 	}
-	return parseContentModerationConfig(raw)
+	cfg, err := parseContentModerationConfig(raw)
+	return cfg, raw, true, err
 }
 
 func parseContentModerationConfig(raw string) (*ContentModerationConfig, error) {
@@ -1710,6 +1796,20 @@ func parseContentModerationConfig(raw string) (*ContentModerationConfig, error) 
 	}
 	if err := json.Unmarshal([]byte(raw), cfg); err != nil {
 		return nil, infraerrors.BadRequest("INVALID_CONTENT_MODERATION_CONFIG", "内容审计配置不是有效 JSON")
+	}
+	var stored struct {
+		BuiltinRegexDefaultsVersion *int `json:"builtin_regex_defaults_version"`
+	}
+	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_CONTENT_MODERATION_CONFIG", "内容审计配置不是有效 JSON")
+	}
+	storedBuiltinRegexDefaultsVersion := 0
+	if stored.BuiltinRegexDefaultsVersion != nil {
+		storedBuiltinRegexDefaultsVersion = *stored.BuiltinRegexDefaultsVersion
+	}
+	if storedBuiltinRegexDefaultsVersion < currentContentModerationBuiltinRegexDefaultsVersion {
+		cfg.BuiltinRegexRules = upgradeLegacyContentModerationBuiltinRegexRules(cfg.BuiltinRegexRules, storedBuiltinRegexDefaultsVersion)
+		cfg.BuiltinRegexDefaultsVersion = currentContentModerationBuiltinRegexDefaultsVersion
 	}
 	cfg.normalize()
 	if err := validateContentModerationBuiltinRegexRules(cfg.BuiltinRegexRules); err != nil {
@@ -1874,6 +1974,8 @@ func (s *ContentModerationService) validateConfig(ctx context.Context, cfg *Cont
 	}
 	rawEndpointType := strings.ToLower(strings.TrimSpace(cfg.EndpointType))
 	rawConfidenceThreshold := cfg.ConfidenceThreshold
+	rawKeywordBlockingMode := strings.ToLower(strings.TrimSpace(cfg.KeywordBlockingMode))
+	rawModelFilterType := strings.ToLower(strings.TrimSpace(cfg.ModelFilter.Type))
 	cfg.normalize()
 	if err := validateContentModerationBuiltinRegexRules(cfg.BuiltinRegexRules); err != nil {
 		return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_REGEX_RULES", err.Error())
@@ -1886,7 +1988,14 @@ func (s *ContentModerationService) validateConfig(ctx context.Context, cfg *Cont
 	if rawEndpointType != "" && rawEndpointType != ContentModerationEndpointModeration && rawEndpointType != ContentModerationEndpointChatCompletions {
 		return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_ENDPOINT_TYPE", "内容审核接口类型无效")
 	}
-	if _, err := url.ParseRequestURI(cfg.BaseURL); err != nil {
+	if rawKeywordBlockingMode != "" && rawKeywordBlockingMode != ContentModerationKeywordModeKeywordOnly && rawKeywordBlockingMode != ContentModerationKeywordModeKeywordAndAPI && rawKeywordBlockingMode != ContentModerationKeywordModeAPIOnly {
+		return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_KEYWORD_MODE", "内容审计策略无效")
+	}
+	if rawModelFilterType != "" && rawModelFilterType != ContentModerationModelFilterAll && rawModelFilterType != ContentModerationModelFilterInclude && rawModelFilterType != ContentModerationModelFilterExclude {
+		return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_MODEL_FILTER", "内容审计模型筛选类型无效")
+	}
+	baseURL, err := url.ParseRequestURI(cfg.BaseURL)
+	if err != nil || baseURL == nil || baseURL.Host == "" || (baseURL.Scheme != "http" && baseURL.Scheme != "https") || baseURL.User != nil {
 		return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_BASE_URL", "内容审核 Base URL 无效")
 	}
 	if cfg.EndpointType == ContentModerationEndpointChatCompletions {
@@ -1907,6 +2016,20 @@ func (s *ContentModerationService) validateConfig(ctx context.Context, cfg *Cont
 	}
 	if cfg.ModelFilter.Type != ContentModerationModelFilterAll && len(cfg.ModelFilter.Models) == 0 {
 		return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_MODEL_FILTER", "指定或排除模型时至少需要配置 1 个模型")
+	}
+	active := cfg.Enabled && cfg.Mode != ContentModerationModeOff
+	if active && !cfg.AllGroups && len(cfg.GroupIDs) == 0 {
+		return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_GROUP_SCOPE", "启用内容审计时必须选择全部分组或至少 1 个指定分组")
+	}
+	localKeywordEnabled := cfg.KeywordBlockingMode != ContentModerationKeywordModeAPIOnly && len(cfg.BlockedKeywords) > 0
+	localRegexEnabled := cfg.BuiltinRegexEnabled && len(filterDisabledContentModerationBuiltinRegexRules(cfg.BuiltinRegexRules, cfg.DisabledBuiltinRegexRules)) > 0
+	localHashEnabled := cfg.Mode == ContentModerationModePreBlock && cfg.PreHashCheckEnabled && s.hashCache != nil
+	remoteEnabled := cfg.KeywordBlockingMode != ContentModerationKeywordModeKeywordOnly && cfg.SampleRate > 0
+	if active && remoteEnabled && len(cfg.apiKeys()) == 0 {
+		return infraerrors.BadRequest("CONTENT_MODERATION_API_KEY_REQUIRED", "当前策略会调用远程审核接口，至少需要配置 1 个审核 API Key")
+	}
+	if active && !remoteEnabled && !localKeywordEnabled && !localRegexEnabled && !localHashEnabled {
+		return infraerrors.BadRequest("CONTENT_MODERATION_DETECTOR_REQUIRED", "启用内容审计时至少需要启用一种本地规则或远程审核")
 	}
 	if !cfg.AllGroups && len(cfg.GroupIDs) > 0 && s.groupRepo != nil {
 		for _, groupID := range cfg.GroupIDs {
@@ -2432,6 +2555,7 @@ func (s *ContentModerationService) siteName(ctx context.Context) string {
 
 func defaultContentModerationConfig() *ContentModerationConfig {
 	return &ContentModerationConfig{
+		ConfigVersion:               1,
 		Enabled:                     false,
 		Mode:                        ContentModerationModePreBlock,
 		EndpointType:                ContentModerationEndpointModeration,
@@ -2463,6 +2587,7 @@ func defaultContentModerationConfig() *ContentModerationConfig {
 		BuiltinRegexEnabled:         true,
 		BuiltinRegexThreshold:       defaultContentModerationBuiltinRegexThreshold,
 		BuiltinRegexStrictThreshold: defaultContentModerationBuiltinRegexStrictThreshold,
+		BuiltinRegexDefaultsVersion: currentContentModerationBuiltinRegexDefaultsVersion,
 		BuiltinRegexRules:           defaultContentModerationBuiltinRegexRules(),
 		DisabledBuiltinRegexRules:   []string{},
 		ModelFilter: ContentModerationModelFilter{
@@ -2493,6 +2618,9 @@ func cloneContentModerationConfig(cfg *ContentModerationConfig) *ContentModerati
 }
 
 func (cfg *ContentModerationConfig) normalize() {
+	if cfg.ConfigVersion < 1 {
+		cfg.ConfigVersion = 1
+	}
 	if cfg.APIKey != "" {
 		cfg.APIKeys = normalizeModerationAPIKeys(append(cfg.APIKeys, cfg.APIKey))
 		cfg.APIKey = ""
@@ -2600,6 +2728,9 @@ func (cfg *ContentModerationConfig) normalize() {
 	}
 	if cfg.BuiltinRegexStrictThreshold > maxContentModerationBuiltinRegexStrictThreshold {
 		cfg.BuiltinRegexStrictThreshold = maxContentModerationBuiltinRegexStrictThreshold
+	}
+	if cfg.BuiltinRegexDefaultsVersion < 1 {
+		cfg.BuiltinRegexDefaultsVersion = currentContentModerationBuiltinRegexDefaultsVersion
 	}
 	cfg.BuiltinRegexRules = normalizeContentModerationBuiltinRegexRules(cfg.BuiltinRegexRules)
 	cfg.DisabledBuiltinRegexRules = normalizeDisabledContentModerationBuiltinRegexRules(cfg.DisabledBuiltinRegexRules)
@@ -2803,6 +2934,7 @@ func (s *ContentModerationService) configView(cfg *ContentModerationConfig) *Con
 		apiKeyMasked = masks[0]
 	}
 	return &ContentModerationConfigView{
+		ConfigVersion:                  cfg.ConfigVersion,
 		Enabled:                        cfg.Enabled,
 		Mode:                           cfg.Mode,
 		EndpointType:                   cfg.EndpointType,
@@ -3116,6 +3248,7 @@ type moderationAPIResult struct {
 	Confidence     float64            `json:"confidence,omitempty"`
 	Reason         string             `json:"reason,omitempty"`
 	Source         string             `json:"source,omitempty"`
+	Categories     map[string]bool    `json:"categories,omitempty"`
 	CategoryScores map[string]float64 `json:"category_scores"`
 }
 
@@ -3190,6 +3323,9 @@ func decodeChatCompletionAuditResponse(reader io.Reader, confidenceThreshold flo
 	decoder.UseNumber()
 	if err := decoder.Decode(&decision); err != nil {
 		return nil, fmt.Errorf("decode chat completion audit decision: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return nil, errors.New("chat completion audit must return exactly one JSON object")
 	}
 	flagged, hasFlagged := parseAuditBool(decision.Flagged)
 	confidence, hasConfidence, err := parseAuditConfidence(decision.Confidence)
@@ -3276,7 +3412,7 @@ func parseAuditConfidence(value any) (float64, bool, error) {
 		return 0, false, errors.New("chat completion audit confidence has invalid type")
 	}
 	confidence, err := strconv.ParseFloat(raw, 64)
-	if err != nil || confidence < 0 || confidence > 1 {
+	if err != nil || math.IsNaN(confidence) || math.IsInf(confidence, 0) || confidence < 0 || confidence > 1 {
 		return 0, false, errors.New("chat completion audit confidence must be between 0 and 1")
 	}
 	return confidence, true, nil
@@ -3320,7 +3456,71 @@ func evaluateContentModerationResult(result *moderationAPIResult, cfg *ContentMo
 	if cfg != nil {
 		thresholds = cfg.Thresholds
 	}
-	return evaluateModerationScores(result.CategoryScores, thresholds)
+	flagged, highestCategory, highestScore := evaluateModerationScores(result.CategoryScores, thresholds)
+	if flagged || !result.Flagged {
+		return flagged, highestCategory, highestScore
+	}
+	for category, categoryFlagged := range result.Categories {
+		if !categoryFlagged || !isKnownContentModerationCategory(category) {
+			continue
+		}
+		if _, hasScore := result.CategoryScores[category]; !hasScore {
+			return true, category, 1
+		}
+	}
+	unknownCategory, unknownScore := highestFlaggedUnknownModerationCategory(result)
+	if unknownCategory != "" {
+		return true, unknownCategory, unknownScore
+	}
+	if len(result.Categories) == 0 && len(result.CategoryScores) == 0 {
+		return true, "upstream_flagged", 1
+	}
+	for _, categoryFlagged := range result.Categories {
+		if categoryFlagged {
+			return false, highestCategory, highestScore
+		}
+	}
+	if len(result.Categories) > 0 {
+		return true, "upstream_flagged", 1
+	}
+	return false, highestCategory, highestScore
+}
+
+func highestFlaggedUnknownModerationCategory(result *moderationAPIResult) (string, float64) {
+	if result == nil {
+		return "", 0
+	}
+	category := ""
+	score := 0.0
+	for name, categoryFlagged := range result.Categories {
+		if !categoryFlagged || isKnownContentModerationCategory(name) {
+			continue
+		}
+		if value := result.CategoryScores[name]; category == "" || value > score || (value == score && name < category) {
+			category, score = name, value
+		}
+	}
+	if category != "" {
+		return category, score
+	}
+	for name, value := range result.CategoryScores {
+		if isKnownContentModerationCategory(name) {
+			continue
+		}
+		if category == "" || value > score || (value == score && name < category) {
+			category, score = name, value
+		}
+	}
+	return category, score
+}
+
+func isKnownContentModerationCategory(category string) bool {
+	for _, known := range contentModerationCategoryOrder {
+		if category == known {
+			return true
+		}
+	}
+	return false
 }
 
 func mergeContentModerationThresholds(base map[string]float64, override map[string]float64) map[string]float64 {

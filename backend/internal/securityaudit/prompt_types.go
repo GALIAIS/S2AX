@@ -160,13 +160,15 @@ type PromptDecision struct {
 }
 
 type LegacyDecision struct {
-	Allowed    bool   `json:"allowed"`
-	Blocked    bool   `json:"blocked"`
-	Flagged    bool   `json:"flagged"`
-	Message    string `json:"message"`
-	StatusCode int    `json:"status_code"`
-	ErrorCode  string `json:"error_code"`
-	Action     string `json:"action"`
+	Allowed        bool   `json:"allowed"`
+	Blocked        bool   `json:"blocked"`
+	Flagged        bool   `json:"flagged"`
+	LocalEvaluated bool   `json:"local_evaluated"`
+	LocalFlagged   bool   `json:"local_flagged"`
+	Message        string `json:"message"`
+	StatusCode     int    `json:"status_code"`
+	ErrorCode      string `json:"error_code"`
+	Action         string `json:"action"`
 }
 
 type Decision struct {

@@ -20,34 +20,35 @@ func NewContentModerationHandler(svc *service.ContentModerationService) *Content
 }
 
 type contentModerationConfigRequest struct {
-	Enabled              *bool               `json:"enabled"`
-	Mode                 *string             `json:"mode"`
-	EndpointType         *string             `json:"endpoint_type"`
-	BaseURL              *string             `json:"base_url"`
-	Model                *string             `json:"model"`
-	AuditPrompt          *string             `json:"audit_prompt"`
-	ConfidenceThreshold  *float64            `json:"confidence_threshold"`
-	ProxyID              *int64              `json:"proxy_id"`
-	APIKey               *string             `json:"api_key"`
-	APIKeys              *[]string           `json:"api_keys"`
-	APIKeysMode          string              `json:"api_keys_mode"`
-	DeleteAPIKeyHashes   *[]string           `json:"delete_api_key_hashes"`
-	ClearAPIKey          bool                `json:"clear_api_key"`
-	TimeoutMS            *int                `json:"timeout_ms"`
-	SampleRate           *int                `json:"sample_rate"`
-	AllGroups            *bool               `json:"all_groups"`
-	GroupIDs             *[]int64            `json:"group_ids"`
-	RecordNonHits        *bool               `json:"record_non_hits"`
-	ContextMessageLimit  *int                `json:"context_message_limit"`
-	Thresholds           *map[string]float64 `json:"thresholds"`
-	WorkerCount          *int                `json:"worker_count"`
-	QueueSize            *int                `json:"queue_size"`
-	BlockStatus          *int                `json:"block_status"`
-	BlockMessage         *string             `json:"block_message"`
-	EmailOnHit           *bool               `json:"email_on_hit"`
-	AutoBanEnabled       *bool               `json:"auto_ban_enabled"`
-	BanThreshold         *int                `json:"ban_threshold"`
-	ViolationWindowHours *int                `json:"violation_window_hours"`
+	ExpectedConfigVersion *int64              `json:"expected_config_version"`
+	Enabled               *bool               `json:"enabled"`
+	Mode                  *string             `json:"mode"`
+	EndpointType          *string             `json:"endpoint_type"`
+	BaseURL               *string             `json:"base_url"`
+	Model                 *string             `json:"model"`
+	AuditPrompt           *string             `json:"audit_prompt"`
+	ConfidenceThreshold   *float64            `json:"confidence_threshold"`
+	ProxyID               *int64              `json:"proxy_id"`
+	APIKey                *string             `json:"api_key"`
+	APIKeys               *[]string           `json:"api_keys"`
+	APIKeysMode           string              `json:"api_keys_mode"`
+	DeleteAPIKeyHashes    *[]string           `json:"delete_api_key_hashes"`
+	ClearAPIKey           bool                `json:"clear_api_key"`
+	TimeoutMS             *int                `json:"timeout_ms"`
+	SampleRate            *int                `json:"sample_rate"`
+	AllGroups             *bool               `json:"all_groups"`
+	GroupIDs              *[]int64            `json:"group_ids"`
+	RecordNonHits         *bool               `json:"record_non_hits"`
+	ContextMessageLimit   *int                `json:"context_message_limit"`
+	Thresholds            *map[string]float64 `json:"thresholds"`
+	WorkerCount           *int                `json:"worker_count"`
+	QueueSize             *int                `json:"queue_size"`
+	BlockStatus           *int                `json:"block_status"`
+	BlockMessage          *string             `json:"block_message"`
+	EmailOnHit            *bool               `json:"email_on_hit"`
+	AutoBanEnabled        *bool               `json:"auto_ban_enabled"`
+	BanThreshold          *int                `json:"ban_threshold"`
+	ViolationWindowHours  *int                `json:"violation_window_hours"`
 	// cyber_policy 命中是否排除出自动封号计数；前端 RiskControlView 已发送该字段，
 	// service.UpdateContentModerationConfigInput 已支持，此前 handler 层缺透传导致开关静默失效。
 	CyberPolicyExcludeFromBanCount *bool                                 `json:"cyber_policy_exclude_from_ban_count"`
@@ -71,7 +72,7 @@ type contentModerationAPIKeyTestRequest struct {
 	BaseURL             string   `json:"base_url"`
 	Model               string   `json:"model"`
 	AuditPrompt         string   `json:"audit_prompt"`
-	ConfidenceThreshold float64  `json:"confidence_threshold"`
+	ConfidenceThreshold *float64 `json:"confidence_threshold"`
 	TimeoutMS           int      `json:"timeout_ms"`
 	ProxyID             *int64   `json:"proxy_id"`
 	Prompt              string   `json:"prompt"`
@@ -97,7 +98,12 @@ func (h *ContentModerationHandler) UpdateConfig(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	if req.ExpectedConfigVersion == nil || *req.ExpectedConfigVersion < 1 {
+		response.BadRequest(c, "expected_config_version is required")
+		return
+	}
 	cfg, err := h.service.UpdateConfig(c.Request.Context(), service.UpdateContentModerationConfigInput{
+		ExpectedConfigVersion:          req.ExpectedConfigVersion,
 		Enabled:                        req.Enabled,
 		Mode:                           req.Mode,
 		EndpointType:                   req.EndpointType,

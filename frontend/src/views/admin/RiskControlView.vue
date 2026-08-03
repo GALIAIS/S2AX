@@ -423,12 +423,33 @@
                 <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ modeDescription(configForm.mode) }}</p>
               </div>
               <div>
+                <label class="input-label">{{ t('admin.riskControl.endpointType') }}</label>
+                <Select v-model="configForm.endpoint_type" :options="endpointTypeOptions" />
+                <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">
+                  {{ configForm.endpoint_type === 'moderation' ? t('admin.riskControl.endpointModerationDesc') : t('admin.riskControl.endpointChatDesc') }}
+                </p>
+              </div>
+              <div>
                 <label class="input-label">{{ t('admin.riskControl.baseUrl') }}</label>
                 <input v-model.trim="configForm.base_url" type="url" class="input" placeholder="https://api.openai.com" />
               </div>
               <div>
                 <label class="input-label">{{ t('admin.riskControl.model') }}</label>
-                <input v-model.trim="configForm.model" type="text" class="input" placeholder="omni-moderation-latest" />
+                <input v-model.trim="configForm.model" type="text" class="input" :placeholder="configForm.endpoint_type === 'moderation' ? 'omni-moderation-latest' : 'deepseek-v4-flash'" />
+              </div>
+              <div v-if="configForm.endpoint_type === 'chat_completions'" class="lg:col-span-2">
+                <label class="input-label">{{ t('admin.riskControl.auditPrompt') }}</label>
+                <textarea v-model="configForm.audit_prompt" rows="12" class="input min-h-64 resize-y font-mono text-xs leading-5" />
+                <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.auditPromptHint') }}</p>
+              </div>
+              <div v-if="configForm.endpoint_type === 'chat_completions'">
+                <label class="input-label">{{ t('admin.riskControl.confidenceThreshold') }}</label>
+                <input v-model.number="configForm.confidence_threshold" type="number" min="0.01" max="1" step="0.01" class="input" />
+              </div>
+              <div>
+                <label class="input-label">{{ t('admin.riskControl.contextMessageLimit') }}</label>
+                <input v-model.number="configForm.context_message_limit" type="number" min="1" max="20" step="1" class="input" />
+                <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.contextMessageLimitHint') }}</p>
               </div>
               <div>
                 <label class="input-label">{{ t('admin.riskControl.timeoutMs') }}</label>
@@ -450,6 +471,10 @@
                 <ProxySelector v-model="configForm.proxy_id" :proxies="proxies" />
                 <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.proxyHint') }}</p>
               </div>
+            </div>
+
+            <div class="border border-primary-200 bg-primary-50 px-4 py-3 text-xs leading-5 text-primary-800 dark:border-primary-900/50 dark:bg-primary-900/15 dark:text-primary-200">
+              {{ t('admin.riskControl.policyCompositionHint') }}
             </div>
 
             <div class="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800">
@@ -689,6 +714,12 @@
                         <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.auditTestResult') }}</p>
                         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                           {{ t('admin.riskControl.auditTestHighest', { category: moderationTestResult.highest_category || '-', score: percent(moderationTestResult.highest_score) }) }}
+                        </p>
+                        <p v-if="moderationTestResult.reason" class="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">
+                          {{ t('admin.riskControl.auditTestReason', { reason: moderationTestResult.reason }) }}
+                        </p>
+                        <p v-if="moderationTestResult.source" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          {{ t('admin.riskControl.auditTestSource', { source: moderationTestResult.source }) }}
                         </p>
                       </div>
                       <span class="inline-flex rounded-full px-2 py-1 text-xs font-medium" :class="moderationTestResult.flagged ? 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300'">
@@ -1239,6 +1270,7 @@ import type {
   ContentModerationAPIKeyLoad,
   ContentModerationAPIKeyStatus,
   ContentModerationConfig,
+  ContentModerationEndpointType,
   ContentModerationLog,
   ContentModerationModelFilter,
   ContentModerationModelFilterType,
@@ -1251,7 +1283,7 @@ import type {
 } from '@/api/admin/riskControl'
 import type { AdminGroup, Proxy, SelectOption } from '@/types'
 import { useAppStore } from '@/stores/app'
-import { extractApiErrorMessage } from '@/utils/apiError'
+import { extractApiErrorCode, extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime as formatDateTimeValue } from '@/utils/format'
 import { useUrlQueryBindings, parseNumberQuery, parseStringQuery } from '@/composables/useUrlQueryBindings'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
@@ -1324,10 +1356,14 @@ let logsAbortController: AbortController | null = null
 let logsRequestSequence = 0
 
 const configForm = reactive({
+  config_version: 1,
   enabled: false,
   mode: 'pre_block' as ModerationMode,
+  endpoint_type: 'moderation' as ContentModerationEndpointType,
   base_url: 'https://api.openai.com',
   model: 'omni-moderation-latest',
+  audit_prompt: '',
+  confidence_threshold: 0.85,
   proxy_id: null as number | null,
   api_keys_text: '',
   api_key_configured: false,
@@ -1343,6 +1379,7 @@ const configForm = reactive({
   all_groups: true,
   group_ids: [] as number[],
   record_non_hits: false,
+  context_message_limit: 6,
   worker_count: 4,
   queue_size: 32768,
   block_status: 403,
@@ -1411,6 +1448,11 @@ const modeOptions = computed<SelectOption[]>(() => [
   { value: 'off', label: t('admin.riskControl.modeOff') },
 ])
 
+const endpointTypeOptions = computed<SelectOption[]>(() => [
+  { value: 'moderation', label: t('admin.riskControl.endpointModeration') },
+  { value: 'chat_completions', label: t('admin.riskControl.endpointChat') },
+])
+
 const keywordBlockingModeOptions = computed<Array<{ value: KeywordBlockingMode; label: string; description: string }>>(() => [
   {
     value: 'keyword_and_api',
@@ -1473,6 +1515,13 @@ const keywordNoticeTones = {
 
 const keywordNotice = computed<KeywordNoticeView>(() => {
   const strategy = configForm.keyword_blocking_mode
+  if (configForm.mode === 'off') {
+    return {
+      ...keywordNoticeTones.warning,
+      title: t('admin.riskControl.blockedKeywordsModeWarning', { mode: modeLabel(configForm.mode) }),
+      description: t('admin.riskControl.blockedKeywordsDescription'),
+    }
+  }
   if (strategy === 'api_only') {
     return {
       ...keywordNoticeTones.info,
@@ -1480,10 +1529,10 @@ const keywordNotice = computed<KeywordNoticeView>(() => {
       description: t('admin.riskControl.keywordModeApiOnlyDesc'),
     }
   }
-  if (configForm.mode !== 'pre_block') {
+  if (configForm.mode === 'observe') {
     return {
-      ...keywordNoticeTones.warning,
-      title: t('admin.riskControl.blockedKeywordsModeWarning', { mode: modeLabel(configForm.mode) }),
+      ...keywordNoticeTones.info,
+      title: t('admin.riskControl.blockedKeywordsObserveHint'),
       description: t('admin.riskControl.blockedKeywordsDescription'),
     }
   }
@@ -1816,10 +1865,14 @@ const runtimeBadgeClass = computed(() => {
 })
 
 function applyConfig(config: ContentModerationConfig) {
+  configForm.config_version = config.config_version || 1
   configForm.enabled = config.enabled
   configForm.mode = config.mode
+  configForm.endpoint_type = config.endpoint_type || 'moderation'
   configForm.base_url = config.base_url || 'https://api.openai.com'
   configForm.model = config.model || 'omni-moderation-latest'
+  configForm.audit_prompt = config.audit_prompt || ''
+  configForm.confidence_threshold = config.confidence_threshold || 0.85
   configForm.proxy_id = config.proxy_id || null
   configForm.api_keys_text = ''
   configForm.api_key_configured = config.api_key_configured
@@ -1838,6 +1891,7 @@ function applyConfig(config: ContentModerationConfig) {
   configForm.all_groups = config.all_groups
   configForm.group_ids = Array.isArray(config.group_ids) ? [...config.group_ids] : []
   configForm.record_non_hits = config.record_non_hits
+  configForm.context_message_limit = config.context_message_limit || 6
   configForm.worker_count = config.worker_count || 4
   configForm.queue_size = config.queue_size || 32768
   configForm.block_status = config.block_status || 403
@@ -1926,12 +1980,30 @@ async function saveConfig() {
       appStore.showError(t('admin.riskControl.modelFilterModelsRequired'))
       return
     }
+    if (configForm.enabled && configForm.mode !== 'off' && !configForm.all_groups && configForm.group_ids.length === 0) {
+      appStore.showError(t('admin.riskControl.groupScopeRequired'))
+      return
+    }
+    if (configForm.endpoint_type === 'chat_completions') {
+      if (!configForm.audit_prompt.trim()) {
+        appStore.showError(t('admin.riskControl.auditPromptRequired'))
+        return
+      }
+      if (configForm.confidence_threshold <= 0 || configForm.confidence_threshold > 1) {
+        appStore.showError(t('admin.riskControl.confidenceThresholdInvalid'))
+        return
+      }
+    }
     if (!validateBuiltinRegexRules()) return
     const payload: UpdateContentModerationConfig = {
+      expected_config_version: configForm.config_version,
       enabled: configForm.enabled,
       mode: configForm.mode,
+      endpoint_type: configForm.endpoint_type,
       base_url: configForm.base_url,
       model: configForm.model,
+      audit_prompt: configForm.audit_prompt,
+      confidence_threshold: Number(configForm.confidence_threshold) || 0.85,
       // 后端语义：0 清除代理（直连），>0 指定代理
       proxy_id: configForm.proxy_id ?? 0,
       timeout_ms: Number(configForm.timeout_ms) || 3000,
@@ -1940,6 +2012,7 @@ async function saveConfig() {
       all_groups: configForm.all_groups,
       group_ids: configForm.all_groups ? [] : [...configForm.group_ids],
       record_non_hits: configForm.record_non_hits,
+      context_message_limit: Math.min(Math.max(Number(configForm.context_message_limit) || 6, 1), 20),
       clear_api_key: configForm.clear_api_key,
       worker_count: Number(configForm.worker_count) || 4,
       queue_size: Number(configForm.queue_size) || 32768,
@@ -1975,6 +2048,24 @@ async function saveConfig() {
     if (!payload.clear_api_key && configForm.api_keys_mode !== 'replace' && pendingDeleteApiKeyHashes.value.length > 0) {
       payload.delete_api_key_hashes = [...pendingDeleteApiKeyHashes.value]
     }
+    const active = payload.enabled && payload.mode !== 'off'
+    const remoteEnabled = payload.keyword_blocking_mode !== 'keyword_only' && (payload.sample_rate ?? 0) > 0
+    const remainingKeyCount = payload.clear_api_key
+      ? 0
+      : configForm.api_keys_mode === 'replace'
+        ? keys.length
+        : effectiveStoredApiKeyCount.value + keys.length
+    if (active && remoteEnabled && remainingKeyCount === 0) {
+      appStore.showError(t('admin.riskControl.apiKeyRequiredForRemote'))
+      return
+    }
+    const localEnabled = (payload.keyword_blocking_mode !== 'api_only' && blockedKeywordList.value.length > 0)
+      || Boolean(payload.builtin_regex_enabled && payload.builtin_regex_rules?.length)
+      || Boolean(payload.mode === 'pre_block' && payload.pre_hash_check_enabled)
+    if (active && !remoteEnabled && !localEnabled) {
+      appStore.showError(t('admin.riskControl.detectorRequired'))
+      return
+    }
 
     const updated = await adminAPI.riskControl.updateConfig(payload)
     applyConfig(updated)
@@ -1982,7 +2073,11 @@ async function saveConfig() {
     appStore.showSuccess(t('admin.riskControl.saved'))
     await Promise.all([loadStatus(true), loadLogs()])
   } catch (err: unknown) {
-    appStore.showError(extractApiErrorMessage(err, t('admin.riskControl.saveFailed')))
+    appStore.showError(
+      extractApiErrorCode(err) === 'CONTENT_MODERATION_CONFIG_CONFLICT'
+        ? t('admin.riskControl.configConflict')
+        : extractApiErrorMessage(err, t('admin.riskControl.saveFailed')),
+    )
   } finally {
     saving.value = false
   }
@@ -2152,8 +2247,11 @@ async function testApiKeys(useInputKeys: boolean) {
   try {
     const result = await adminAPI.riskControl.testAPIKeys({
       api_keys: keys,
+      endpoint_type: configForm.endpoint_type,
       base_url: configForm.base_url,
       model: configForm.model,
+      audit_prompt: configForm.audit_prompt,
+      confidence_threshold: Number(configForm.confidence_threshold) || 0.85,
       timeout_ms: Number(configForm.timeout_ms) || 3000,
       // 与保存语义一致：0 强制直连，>0 指定代理，确保测试与实际审计走同一条链路
       proxy_id: configForm.proxy_id ?? 0,

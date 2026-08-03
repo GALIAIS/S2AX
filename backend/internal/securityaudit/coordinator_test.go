@@ -154,6 +154,36 @@ func TestCoordinatorPreservesIndependentEngineFactsAndMapsOnlyGatewayOutcome(t *
 	require.Equal(t, ErrorCodeBlocked, decision.ErrorCode)
 }
 
+func TestCoordinatorFallbackLocalRequiresAndUsesLocalVerdict(t *testing.T) {
+	fallback := &PromptDecision{Kind: DecisionUnavailable, FailureMode: FailureFallbackLocal}
+
+	clean := prioritize(&LegacyDecision{Allowed: true, LocalEvaluated: true}, fallback)
+	require.Equal(t, DecisionAllow, clean.Kind)
+	require.True(t, clean.AllowNextStage)
+
+	flagged := prioritize(&LegacyDecision{
+		Allowed: true, Flagged: true, LocalEvaluated: true, LocalFlagged: true,
+		StatusCode: http.StatusForbidden, ErrorCode: "local_policy", Message: "local finding",
+	}, fallback)
+	require.Equal(t, DecisionBlock, flagged.Kind)
+	require.False(t, flagged.AllowNextStage)
+	require.Equal(t, "local_policy", flagged.ErrorCode)
+	require.Equal(t, "local finding", flagged.ClientMessage)
+
+	remoteOnly := prioritize(&LegacyDecision{
+		Allowed: true, Flagged: true, LocalEvaluated: true, LocalFlagged: false,
+	}, fallback)
+	require.Equal(t, DecisionAllow, remoteOnly.Kind)
+	require.True(t, remoteOnly.AllowNextStage)
+
+	for _, legacy := range []*LegacyDecision{nil, {Allowed: true}} {
+		unavailable := prioritize(legacy, fallback)
+		require.Equal(t, DecisionUnavailable, unavailable.Kind)
+		require.Equal(t, http.StatusServiceUnavailable, unavailable.HTTPStatus)
+		require.False(t, unavailable.AllowNextStage)
+	}
+}
+
 func TestCoordinatorAsyncEnqueueFailuresNeverChangeResponseOrDownstreamDispatch(t *testing.T) {
 	for _, enqueueErr := range []error{ErrQueueFull, ErrQueueAdmissionBusy, errors.New("redis unavailable"), errors.New("publish failed")} {
 		prompt := &fakePromptEngine{mode: ModeAsync, err: enqueueErr}

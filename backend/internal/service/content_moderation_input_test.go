@@ -1,10 +1,22 @@
 package service
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestContentModerationInputNormalizePreservesBothEnds(t *testing.T) {
+	input := ContentModerationInput{Text: strings.Repeat("A", maxModerationInputRunes) + "MIDDLE" + strings.Repeat("Z", maxModerationInputRunes)}
+
+	input.Normalize()
+
+	require.Len(t, []rune(input.Text), maxModerationInputRunes)
+	require.True(t, strings.HasPrefix(input.Text, "AAAA"))
+	require.True(t, strings.HasSuffix(input.Text, "ZZZZ"))
+	require.NotContains(t, input.Text, "MIDDLE")
+}
 
 // 当数组末尾不是用户消息时（典型场景：Agent 工具循环结束于 tool/assistant），
 // 应直接跳过审计——不再回溯查找历史中的某条用户消息。

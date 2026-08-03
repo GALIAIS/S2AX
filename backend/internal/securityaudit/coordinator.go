@@ -109,6 +109,29 @@ func prioritize(legacy *LegacyDecision, prompt *PromptDecision) Decision {
 	if prompt == nil {
 		return allowDecision(legacy, nil)
 	}
+	if prompt.FailureMode == FailureFallbackLocal {
+		if legacy == nil || !legacy.LocalEvaluated {
+			return Decision{Kind: DecisionUnavailable, HTTPStatus: http.StatusServiceUnavailable, ErrorCode: ErrorCodeUnavailable,
+				ClientMessage: "本地内容审计不可用，请稍后重试", Legacy: legacy, Prompt: prompt}
+		}
+		if legacy.LocalFlagged {
+			status := legacy.StatusCode
+			if status < 400 || status > 599 {
+				status = http.StatusForbidden
+			}
+			code := legacy.ErrorCode
+			if code == "" {
+				code = "content_policy_violation"
+			}
+			message := legacy.Message
+			if message == "" {
+				message = "本地内容审计命中风险规则，请调整输入后重试"
+			}
+			return Decision{Kind: DecisionBlock, HTTPStatus: status, ErrorCode: code, ClientMessage: message,
+				Legacy: legacy, Prompt: prompt, AllowNextStage: false}
+		}
+		return allowDecision(legacy, prompt)
+	}
 	switch prompt.Kind {
 	case DecisionBlock:
 		return Decision{Kind: DecisionBlock, HTTPStatus: http.StatusForbidden, ErrorCode: ErrorCodeBlocked,

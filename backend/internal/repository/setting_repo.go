@@ -53,6 +53,23 @@ func (r *settingRepository) Set(ctx context.Context, key, value string) error {
 		Exec(ctx)
 }
 
+func (r *settingRepository) CompareAndSet(ctx context.Context, key string, expectedValue *string, value string) (bool, error) {
+	now := time.Now()
+	if expectedValue == nil {
+		_, err := r.client.Setting.Create().SetKey(key).SetValue(value).SetUpdatedAt(now).Save(ctx)
+		if ent.IsConstraintError(err) {
+			return false, nil
+		}
+		return err == nil, err
+	}
+	updated, err := r.client.Setting.Update().
+		Where(setting.KeyEQ(key), setting.ValueEQ(*expectedValue)).
+		SetValue(value).
+		SetUpdatedAt(now).
+		Save(ctx)
+	return updated == 1, err
+}
+
 func (r *settingRepository) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
 	if len(keys) == 0 {
 		return map[string]string{}, nil

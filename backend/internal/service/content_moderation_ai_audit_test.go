@@ -51,6 +51,26 @@ func TestCallModerationOnceWithInputUsesChatCompletionsPayload(t *testing.T) {
 	assert.False(t, result.Flagged)
 }
 
+func TestContentModerationTestAPIKeysRejectsUnsavableRemoteContract(t *testing.T) {
+	t.Parallel()
+
+	service := NewContentModerationService(
+		&contentModerationTestSettingRepo{values: map[string]string{}},
+		nil, nil, nil, nil, nil, nil, nil,
+	)
+	negativeConfidence := -0.1
+	zeroConfidence := 0.0
+	for _, input := range []TestContentModerationAPIKeysInput{
+		{APIKeys: []string{"sk-test"}, EndpointType: "unknown"},
+		{APIKeys: []string{"sk-test"}, BaseURL: "/relative"},
+		{APIKeys: []string{"sk-test"}, EndpointType: ContentModerationEndpointChatCompletions, ConfidenceThreshold: &negativeConfidence},
+		{APIKeys: []string{"sk-test"}, EndpointType: ContentModerationEndpointChatCompletions, ConfidenceThreshold: &zeroConfidence},
+	} {
+		_, err := service.TestAPIKeys(t.Context(), input)
+		require.Error(t, err)
+	}
+}
+
 func TestBuildContentModerationEndpoint(t *testing.T) {
 	t.Parallel()
 
@@ -123,6 +143,25 @@ func TestDecodeChatCompletionAuditResponseSupportsConfidenceOnly(t *testing.T) {
 	assert.Equal(t, 0.03, result.Confidence)
 }
 
+func TestDecodeChatCompletionAuditResponseRejectsNonFiniteConfidence(t *testing.T) {
+	t.Parallel()
+
+	for _, confidence := range []string{"NaN", "+Inf", "-Inf"} {
+		body := `{"choices":[{"message":{"content":"{\"confidence\":\"` + confidence + `\"}"}}]}`
+		_, err := decodeChatCompletionAuditResponse(strings.NewReader(body), 0.85)
+		require.ErrorContains(t, err, "between 0 and 1")
+	}
+}
+
+func TestDecodeChatCompletionAuditResponseRejectsMultipleDecisions(t *testing.T) {
+	t.Parallel()
+
+	body := `{"choices":[{"message":{"content":"{\"flagged\":false,\"confidence\":0.01} {\"flagged\":true,\"confidence\":0.99}"}}]}`
+	_, err := decodeChatCompletionAuditResponse(strings.NewReader(body), 0.85)
+
+	require.ErrorContains(t, err, "exactly one JSON object")
+}
+
 func TestContentModerationThresholdSnapshotUsesAIConfidenceThreshold(t *testing.T) {
 	t.Parallel()
 
@@ -131,4 +170,64 @@ func TestContentModerationThresholdSnapshotUsesAIConfidenceThreshold(t *testing.
 	cfg.ConfidenceThreshold = 0.72
 
 	assert.Equal(t, map[string]float64{contentModerationAIAuditCategory: 0.72}, contentModerationThresholdSnapshot(cfg))
+}
+
+func TestEvaluateContentModerationResultHandlesUnknownUpstreamCategories(t *testing.T) {
+	cfg := defaultContentModerationConfig()
+
+	flagged, category, score := evaluateContentModerationResult(&moderationAPIResult{
+		Flagged:        true,
+		Categories:     map[string]bool{"new_policy_category": true},
+		CategoryScores: map[string]float64{"new_policy_category": 0.91},
+	}, cfg)
+	require.True(t, flagged)
+	require.Equal(t, "new_policy_category", category)
+	require.Equal(t, 0.91, score)
+
+	flagged, category, score = evaluateContentModerationResult(&moderationAPIResult{Flagged: true}, cfg)
+	require.True(t, flagged)
+	require.Equal(t, "upstream_flagged", category)
+	require.Equal(t, 1.0, score)
+}
+
+func TestEvaluateContentModerationResultHonorsThresholdsForKnownCategories(t *testing.T) {
+	cfg := defaultContentModerationConfig()
+	cfg.Thresholds["sexual"] = 0.95
+
+	flagged, category, score := evaluateContentModerationResult(&moderationAPIResult{
+		Flagged:        true,
+		Categories:     map[string]bool{"sexual": true},
+		CategoryScores: map[string]float64{"sexual": 0.80},
+	}, cfg)
+
+	require.False(t, flagged)
+	require.Equal(t, "sexual", category)
+	require.Equal(t, 0.80, score)
+}
+
+func TestEvaluateContentModerationResultFailsClosedWhenFlaggedCategoryHasNoScore(t *testing.T) {
+	cfg := defaultContentModerationConfig()
+
+	flagged, category, score := evaluateContentModerationResult(&moderationAPIResult{
+		Flagged:    true,
+		Categories: map[string]bool{"sexual": true},
+	}, cfg)
+
+	require.True(t, flagged)
+	require.Equal(t, "sexual", category)
+	require.Equal(t, 1.0, score)
+}
+
+func TestEvaluateContentModerationResultFailsClosedOnInconsistentAggregateFlag(t *testing.T) {
+	cfg := defaultContentModerationConfig()
+
+	flagged, category, score := evaluateContentModerationResult(&moderationAPIResult{
+		Flagged:        true,
+		Categories:     map[string]bool{"new_policy_category": false},
+		CategoryScores: map[string]float64{"new_policy_category": 0.91},
+	}, cfg)
+
+	require.True(t, flagged)
+	require.Equal(t, "new_policy_category", category)
+	require.Equal(t, 0.91, score)
 }

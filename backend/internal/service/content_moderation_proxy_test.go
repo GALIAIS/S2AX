@@ -208,7 +208,8 @@ func TestContentModerationUpdateConfigProxyIDSemantics(t *testing.T) {
 
 	// nil 表示不修改，代理保持不变。
 	enabled := true
-	view, err = svc.UpdateConfig(ctx, UpdateContentModerationConfigInput{Enabled: &enabled})
+	apiKeys := []string{"sk-test"}
+	view, err = svc.UpdateConfig(ctx, UpdateContentModerationConfigInput{Enabled: &enabled, APIKeys: &apiKeys})
 	if err != nil {
 		t.Fatalf("update unrelated field: %v", err)
 	}

@@ -55,6 +55,7 @@ vi.mock('@/stores/app', () => ({
 }))
 
 vi.mock('@/utils/apiError', () => ({
+  extractApiErrorCode: (err: unknown) => (err as { reason?: string } | null)?.reason,
   extractApiErrorMessage: (_err: unknown, fallback: string) => fallback,
 }))
 
@@ -74,21 +75,26 @@ vi.mock('vue-i18n', async () => {
 })
 
 const baseConfig = (): ContentModerationConfig => ({
+  config_version: 1,
   enabled: true,
   mode: 'pre_block',
+  endpoint_type: 'moderation',
   base_url: 'https://api.openai.com',
   model: 'omni-moderation-latest',
+  audit_prompt: 'Return JSON only.',
+  confidence_threshold: 0.85,
   proxy_id: null,
-  api_key_configured: false,
-  api_key_masked: '',
-  api_key_count: 0,
-  api_key_masks: [],
+  api_key_configured: true,
+  api_key_masked: 'sk-...test',
+  api_key_count: 1,
+  api_key_masks: ['sk-...test'],
   api_key_statuses: [],
   timeout_ms: 3000,
   sample_rate: 100,
   all_groups: true,
   group_ids: [],
   record_non_hits: false,
+  context_message_limit: 6,
   worker_count: 4,
   queue_size: 32768,
   block_status: 403,
@@ -101,6 +107,7 @@ const baseConfig = (): ContentModerationConfig => ({
   hit_retention_days: 180,
   non_hit_retention_days: 3,
   pre_hash_check_enabled: false,
+  cyber_policy_exclude_from_ban_count: false,
   blocked_keywords: [],
   keyword_blocking_mode: 'keyword_and_api',
   thresholds: {
@@ -208,11 +215,12 @@ describe('admin RiskControlView', () => {
     updateConfig.mockImplementation(async (payload: UpdateContentModerationConfig) => ({
       ...baseConfig(),
       ...payload,
+      config_version: payload.expected_config_version + 1,
       model_filter: payload.model_filter ?? baseConfig().model_filter,
-      api_key_configured: false,
-      api_key_masked: '',
-      api_key_count: 0,
-      api_key_masks: [],
+      api_key_configured: true,
+      api_key_masked: 'sk-...test',
+      api_key_count: 1,
+      api_key_masks: ['sk-...test'],
       api_key_statuses: [],
     }))
   })
@@ -249,6 +257,73 @@ describe('admin RiskControlView', () => {
       },
     }))
     expect(showError).not.toHaveBeenCalled()
+  })
+
+  it('round-trips the complete Chat Completions audit contract and config version', async () => {
+    getConfig.mockResolvedValue({
+      ...baseConfig(),
+      config_version: 7,
+      endpoint_type: 'chat_completions',
+      model: 'deepseek-v4-flash',
+      audit_prompt: 'Audit only the configured narrow policy and return JSON.',
+      confidence_threshold: 0.91,
+      context_message_limit: 9,
+    })
+
+    const wrapper = mount(RiskControlView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          BaseDialog: BaseDialogStub,
+          Icon: true,
+          Select: true,
+          Toggle: true,
+          Pagination: true,
+          ModelWhitelistSelector: ModelWhitelistSelectorStub,
+          ProxySelector: true,
+        },
+      },
+    })
+
+    await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click')
+    await flushPromises()
+
+    expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({
+      expected_config_version: 7,
+      endpoint_type: 'chat_completions',
+      model: 'deepseek-v4-flash',
+      audit_prompt: 'Audit only the configured narrow policy and return JSON.',
+      confidence_threshold: 0.91,
+      context_message_limit: 9,
+    }))
+  })
+
+  it('reports a concurrent config update without claiming the save succeeded', async () => {
+    updateConfig.mockRejectedValue({ reason: 'CONTENT_MODERATION_CONFIG_CONFLICT' })
+    const wrapper = mount(RiskControlView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          BaseDialog: BaseDialogStub,
+          Icon: true,
+          Select: true,
+          Toggle: true,
+          Pagination: true,
+          ModelWhitelistSelector: ModelWhitelistSelectorStub,
+          ProxySelector: true,
+        },
+      },
+    })
+
+    await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click')
+    await flushPromises()
+
+    expect(showError).toHaveBeenCalledWith('admin.riskControl.configConflict')
+    expect(showSuccess).not.toHaveBeenCalled()
   })
 
   it('submits edited risk control thresholds when saving moderation config', async () => {

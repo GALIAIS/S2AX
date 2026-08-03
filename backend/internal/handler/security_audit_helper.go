@@ -64,6 +64,7 @@ func runSecurityAudit(c *gin.Context, reqLog *zap.Logger, coordinator *securitya
 		decision := securityaudit.Decision{Kind: securityaudit.DecisionAllow, HTTPStatus: http.StatusOK, AllowNextStage: true}
 		decision.Legacy = &securityaudit.LegacyDecision{
 			Allowed: legacyDecision.Allowed, Blocked: legacyDecision.Blocked, Flagged: legacyDecision.Flagged,
+			LocalEvaluated: legacyDecision.LocalEvaluated, LocalFlagged: legacyDecision.LocalFlagged,
 			Message: legacyDecision.Message, StatusCode: legacyDecision.StatusCode,
 			ErrorCode: "content_policy_violation", Action: legacyDecision.Action,
 		}

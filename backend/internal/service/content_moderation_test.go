@@ -18,7 +18,8 @@ import (
 )
 
 type contentModerationTestSettingRepo struct {
-	values map[string]string
+	values      map[string]string
+	casConflict bool
 }
 
 func (r *contentModerationTestSettingRepo) Get(ctx context.Context, key string) (*Setting, error) {
@@ -41,6 +42,25 @@ func (r *contentModerationTestSettingRepo) Set(ctx context.Context, key, value s
 	}
 	r.values[key] = value
 	return nil
+}
+
+func (r *contentModerationTestSettingRepo) CompareAndSet(ctx context.Context, key string, expectedValue *string, value string) (bool, error) {
+	if r.casConflict {
+		return false, nil
+	}
+	current, exists := r.values[key]
+	if expectedValue == nil {
+		if exists {
+			return false, nil
+		}
+	} else if !exists || current != *expectedValue {
+		return false, nil
+	}
+	if r.values == nil {
+		r.values = map[string]string{}
+	}
+	r.values[key] = value
+	return true, nil
 }
 
 func (r *contentModerationTestSettingRepo) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
@@ -579,7 +599,7 @@ func TestContentModerationCheck_PreBlockKeywordHitSkipsUpstreamCall(t *testing.T
 	require.Equal(t, "secret-token", logs[0].MatchedKeyword, "blocked log must record which keyword was hit")
 }
 
-func TestContentModerationCheck_KeywordsIgnoredInObserveMode(t *testing.T) {
+func TestContentModerationCheck_ObserveModeRecordsKeywordWithoutBlocking(t *testing.T) {
 	upstreamHits := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upstreamHits++
@@ -621,7 +641,15 @@ func TestContentModerationCheck_KeywordsIgnoredInObserveMode(t *testing.T) {
 
 	require.NoError(t, err)
 	require.True(t, decision.Allowed, "observe mode must let the request through even on keyword hit")
+	require.True(t, decision.Flagged)
+	require.True(t, decision.LocalEvaluated)
+	require.True(t, decision.LocalFlagged)
 	require.Equal(t, ContentModerationActionAllow, decision.Action)
+	require.Zero(t, upstreamHits, "a conclusive local finding must not make a duplicate remote call")
+	logs := requireContentModerationLogCount(t, repo, 1)
+	require.True(t, logs[0].Flagged)
+	require.Equal(t, ContentModerationActionAllow, logs[0].Action)
+	require.Equal(t, "secret-token", logs[0].MatchedKeyword)
 }
 
 func TestContentModerationCheck_ObserveModeSkipsPreHashLookup(t *testing.T) {
@@ -1024,6 +1052,107 @@ func TestContentModerationUpdateConfig_SavesCustomThresholds(t *testing.T) {
 	require.Equal(t, 0.72, saved.Thresholds["sexual"])
 	require.Equal(t, 1.0, saved.Thresholds["harassment"])
 	require.NotContains(t, saved.Thresholds, "unknown")
+}
+
+func TestContentModerationUpdateConfigUsesVersionedCompareAndSet(t *testing.T) {
+	repo := &contentModerationTestSettingRepo{values: map[string]string{}}
+	svc := NewContentModerationService(repo, nil, nil, nil, nil, nil, nil, nil)
+	version := int64(1)
+	enabled := false
+
+	view, err := svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{
+		ExpectedConfigVersion: &version,
+		Enabled:               &enabled,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, int64(2), view.ConfigVersion)
+	_, err = svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{
+		ExpectedConfigVersion: &version,
+		Enabled:               &enabled,
+	})
+	require.ErrorContains(t, err, "内容审计配置已被其他管理员更新")
+	reloaded, err := svc.GetConfig(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, int64(2), reloaded.ConfigVersion)
+}
+
+func TestContentModerationUpdateConfigRejectsStorageCASConflict(t *testing.T) {
+	cfg := defaultContentModerationConfig()
+	raw, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	repo := &contentModerationTestSettingRepo{
+		values:      map[string]string{SettingKeyContentModerationConfig: string(raw)},
+		casConflict: true,
+	}
+	svc := NewContentModerationService(repo, nil, nil, nil, nil, nil, nil, nil)
+	version := int64(1)
+
+	_, err = svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{ExpectedConfigVersion: &version})
+
+	require.ErrorContains(t, err, "内容审计配置已被其他管理员更新")
+}
+
+func TestContentModerationUpdateConfigRejectsUnsafeActiveScopesAndMissingDetectors(t *testing.T) {
+	tests := []struct {
+		name  string
+		input UpdateContentModerationConfigInput
+		want  string
+	}{
+		{
+			name:  "relative audit endpoint",
+			input: UpdateContentModerationConfigInput{BaseURL: contentModerationStringPtr("/v1/moderations")},
+			want:  "Base URL 无效",
+		},
+		{
+			name:  "unknown moderation strategy",
+			input: UpdateContentModerationConfigInput{KeywordBlockingMode: contentModerationStringPtr("unknown")},
+			want:  "内容审计策略无效",
+		},
+		{
+			name: "unknown model filter",
+			input: UpdateContentModerationConfigInput{ModelFilter: &ContentModerationModelFilter{
+				Type: "unknown", Models: []string{"gpt-*"},
+			}},
+			want: "内容审计模型筛选类型无效",
+		},
+		{
+			name: "empty group scope",
+			input: UpdateContentModerationConfigInput{
+				Enabled:   boolPtr(true),
+				AllGroups: boolPtr(false),
+				GroupIDs:  &[]int64{},
+			},
+			want: "必须选择全部分组或至少 1 个指定分组",
+		},
+		{
+			name:  "remote without key",
+			input: UpdateContentModerationConfigInput{Enabled: boolPtr(true)},
+			want:  "至少需要配置 1 个审核 API Key",
+		},
+		{
+			name: "local only without detector",
+			input: UpdateContentModerationConfigInput{
+				Enabled:             boolPtr(true),
+				KeywordBlockingMode: contentModerationStringPtr(ContentModerationKeywordModeKeywordOnly),
+				BuiltinRegexEnabled: boolPtr(false),
+				PreHashCheckEnabled: boolPtr(false),
+			},
+			want: "至少需要启用一种本地规则或远程审核",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := NewContentModerationService(&contentModerationTestSettingRepo{values: map[string]string{}}, nil, nil, nil, nil, nil, nil, nil)
+			_, err := svc.UpdateConfig(context.Background(), tt.input)
+			require.ErrorContains(t, err, tt.want)
+		})
+	}
+}
+
+func contentModerationStringPtr(value string) *string {
+	return &value
 }
 
 func TestExtractContentModerationInput_AnthropicImageSourceOnlyParticipatesInMemory(t *testing.T) {

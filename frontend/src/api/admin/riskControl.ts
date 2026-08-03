@@ -3,6 +3,7 @@ import type { FetchOptions } from '@/types'
 
 export type ModerationMode = 'off' | 'observe' | 'pre_block'
 export type KeywordBlockingMode = 'keyword_only' | 'keyword_and_api' | 'api_only'
+export type ContentModerationEndpointType = 'moderation' | 'chat_completions'
 export type ContentModerationModelFilterType = 'all' | 'include' | 'exclude'
 
 export interface ContentModerationRegexRule {
@@ -19,10 +20,14 @@ export interface ContentModerationModelFilter {
 }
 
 export interface ContentModerationConfig {
+  config_version: number
   enabled: boolean
   mode: ModerationMode
+  endpoint_type: ContentModerationEndpointType
   base_url: string
   model: string
+  audit_prompt: string
+  confidence_threshold: number
   proxy_id: number | null
   api_key_configured: boolean
   api_key_masked: string
@@ -34,6 +39,7 @@ export interface ContentModerationConfig {
   all_groups: boolean
   group_ids: number[]
   record_non_hits: boolean
+  context_message_limit: number
   thresholds: Record<string, number>
   default_thresholds?: Record<string, number>
   worker_count: number
@@ -81,8 +87,11 @@ export interface ContentModerationAPIKeyStatus {
 
 export interface TestContentModerationAPIKeysPayload {
   api_keys?: string[]
+  endpoint_type?: ContentModerationEndpointType
   base_url?: string
   model?: string
+  audit_prompt?: string
+  confidence_threshold?: number
   timeout_ms?: number
   // null/undefined 沿用已保存配置的代理；0 强制直连；>0 指定代理
   proxy_id?: number
@@ -101,15 +110,22 @@ export interface ContentModerationTestAuditResult {
   highest_category: string
   highest_score: number
   composite_score: number
+  confidence: number
+  reason: string
+  source: string
   category_scores: Record<string, number>
   thresholds: Record<string, number>
 }
 
 export interface UpdateContentModerationConfig {
+  expected_config_version: number
   enabled?: boolean
   mode?: ModerationMode
+  endpoint_type?: ContentModerationEndpointType
   base_url?: string
   model?: string
+  audit_prompt?: string
+  confidence_threshold?: number
   // undefined 不修改；0 清除（直连）；>0 指定代理
   proxy_id?: number
   api_key?: string
@@ -122,6 +138,7 @@ export interface UpdateContentModerationConfig {
   all_groups?: boolean
   group_ids?: number[]
   record_non_hits?: boolean
+  context_message_limit?: number
   thresholds?: Record<string, number>
   worker_count?: number
   queue_size?: number

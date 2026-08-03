@@ -41,6 +41,28 @@ func (s *SettingRepoSuite) TestSet_Upsert() {
 	s.Require().Equal("v2", got, "upsert mismatch")
 }
 
+func (s *SettingRepoSuite) TestCompareAndSet() {
+	created, err := s.repo.CompareAndSet(s.ctx, "cas_key", nil, "v1")
+	s.Require().NoError(err)
+	s.Require().True(created)
+
+	duplicate, err := s.repo.CompareAndSet(s.ctx, "cas_key", nil, "unexpected")
+	s.Require().NoError(err)
+	s.Require().False(duplicate)
+
+	expected := "v1"
+	updated, err := s.repo.CompareAndSet(s.ctx, "cas_key", &expected, "v2")
+	s.Require().NoError(err)
+	s.Require().True(updated)
+
+	stale, err := s.repo.CompareAndSet(s.ctx, "cas_key", &expected, "unexpected")
+	s.Require().NoError(err)
+	s.Require().False(stale)
+	value, err := s.repo.GetValue(s.ctx, "cas_key")
+	s.Require().NoError(err)
+	s.Require().Equal("v2", value)
+}
+
 func (s *SettingRepoSuite) TestGetValue_Missing() {
 	_, err := s.repo.GetValue(s.ctx, "nonexistent")
 	s.Require().Error(err, "expected error for missing key")
