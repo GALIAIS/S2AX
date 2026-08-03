@@ -486,7 +486,9 @@ export interface UpdateSharedQuotaPoolRequest {
   borrow_multiplier?: number
   upstream_capacity_usd?: number | null
   upstream_utilization_percent?: number | null
-  windows: Array<Pick<SharedQuotaPoolWindowConfig, 'key' | 'enabled' | 'window_seconds' | 'capacity_usd' | 'reserve_ratio' | 'soft_stop_ratio' | 'hard_stop_ratio'>>
+  capacity_mode?: 'manual_usd' | 'official_percent'
+  upstream_account_id?: number | null
+  windows: Array<Pick<SharedQuotaPoolWindowConfig, 'key' | 'enabled' | 'window_seconds' | 'capacity_usd' | 'reserve_ratio' | 'soft_stop_ratio' | 'hard_stop_ratio' | 'capacity_mode' | 'upstream_account_id'>>
   members: Array<{ user_id: number; weight: number; enabled: boolean }>
 }
 

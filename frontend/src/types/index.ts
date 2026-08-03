@@ -1977,6 +1977,12 @@ export interface SharedQuotaUserProgress {
   pool_total_used_usd: number
   pool_distributable_usd: number
   pool_utilization_percent: number
+  capacity_mode?: 'manual_usd' | 'official_percent'
+  used_percent?: number
+  base_share_percent?: number
+  maximum_percent?: number
+  remaining_percent?: number
+  borrowed_percent?: number
   soft_stop_reached: boolean
   hard_stop_reached: boolean
   allowed: boolean
@@ -1997,6 +2003,17 @@ export interface SharedQuotaUserWindowProgress {
   pool_total_used_usd: number
   pool_distributable_usd: number
   pool_utilization_percent: number
+  capacity_mode?: 'manual_usd' | 'official_percent'
+  official_data_available?: boolean
+  official_data_stale?: boolean
+  official_used_percent?: number
+  official_reset_at?: string
+  official_fetched_at?: string
+  base_share_percent?: number
+  maximum_percent?: number
+  used_percent?: number
+  remaining_percent?: number
+  borrowed_percent?: number
   soft_stop_reached: boolean
   hard_stop_reached: boolean
   allowed: boolean
@@ -2020,6 +2037,8 @@ export interface SharedQuotaPoolConfig {
   window_end: string
   updated_at: string
   windows: SharedQuotaPoolWindowConfig[]
+  capacity_mode?: 'manual_usd' | 'official_percent'
+  upstream_account_id?: number | null
 }
 
 export interface SharedQuotaPoolWindowConfig {
@@ -2035,6 +2054,8 @@ export interface SharedQuotaPoolWindowConfig {
   window_start: string
   window_end: string
   updated_at: string
+  capacity_mode?: 'manual_usd' | 'official_percent'
+  upstream_account_id?: number | null
 }
 
 export interface SharedQuotaPoolMember {
@@ -2053,6 +2074,11 @@ export interface SharedQuotaPoolMember {
   share_percent: number
   allowed: boolean
   decision_reason?: string
+  used_percent?: number
+  base_share_percent?: number
+  maximum_percent?: number
+  remaining_percent?: number
+  borrowed_percent?: number
 }
 
 export interface SharedQuotaPoolSnapshot {
@@ -2072,6 +2098,7 @@ export interface SharedQuotaPoolSnapshot {
   members: SharedQuotaPoolMember[]
   windows: SharedQuotaPoolWindowSnapshot[]
   snapshot_at: string
+  capacity_mode?: 'manual_usd' | 'official_percent'
 }
 
 export interface SharedQuotaPoolWindowSnapshot {
@@ -2087,6 +2114,18 @@ export interface SharedQuotaPoolWindowSnapshot {
   soft_stop_reached: boolean
   hard_stop_reached: boolean
   members: SharedQuotaPoolMember[]
+  capacity_mode?: 'manual_usd' | 'official_percent'
+  official_data_available?: boolean
+  official_data_stale?: boolean
+  official_used_percent?: number
+  official_reset_at?: string
+  official_fetched_at?: string
+  base_capacity_percent?: number
+  distributable_percent?: number
+  total_used_percent?: number
+  remaining_percent?: number
+  soft_limit_percent?: number
+  hard_limit_percent?: number
 }
 
 export interface AssignSubscriptionRequest {

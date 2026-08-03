@@ -12,9 +12,12 @@ func TestSharedQuotaPoolMigrationsDefineIndependentWindows(t *testing.T) {
 	require.NoError(t, err)
 	windows, err := FS.ReadFile("310_shared_quota_pool_windows.sql")
 	require.NoError(t, err)
+	official, err := FS.ReadFile("311_shared_quota_official_percent.sql")
+	require.NoError(t, err)
 
 	baseSQL := strings.ToLower(string(base))
 	windowSQL := strings.ToLower(string(windows))
+	officialSQL := strings.ToLower(string(official))
 	for _, required := range []string{
 		"create table if not exists shared_quota_pools",
 		"create table if not exists shared_quota_pool_members",
@@ -30,5 +33,14 @@ func TestSharedQuotaPoolMigrationsDefineIndependentWindows(t *testing.T) {
 		"group_id, 'short', false",
 	} {
 		require.Contains(t, windowSQL, required)
+	}
+	for _, required := range []string{
+		"add column if not exists capacity_mode",
+		"add column if not exists upstream_account_id",
+		"create table if not exists shared_quota_pool_official_snapshots",
+		"primary key (group_id, window_key)",
+		"used_percent >= 0 and used_percent <= 100",
+	} {
+		require.Contains(t, officialSQL, required)
 	}
 }

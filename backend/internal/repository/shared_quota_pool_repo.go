@@ -27,12 +27,15 @@ func (r *sharedQuotaPoolRepository) GetConfig(ctx context.Context, groupID int64
 		SELECT group_id, enabled, window_seconds, capacity_usd,
 		       reserve_ratio, soft_stop_ratio, hard_stop_ratio,
 		       borrow_enabled, borrow_multiplier, upstream_capacity_usd,
-		       upstream_utilization_percent, window_start, window_end, updated_at
+		       upstream_utilization_percent, window_start, window_end, updated_at,
+		       capacity_mode, upstream_account_id
 		FROM shared_quota_pools
 		WHERE group_id = $1`
 
 	var config service.SharedQuotaPoolConfig
 	var capacity, upstreamCapacity, upstreamUtilization sql.NullFloat64
+	var capacityMode sql.NullString
+	var upstreamAccountID sql.NullInt64
 	if err := r.db.QueryRowContext(ctx, query, groupID).Scan(
 		&config.GroupID,
 		&config.Enabled,
@@ -48,6 +51,8 @@ func (r *sharedQuotaPoolRepository) GetConfig(ctx context.Context, groupID int64
 		&config.WindowStart,
 		&config.WindowEnd,
 		&config.UpdatedAt,
+		&capacityMode,
+		&upstreamAccountID,
 	); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -62,6 +67,12 @@ func (r *sharedQuotaPoolRepository) GetConfig(ctx context.Context, groupID int64
 	}
 	if upstreamUtilization.Valid {
 		config.UpstreamUtilizationPercent = &upstreamUtilization.Float64
+	}
+	if capacityMode.Valid {
+		config.CapacityMode = capacityMode.String
+	}
+	if upstreamAccountID.Valid {
+		config.UpstreamAccountID = &upstreamAccountID.Int64
 	}
 	windows, err := r.getWindows(ctx, groupID)
 	if err != nil {
@@ -82,6 +93,8 @@ func (r *sharedQuotaPoolRepository) GetConfig(ctx context.Context, groupID int64
 		config.HardStopRatio = window.HardStopRatio
 		config.UpstreamCapacityUSD = window.UpstreamCapacityUSD
 		config.UpstreamUtilizationPercent = window.UpstreamUtilizationPercent
+		config.CapacityMode = window.CapacityMode
+		config.UpstreamAccountID = window.UpstreamAccountID
 		config.WindowStart = window.WindowStart
 		config.WindowEnd = window.WindowEnd
 		break
@@ -104,8 +117,8 @@ func (r *sharedQuotaPoolRepository) SaveConfigAndWindowsAndMembers(ctx context.C
 			group_id, enabled, window_seconds, capacity_usd,
 			reserve_ratio, soft_stop_ratio, hard_stop_ratio,
 			borrow_enabled, borrow_multiplier, upstream_capacity_usd,
-			upstream_utilization_percent
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+			upstream_utilization_percent, capacity_mode, upstream_account_id
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 		ON CONFLICT (group_id) DO UPDATE SET
 			enabled = EXCLUDED.enabled,
 			window_seconds = EXCLUDED.window_seconds,
@@ -117,6 +130,8 @@ func (r *sharedQuotaPoolRepository) SaveConfigAndWindowsAndMembers(ctx context.C
 			borrow_multiplier = EXCLUDED.borrow_multiplier,
 			upstream_capacity_usd = EXCLUDED.upstream_capacity_usd,
 			upstream_utilization_percent = EXCLUDED.upstream_utilization_percent,
+			capacity_mode = EXCLUDED.capacity_mode,
+			upstream_account_id = EXCLUDED.upstream_account_id,
 			updated_at = NOW()`
 	legacyWindow := legacyWindowFromConfig(*config)
 	if len(windows) > 0 {
@@ -139,6 +154,8 @@ func (r *sharedQuotaPoolRepository) SaveConfigAndWindowsAndMembers(ctx context.C
 		config.BorrowMultiplier,
 		nilFloat(legacyWindow.UpstreamCapacityUSD),
 		nilFloat(legacyWindow.UpstreamUtilizationPercent),
+		capacityModeOrDefault(legacyWindow.CapacityMode),
+		nilInt64(legacyWindow.UpstreamAccountID),
 	); err != nil {
 		return err
 	}
@@ -159,8 +176,8 @@ func (r *sharedQuotaPoolRepository) SaveConfigAndWindowsAndMembers(ctx context.C
 				group_id, window_key, enabled, window_seconds, capacity_usd,
 				reserve_ratio, soft_stop_ratio, hard_stop_ratio,
 				upstream_capacity_usd, upstream_utilization_percent,
-				window_start, window_end
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+				window_start, window_end, capacity_mode, upstream_account_id
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 			ON CONFLICT (group_id, window_key) DO UPDATE SET
 				enabled = EXCLUDED.enabled,
 				window_seconds = EXCLUDED.window_seconds,
@@ -172,11 +189,15 @@ func (r *sharedQuotaPoolRepository) SaveConfigAndWindowsAndMembers(ctx context.C
 				upstream_utilization_percent = EXCLUDED.upstream_utilization_percent,
 				window_start = EXCLUDED.window_start,
 				window_end = EXCLUDED.window_end,
+				capacity_mode = EXCLUDED.capacity_mode,
+				upstream_account_id = EXCLUDED.upstream_account_id,
 				updated_at = NOW()`,
 			config.GroupID, window.Key, window.Enabled, window.WindowSeconds,
 			nilFloat(window.CapacityUSD), window.ReserveRatio, window.SoftStopRatio,
 			window.HardStopRatio, nilFloat(window.UpstreamCapacityUSD),
-			nilFloat(window.UpstreamUtilizationPercent), windowStart, windowEnd); err != nil {
+			nilFloat(window.UpstreamUtilizationPercent), windowStart, windowEnd,
+			capacityModeOrDefault(window.CapacityMode),
+			nilInt64(window.UpstreamAccountID)); err != nil {
 			return err
 		}
 	}
@@ -291,12 +312,56 @@ func (r *sharedQuotaPoolRepository) GetUsage(ctx context.Context, groupID int64,
 	return total, usageByUser, rows.Err()
 }
 
+func (r *sharedQuotaPoolRepository) GetOfficialQuotaSnapshot(ctx context.Context, groupID int64, windowKey string) (*service.SharedQuotaOfficialSnapshot, error) {
+	if r == nil || r.db == nil {
+		return nil, nil
+	}
+	var snapshot service.SharedQuotaOfficialSnapshot
+	var resetAt sql.NullTime
+	err := r.db.QueryRowContext(ctx, `
+		SELECT account_id, used_percent, limit_window_seconds, reset_at, fetched_at
+		FROM shared_quota_pool_official_snapshots
+		WHERE group_id = $1 AND window_key = $2`, groupID, windowKey).Scan(
+		&snapshot.AccountID, &snapshot.UsedPercent, &snapshot.LimitWindowSeconds, &resetAt, &snapshot.FetchedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if resetAt.Valid {
+		snapshot.ResetAt = resetAt.Time
+	}
+	return &snapshot, nil
+}
+
+func (r *sharedQuotaPoolRepository) SaveOfficialQuotaSnapshot(ctx context.Context, groupID int64, windowKey string, snapshot *service.SharedQuotaOfficialSnapshot) error {
+	if r == nil || r.db == nil || snapshot == nil {
+		return nil
+	}
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO shared_quota_pool_official_snapshots (
+			group_id, window_key, account_id, used_percent, limit_window_seconds,
+			reset_at, fetched_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7)
+		ON CONFLICT (group_id, window_key) DO UPDATE SET
+			account_id = EXCLUDED.account_id,
+			used_percent = EXCLUDED.used_percent,
+			limit_window_seconds = EXCLUDED.limit_window_seconds,
+			reset_at = EXCLUDED.reset_at,
+			fetched_at = EXCLUDED.fetched_at,
+			updated_at = NOW()`, groupID, windowKey, snapshot.AccountID,
+		snapshot.UsedPercent, snapshot.LimitWindowSeconds, timeOrNil(snapshot.ResetAt), snapshot.FetchedAt)
+	return err
+}
+
 func (r *sharedQuotaPoolRepository) getWindows(ctx context.Context, groupID int64) ([]service.SharedQuotaPoolWindowConfig, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT window_key, enabled, window_seconds, capacity_usd,
 		       reserve_ratio, soft_stop_ratio, hard_stop_ratio,
 		       upstream_capacity_usd, upstream_utilization_percent,
-		       window_start, window_end, updated_at
+		       window_start, window_end, updated_at,
+		       capacity_mode, upstream_account_id
 		FROM shared_quota_pool_windows
 		WHERE group_id = $1
 		ORDER BY CASE window_key WHEN 'short' THEN 0 WHEN 'long' THEN 1 ELSE 2 END, window_key`, groupID)
@@ -308,10 +373,12 @@ func (r *sharedQuotaPoolRepository) getWindows(ctx context.Context, groupID int6
 	for rows.Next() {
 		var window service.SharedQuotaPoolWindowConfig
 		var capacity, upstreamCapacity, upstreamUtilization sql.NullFloat64
+		var capacityMode sql.NullString
+		var upstreamAccountID sql.NullInt64
 		if err := rows.Scan(&window.Key, &window.Enabled, &window.WindowSeconds, &capacity,
 			&window.ReserveRatio, &window.SoftStopRatio, &window.HardStopRatio,
 			&upstreamCapacity, &upstreamUtilization, &window.WindowStart,
-			&window.WindowEnd, &window.UpdatedAt); err != nil {
+			&window.WindowEnd, &window.UpdatedAt, &capacityMode, &upstreamAccountID); err != nil {
 			return nil, err
 		}
 		if capacity.Valid {
@@ -322,6 +389,12 @@ func (r *sharedQuotaPoolRepository) getWindows(ctx context.Context, groupID int6
 		}
 		if upstreamUtilization.Valid {
 			window.UpstreamUtilizationPercent = &upstreamUtilization.Float64
+		}
+		if capacityMode.Valid {
+			window.CapacityMode = capacityMode.String
+		}
+		if upstreamAccountID.Valid {
+			window.UpstreamAccountID = &upstreamAccountID.Int64
 		}
 		windows = append(windows, window)
 	}
@@ -376,4 +449,25 @@ func nilFloat(value *float64) any {
 		return nil
 	}
 	return *value
+}
+
+func nilInt64(value *int64) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func timeOrNil(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value
+}
+
+func capacityModeOrDefault(value string) string {
+	if value == "" {
+		return service.SharedQuotaCapacityModeUSD
+	}
+	return value
 }

@@ -12,8 +12,9 @@
             </span>
           </div>
           <div class="mt-1 flex items-baseline justify-between gap-3 font-mono text-sm text-gray-900 dark:text-white">
-            <span>{{ window.config.capacity_usd == null ? '—' : usd(window.total_used_usd) }}</span>
-            <span class="text-xs text-gray-500 dark:text-gray-400">/ {{ window.config.capacity_usd == null ? '—' : usd(window.distributable_usd) }}</span>
+            <span v-if="window.config.capacity_mode === 'official_percent'">{{ percent(window.official_used_percent ?? 0) }}</span>
+            <span v-else>{{ window.config.capacity_usd == null ? '—' : usd(window.total_used_usd) }}</span>
+            <span class="text-xs text-gray-500 dark:text-gray-400">/ {{ window.config.capacity_mode === 'official_percent' ? '100%' : (window.config.capacity_usd == null ? '—' : usd(window.distributable_usd)) }}</span>
           </div>
         </div>
       </div>
@@ -38,8 +39,25 @@
                 </label>
               </div>
               <label class="input-label">
+                {{ t('admin.sharedQuota.mode') }}
+                <select v-model="window.capacityMode" class="input mt-1">
+                  <option value="manual_usd">{{ t('admin.sharedQuota.manualMode') }}</option>
+                  <option value="official_percent">{{ t('admin.sharedQuota.officialMode') }}</option>
+                </select>
+              </label>
+              <label v-if="window.capacityMode === 'manual_usd'" class="input-label">
                 {{ t('admin.sharedQuota.capacity') }}
                 <input v-model.number="window.capacityUsd" type="number" min="0" step="0.01" class="input mt-1" />
+              </label>
+              <label v-else class="input-label">
+                {{ t('admin.sharedQuota.upstreamAccount') }}
+                <select v-model="window.upstreamAccountId" class="input mt-1">
+                  <option :value="null">{{ t('admin.sharedQuota.autoAccount') }}</option>
+                  <option v-for="account in officialAccounts" :key="account.id" :value="account.id">
+                    {{ account.name }} · #{{ account.id }}
+                  </option>
+                </select>
+                <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.sharedQuota.officialHint') }}</span>
               </label>
               <label class="input-label">
                 {{ t('admin.sharedQuota.windowSeconds') }}
@@ -106,9 +124,9 @@
                     <input v-model.number="member.weight" type="number" min="0.0001" max="100000" step="0.1" class="hide-spinner input w-24 text-right" />
                   </td>
                   <td class="px-3 py-2 text-right font-mono text-gray-700 dark:text-gray-300">{{ (windowMember(member.user_id)?.share_percent ?? 0).toFixed(2) }}%</td>
-                  <td class="px-3 py-2 text-right font-mono text-gray-700 dark:text-gray-300">{{ usd(windowMember(member.user_id)?.used_usd ?? 0) }}</td>
-                  <td class="px-3 py-2 text-right font-mono text-gray-700 dark:text-gray-300">{{ usd(windowMember(member.user_id)?.maximum_usd ?? 0) }}</td>
-                  <td class="px-3 py-2 text-right font-mono text-gray-700 dark:text-gray-300">{{ usd(windowMember(member.user_id)?.borrowed_usd ?? 0) }}</td>
+                  <td class="px-3 py-2 text-right font-mono text-gray-700 dark:text-gray-300">{{ displayAmount(windowMember(member.user_id)) }}</td>
+                  <td class="px-3 py-2 text-right font-mono text-gray-700 dark:text-gray-300">{{ displayMaximum(windowMember(member.user_id)) }}</td>
+                  <td class="px-3 py-2 text-right font-mono text-gray-700 dark:text-gray-300">{{ displayBorrowed(windowMember(member.user_id)) }}</td>
                   <td class="px-3 py-2 text-center">
                     <label class="inline-flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
                       <input v-model="member.enabled" type="checkbox" class="checkbox" />
@@ -138,7 +156,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
-import type { AdminGroup, SharedQuotaPoolMember, SharedQuotaPoolSnapshot } from '@/types'
+import type { Account, AdminGroup, SharedQuotaPoolMember, SharedQuotaPoolSnapshot } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 
@@ -149,6 +167,7 @@ const appStore = useAppStore()
 const loading = ref(false)
 const saving = ref(false)
 const snapshot = ref<SharedQuotaPoolSnapshot | null>(null)
+const officialAccounts = ref<Account[]>([])
 const editableMembers = ref<SharedQuotaPoolMember[]>([])
 const selectedWindowKey = ref('long')
 const form = reactive({
@@ -159,7 +178,9 @@ const form = reactive({
 const windowForms = ref<Array<{
   key: string
   enabled: boolean
+  capacityMode: 'manual_usd' | 'official_percent'
   capacityUsd: number | null
+  upstreamAccountId: number | null
   windowSeconds: number
   reservePercent: number
   softStopPercent: number
@@ -169,7 +190,9 @@ const windowForms = ref<Array<{
 const canSave = computed(() => {
   if (!form.enabled) return true
   const enabledWindows = windowForms.value.filter(window => window.enabled)
-  return enabledWindows.length > 0 && enabledWindows.every(window => window.capacityUsd != null && window.capacityUsd > 0)
+  return enabledWindows.length > 0 && enabledWindows.every(window =>
+    window.capacityMode === 'official_percent' || (window.capacityUsd != null && window.capacityUsd > 0)
+  )
 })
 const enabledWindowSnapshots = computed(() => snapshot.value?.windows.filter(window => window.config.enabled) ?? [])
 const selectedWindow = computed(() => {
@@ -181,11 +204,22 @@ const visibleMembers = computed(() => {
   return members.length > 0 ? members : snapshot.value?.members ?? []
 })
 const usd = (value: number) => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 4 }).format(value)
+const percent = (value: number) => `${Number(value || 0).toFixed(2)}%`
 const windowLabel = (key: string) => key === 'short' ? '5h / 5 小时窗口' : key === 'long' ? '7d / 7 天窗口' : key
+const displayAmount = (member?: SharedQuotaPoolMember) => selectedWindow.value?.config.capacity_mode === 'official_percent'
+  ? percent(member?.used_percent ?? 0)
+  : usd(member?.used_usd ?? 0)
+const displayMaximum = (member?: SharedQuotaPoolMember) => selectedWindow.value?.config.capacity_mode === 'official_percent'
+  ? percent(member?.maximum_percent ?? 0)
+  : usd(member?.maximum_usd ?? 0)
+const displayBorrowed = (member?: SharedQuotaPoolMember) => selectedWindow.value?.config.capacity_mode === 'official_percent'
+  ? percent(member?.borrowed_percent ?? 0)
+  : usd(member?.borrowed_usd ?? 0)
 
 const load = async () => {
   if (!props.group) return
   loading.value = true
+  officialAccounts.value = []
   try {
     const result = await adminAPI.groups.getSharedQuota(props.group.id)
     snapshot.value = result
@@ -195,7 +229,9 @@ const load = async () => {
     windowForms.value = result.windows.map(window => ({
       key: window.config.key,
       enabled: window.config.enabled,
+      capacityMode: window.config.capacity_mode ?? 'manual_usd',
       capacityUsd: window.config.capacity_usd,
+      upstreamAccountId: window.config.upstream_account_id ?? null,
       windowSeconds: window.config.window_seconds,
       reservePercent: window.config.reserve_ratio * 100,
       softStopPercent: window.config.soft_stop_ratio * 100,
@@ -207,6 +243,19 @@ const load = async () => {
         ?? 'long'
     }
     editableMembers.value = result.members.map(member => ({ ...member }))
+    try {
+      const accounts = await adminAPI.accounts.list(1, 100, {
+        platform: 'openai',
+        type: 'oauth',
+        status: 'active',
+        group: String(props.group.id),
+        lite: 'true'
+      })
+      officialAccounts.value = accounts.items
+    } catch (error) {
+      officialAccounts.value = []
+      console.error('Error loading official quota accounts:', error)
+    }
   } catch (error) {
     appStore.showError(t('admin.sharedQuota.loadFailed'))
     console.error('Error loading shared quota pool:', error)
@@ -230,6 +279,8 @@ const save = async () => {
         key: window.key,
         enabled: window.enabled,
         capacity_usd: window.capacityUsd,
+        capacity_mode: window.capacityMode,
+        upstream_account_id: window.upstreamAccountId,
         window_seconds: window.windowSeconds,
         reserve_ratio: window.reservePercent / 100,
         soft_stop_ratio: window.softStopPercent / 100,

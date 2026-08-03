@@ -245,19 +245,19 @@
                   </span>
                   <span class="text-gray-500 dark:text-dark-400">
                     {{ t('userSubscriptions.sharedShare', { percent: window.share_percent.toFixed(2) }) }}
-                    · {{ usd(window.used_usd) }} / {{ usd(window.maximum_usd) }}
+                    · {{ sharedAmount(window, 'used') }} / {{ sharedAmount(window, 'maximum') }}
                   </span>
                 </div>
                 <div class="relative h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-dark-600">
                   <div
                     class="absolute inset-y-0 left-0 rounded-full transition-all duration-300"
-                    :class="getProgressBarClass(window.used_usd, window.maximum_usd)"
+                    :class="getProgressBarClass(sharedUsed(window), sharedMaximum(window))"
                     :style="{ width: sharedProgressWidth(window) }"
                   ></div>
                 </div>
                 <div class="flex items-center justify-between text-[11px] text-gray-500 dark:text-dark-400">
                   <span>{{ window.allowed ? t('userSubscriptions.sharedAllowed') : t('userSubscriptions.sharedLimited') }}</span>
-                  <span>{{ t('userSubscriptions.sharedResetIn', { time: formatSharedReset(window.window_end) }) }}</span>
+                  <span>{{ t('userSubscriptions.sharedResetIn', { time: formatSharedReset(sharedWindowEnd(window)) }) }}</span>
                 </div>
               </div>
             </div>
@@ -366,6 +366,28 @@ function usd(value: number): string {
   return `$${(Number.isFinite(value) ? value : 0).toFixed(2)}`
 }
 
+function percent(value: number | undefined): string {
+  const normalized = typeof value === 'number' && Number.isFinite(value) ? value : 0
+  return `${normalized.toFixed(2)}%`
+}
+
+function isOfficialWindow(window: SharedQuotaUserWindowProgress): boolean {
+  return window.capacity_mode === 'official_percent'
+}
+
+function sharedUsed(window: SharedQuotaUserWindowProgress): number {
+  return isOfficialWindow(window) ? (window.used_percent ?? 0) : window.used_usd
+}
+
+function sharedMaximum(window: SharedQuotaUserWindowProgress): number {
+  return isOfficialWindow(window) ? (window.maximum_percent ?? 0) : window.maximum_usd
+}
+
+function sharedAmount(window: SharedQuotaUserWindowProgress, kind: 'used' | 'maximum'): string {
+  if (isOfficialWindow(window)) return percent(kind === 'used' ? window.used_percent : window.maximum_percent)
+  return usd(kind === 'used' ? window.used_usd : window.maximum_usd)
+}
+
 function sharedWindowLabel(window: SharedQuotaUserWindowProgress): string {
   if (window.key === 'short') return t('userSubscriptions.sharedWindowShort')
   if (window.key === 'long') return t('userSubscriptions.sharedWindowLong')
@@ -373,14 +395,21 @@ function sharedWindowLabel(window: SharedQuotaUserWindowProgress): string {
 }
 
 function sharedProgressWidth(window: SharedQuotaUserWindowProgress): string {
-  if (!window.maximum_usd || window.maximum_usd <= 0) return '0%'
-  return `${Math.min(Math.max((window.used_usd / window.maximum_usd) * 100, 0), 100)}%`
+  const maximum = sharedMaximum(window)
+  if (!maximum || maximum <= 0) return '0%'
+  return `${Math.min(Math.max((sharedUsed(window) / maximum) * 100, 0), 100)}%`
 }
 
 function formatSharedReset(windowEnd: string): string {
   const parts = getRemainingDurationParts(windowEnd)
   if (!parts) return t('userSubscriptions.windowNotActive')
   return formatDurationParts(parts)
+}
+
+function sharedWindowEnd(window: SharedQuotaUserWindowProgress): string {
+  return isOfficialWindow(window) && window.official_reset_at
+    ? window.official_reset_at
+    : window.window_end
 }
 
 function getProgressWidth(used: number | undefined, limit: number | null | undefined): string {

@@ -13,6 +13,22 @@ type sharedQuotaPoolRepoStub struct {
 	usage         map[int64]float64
 	totalByWindow map[string]float64
 	usageByWindow map[string]map[int64]float64
+	official      map[string]*SharedQuotaOfficialSnapshot
+}
+
+func (r *sharedQuotaPoolRepoStub) GetOfficialQuotaSnapshot(_ context.Context, _ int64, windowKey string) (*SharedQuotaOfficialSnapshot, error) {
+	if r.official == nil {
+		return nil, nil
+	}
+	return r.official[windowKey], nil
+}
+
+func (r *sharedQuotaPoolRepoStub) SaveOfficialQuotaSnapshot(_ context.Context, _ int64, windowKey string, snapshot *SharedQuotaOfficialSnapshot) error {
+	if r.official == nil {
+		r.official = make(map[string]*SharedQuotaOfficialSnapshot)
+	}
+	r.official[windowKey] = snapshot
+	return nil
 }
 
 func (r *sharedQuotaPoolRepoStub) GetConfig(context.Context, int64) (*SharedQuotaPoolConfig, error) {
@@ -189,5 +205,42 @@ func TestSharedQuotaPoolRejectsInvalidConfiguration(t *testing.T) {
 	}, nil, nil)
 	if err != ErrSharedQuotaPoolInvalid {
 		t.Fatalf("invalid configuration error = %v, want ErrSharedQuotaPoolInvalid", err)
+	}
+}
+
+func TestSharedQuotaPoolOfficialPercentUsesProviderWindowAndLocalFairness(t *testing.T) {
+	now := time.Date(2026, 8, 3, 4, 0, 0, 0, time.UTC)
+	config := sharedQuotaTestConfig()
+	config.Windows[0].Enabled = false
+	config.Windows[1].CapacityUSD = nil
+	config.Windows[1].CapacityMode = SharedQuotaCapacityModeOfficialPercent
+	config.Windows[1].UpstreamAccountID = func() *int64 { id := int64(42); return &id }()
+	repo := &sharedQuotaPoolRepoStub{
+		config: config,
+		members: []SharedQuotaPoolMember{
+			{UserID: 1, Weight: 1, Enabled: true},
+			{UserID: 2, Weight: 1, Enabled: true},
+		},
+		totalByWindow: map[string]float64{"long": 100},
+		usageByWindow: map[string]map[int64]float64{"long": {1: 60, 2: 40}},
+		official: map[string]*SharedQuotaOfficialSnapshot{
+			"long": {AccountID: 42, UsedPercent: 45, LimitWindowSeconds: 7 * 24 * 60 * 60, FetchedAt: now},
+		},
+	}
+	svc := NewSharedQuotaPoolService(repo)
+	svc.now = func() time.Time { return now }
+	snapshot, err := svc.GetSnapshot(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	window := snapshot.Windows[1]
+	if window.CapacityMode != SharedQuotaCapacityModeOfficialPercent || window.TotalUsedPercent != 45 {
+		t.Fatalf("official snapshot = %#v", window)
+	}
+	if got := window.Members[0].UsedPercent; got != 27 {
+		t.Fatalf("user 1 provider-normalized usage = %v, want 27", got)
+	}
+	if got := window.Members[1].UsedPercent; got != 18 {
+		t.Fatalf("user 2 provider-normalized usage = %v, want 18", got)
 	}
 }

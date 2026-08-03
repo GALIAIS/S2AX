@@ -73,6 +73,8 @@ type UpdateSharedQuotaPoolRequest struct {
 	BorrowMultiplier           *float64                              `json:"borrow_multiplier"`
 	UpstreamCapacityUSD        *float64                              `json:"upstream_capacity_usd"`
 	UpstreamUtilizationPercent *float64                              `json:"upstream_utilization_percent"`
+	CapacityMode               *string                               `json:"capacity_mode"`
+	UpstreamAccountID          *int64                                `json:"upstream_account_id"`
 	Windows                    []service.SharedQuotaPoolWindowConfig `json:"windows"`
 	Members                    []service.SharedQuotaPoolMemberInput  `json:"members"`
 }
@@ -410,6 +412,12 @@ func (h *SubscriptionHandler) UpdateSharedQuota(c *gin.Context) {
 	}
 	if req.UpstreamUtilizationPercent != nil {
 		config.UpstreamUtilizationPercent = req.UpstreamUtilizationPercent
+	}
+	if req.CapacityMode != nil {
+		config.CapacityMode = *req.CapacityMode
+	}
+	if req.UpstreamAccountID != nil {
+		config.UpstreamAccountID = req.UpstreamAccountID
 	}
 	snapshot, err := h.subscriptionService.UpdateSharedQuotaPool(c.Request.Context(), groupID, &config, req.Windows, members)
 	if err != nil {
