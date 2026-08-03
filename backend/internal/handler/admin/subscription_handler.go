@@ -59,6 +59,29 @@ type AdjustSubscriptionRequest struct {
 	Days int `json:"days" binding:"required,min=-36500,max=36500"` // negative to shorten, positive to extend
 }
 
+// UpdateSharedQuotaPoolRequest is a full shared-pool configuration update.
+// Pointer fields preserve the distinction between an omitted field and an
+// intentional zero value such as reserve_ratio=0.
+type UpdateSharedQuotaPoolRequest struct {
+	Enabled                    *bool                                 `json:"enabled"`
+	WindowSeconds              *int                                  `json:"window_seconds"`
+	CapacityUSD                *float64                              `json:"capacity_usd"`
+	ReserveRatio               *float64                              `json:"reserve_ratio"`
+	SoftStopRatio              *float64                              `json:"soft_stop_ratio"`
+	HardStopRatio              *float64                              `json:"hard_stop_ratio"`
+	BorrowEnabled              *bool                                 `json:"borrow_enabled"`
+	BorrowMultiplier           *float64                              `json:"borrow_multiplier"`
+	UpstreamCapacityUSD        *float64                              `json:"upstream_capacity_usd"`
+	UpstreamUtilizationPercent *float64                              `json:"upstream_utilization_percent"`
+	Windows                    []service.SharedQuotaPoolWindowConfig `json:"windows"`
+	Members                    []service.SharedQuotaPoolMemberInput  `json:"members"`
+}
+
+type UpdateSharedQuotaMemberRequest struct {
+	Weight  float64 `json:"weight"`
+	Enabled bool    `json:"enabled"`
+}
+
 // List handles listing all subscriptions with pagination and filters
 // GET /api/v1/admin/subscriptions
 func (h *SubscriptionHandler) List(c *gin.Context) {
@@ -308,6 +331,139 @@ func (h *SubscriptionHandler) ListByGroup(c *gin.Context) {
 		out = append(out, *dto.UserSubscriptionFromServiceAdmin(&subscriptions[i]))
 	}
 	response.PaginatedWithResult(c, out, toResponsePagination(pagination))
+}
+
+// GetSharedQuota returns the administrator-only pool snapshot for a group.
+func (h *SubscriptionHandler) GetSharedQuota(c *gin.Context) {
+	groupID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || groupID <= 0 {
+		response.BadRequest(c, "Invalid group ID")
+		return
+	}
+	snapshot, err := h.subscriptionService.GetSharedQuotaPool(c.Request.Context(), groupID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, snapshot)
+}
+
+// UpdateSharedQuota replaces the pool policy and all member overrides in one
+// transaction. Omitted fields retain the persisted value; an explicit empty
+// members array is still honored as a request to clear configured overrides.
+func (h *SubscriptionHandler) UpdateSharedQuota(c *gin.Context) {
+	groupID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || groupID <= 0 {
+		response.BadRequest(c, "Invalid group ID")
+		return
+	}
+	var req UpdateSharedQuotaPoolRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	// Start from the persisted snapshot so omitted fields remain unchanged.
+	// This is important for PATCH-like admin clients that only update a window
+	// or the member list; starting from defaults would silently disable an
+	// existing pool or reset its borrow policy.
+	existing, err := h.subscriptionService.GetSharedQuotaPool(c.Request.Context(), groupID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	config := existing.Config
+	members := req.Members
+	if members == nil {
+		members = make([]service.SharedQuotaPoolMemberInput, 0, len(existing.Members))
+		for _, member := range existing.Members {
+			members = append(members, service.SharedQuotaPoolMemberInput{
+				UserID: member.UserID, Weight: member.Weight, Enabled: member.Enabled,
+			})
+		}
+	}
+	if req.Enabled != nil {
+		config.Enabled = *req.Enabled
+	}
+	if req.WindowSeconds != nil {
+		config.WindowSeconds = *req.WindowSeconds
+	}
+	if req.CapacityUSD != nil {
+		config.CapacityUSD = req.CapacityUSD
+	}
+	if req.ReserveRatio != nil {
+		config.ReserveRatio = *req.ReserveRatio
+	}
+	if req.SoftStopRatio != nil {
+		config.SoftStopRatio = *req.SoftStopRatio
+	}
+	if req.HardStopRatio != nil {
+		config.HardStopRatio = *req.HardStopRatio
+	}
+	if req.BorrowEnabled != nil {
+		config.BorrowEnabled = *req.BorrowEnabled
+	}
+	if req.BorrowMultiplier != nil {
+		config.BorrowMultiplier = *req.BorrowMultiplier
+	}
+	if req.UpstreamCapacityUSD != nil {
+		config.UpstreamCapacityUSD = req.UpstreamCapacityUSD
+	}
+	if req.UpstreamUtilizationPercent != nil {
+		config.UpstreamUtilizationPercent = req.UpstreamUtilizationPercent
+	}
+	snapshot, err := h.subscriptionService.UpdateSharedQuotaPool(c.Request.Context(), groupID, &config, req.Windows, members)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, snapshot)
+}
+
+// UpdateSharedQuotaMember changes one user's weight or membership state.
+func (h *SubscriptionHandler) UpdateSharedQuotaMember(c *gin.Context) {
+	groupID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || groupID <= 0 {
+		response.BadRequest(c, "Invalid group ID")
+		return
+	}
+	userID, err := strconv.ParseInt(c.Param("user_id"), 10, 64)
+	if err != nil || userID <= 0 {
+		response.BadRequest(c, "Invalid user ID")
+		return
+	}
+	var req UpdateSharedQuotaMemberRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	snapshot, err := h.subscriptionService.UpdateSharedQuotaMember(c.Request.Context(), groupID, service.SharedQuotaPoolMemberInput{
+		UserID: userID, Weight: req.Weight, Enabled: req.Enabled,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, snapshot)
+}
+
+// DeleteSharedQuotaMember restores the default weight=1 member behavior.
+func (h *SubscriptionHandler) DeleteSharedQuotaMember(c *gin.Context) {
+	groupID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || groupID <= 0 {
+		response.BadRequest(c, "Invalid group ID")
+		return
+	}
+	userID, err := strconv.ParseInt(c.Param("user_id"), 10, 64)
+	if err != nil || userID <= 0 {
+		response.BadRequest(c, "Invalid user ID")
+		return
+	}
+	snapshot, err := h.subscriptionService.DeleteSharedQuotaMember(c.Request.Context(), groupID, userID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, snapshot)
 }
 
 // ListByUser handles listing subscriptions for a specific user

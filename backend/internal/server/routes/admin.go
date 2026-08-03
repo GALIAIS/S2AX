@@ -794,6 +794,10 @@ func registerSubscriptionRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	}
 
 	// 分组下的订阅列表
+	admin.GET("/groups/:id/shared-quota", h.Admin.Subscription.GetSharedQuota)
+	admin.PUT("/groups/:id/shared-quota", h.Admin.Subscription.UpdateSharedQuota)
+	admin.PUT("/groups/:id/shared-quota/members/:user_id", h.Admin.Subscription.UpdateSharedQuotaMember)
+	admin.DELETE("/groups/:id/shared-quota/members/:user_id", h.Admin.Subscription.DeleteSharedQuotaMember)
 	admin.GET("/groups/:id/subscriptions", h.Admin.Subscription.ListByGroup)
 
 	// 用户下的订阅列表

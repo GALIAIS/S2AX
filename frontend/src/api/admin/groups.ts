@@ -13,7 +13,9 @@ import type {
   CompositeRouteDecision,
   CreateGroupRequest,
   UpdateGroupRequest,
-  PaginatedResponse
+  PaginatedResponse,
+  SharedQuotaPoolSnapshot,
+  SharedQuotaPoolWindowConfig
 } from '@/types'
 
 export interface LiveCapability {
@@ -473,6 +475,37 @@ export async function getCapacitySummary(): Promise<
   return data
 }
 
+export interface UpdateSharedQuotaPoolRequest {
+  enabled?: boolean
+  window_seconds?: number
+  capacity_usd?: number | null
+  reserve_ratio?: number
+  soft_stop_ratio?: number
+  hard_stop_ratio?: number
+  borrow_enabled?: boolean
+  borrow_multiplier?: number
+  upstream_capacity_usd?: number | null
+  upstream_utilization_percent?: number | null
+  windows: Array<Pick<SharedQuotaPoolWindowConfig, 'key' | 'enabled' | 'window_seconds' | 'capacity_usd' | 'reserve_ratio' | 'soft_stop_ratio' | 'hard_stop_ratio'>>
+  members: Array<{ user_id: number; weight: number; enabled: boolean }>
+}
+
+export async function getSharedQuota(id: number): Promise<SharedQuotaPoolSnapshot> {
+  const { data } = await apiClient.get<SharedQuotaPoolSnapshot>(`/admin/groups/${id}/shared-quota`)
+  return data
+}
+
+export async function updateSharedQuota(
+  id: number,
+  request: UpdateSharedQuotaPoolRequest
+): Promise<SharedQuotaPoolSnapshot> {
+  const { data } = await apiClient.put<SharedQuotaPoolSnapshot>(
+    `/admin/groups/${id}/shared-quota`,
+    request
+  )
+  return data
+}
+
 export const groupsAPI = {
   list,
   getAll,
@@ -501,7 +534,9 @@ export const groupsAPI = {
   batchSetGroupRPMOverrides,
   updateSortOrder,
   getUsageSummary,
-  getCapacitySummary
+  getCapacitySummary,
+  getSharedQuota,
+  updateSharedQuota
 }
 
 export default groupsAPI

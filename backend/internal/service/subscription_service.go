@@ -47,6 +47,7 @@ type SubscriptionService struct {
 	userSubRepo         UserSubscriptionRepository
 	billingCacheService *BillingCacheService
 	entClient           *dbent.Client
+	sharedQuotaPool     *SharedQuotaPoolService
 
 	// L1 缓存：加速中间件热路径的订阅查询
 	subCacheL1     *ristretto.Cache
@@ -92,6 +93,53 @@ func (s *SubscriptionService) Stop() {
 	if s.maintenanceQueue != nil {
 		s.maintenanceQueue.Stop()
 	}
+}
+
+// SetSharedQuotaPoolService injects the optional shared-pool admission
+// controller without changing the existing constructor contract.
+func (s *SubscriptionService) SetSharedQuotaPoolService(pool *SharedQuotaPoolService) {
+	if s != nil {
+		s.sharedQuotaPool = pool
+	}
+}
+
+func (s *SubscriptionService) sharedQuotaDecision(ctx context.Context, sub *UserSubscription, group *Group) (*SharedQuotaPoolDecision, bool) {
+	if s == nil || s.sharedQuotaPool == nil || sub == nil || group == nil || !group.IsSubscriptionType() {
+		return nil, false
+	}
+	decision, _ := s.sharedQuotaPool.CheckSubscriptionPool(ctx, group.ID, sub.UserID)
+	if decision == nil || !decision.Enabled {
+		return decision, false
+	}
+	return decision, true
+}
+
+func (s *SubscriptionService) GetSharedQuotaPool(ctx context.Context, groupID int64) (*SharedQuotaPoolSnapshot, error) {
+	if s == nil || s.sharedQuotaPool == nil {
+		return nil, ErrSharedQuotaPoolUnavailable
+	}
+	return s.sharedQuotaPool.GetSnapshot(ctx, groupID)
+}
+
+func (s *SubscriptionService) UpdateSharedQuotaPool(ctx context.Context, groupID int64, config *SharedQuotaPoolConfig, windows []SharedQuotaPoolWindowConfig, members []SharedQuotaPoolMemberInput) (*SharedQuotaPoolSnapshot, error) {
+	if s == nil || s.sharedQuotaPool == nil {
+		return nil, ErrSharedQuotaPoolUnavailable
+	}
+	return s.sharedQuotaPool.UpdateConfig(ctx, groupID, config, windows, members)
+}
+
+func (s *SubscriptionService) UpdateSharedQuotaMember(ctx context.Context, groupID int64, member SharedQuotaPoolMemberInput) (*SharedQuotaPoolSnapshot, error) {
+	if s == nil || s.sharedQuotaPool == nil {
+		return nil, ErrSharedQuotaPoolUnavailable
+	}
+	return s.sharedQuotaPool.UpdateMember(ctx, groupID, member)
+}
+
+func (s *SubscriptionService) DeleteSharedQuotaMember(ctx context.Context, groupID, userID int64) (*SharedQuotaPoolSnapshot, error) {
+	if s == nil || s.sharedQuotaPool == nil {
+		return nil, ErrSharedQuotaPoolUnavailable
+	}
+	return s.sharedQuotaPool.DeleteMember(ctx, groupID, userID)
 }
 
 // initSubCache 初始化订阅 L1 缓存
@@ -964,11 +1012,21 @@ func (s *SubscriptionService) CheckUsageLimits(ctx context.Context, sub *UserSub
 	if !sub.CheckDailyLimit(group, additionalCost) {
 		return ErrDailyLimitExceeded
 	}
-	if !sub.CheckWeeklyLimit(group, additionalCost) {
-		return ErrWeeklyLimitExceeded
-	}
 	if !sub.CheckMonthlyLimit(group, additionalCost) {
 		return ErrMonthlyLimitExceeded
+	}
+	decision, sharedEnabled := s.sharedQuotaDecision(ctx, sub, group)
+	if sharedEnabled {
+		if !decision.Allowed {
+			if decision.Reason == ErrSharedQuotaMemberDisabled.Error() {
+				return ErrSharedQuotaMemberDisabled
+			}
+			return ErrSharedQuotaPoolExceeded
+		}
+		return nil
+	}
+	if !sub.CheckWeeklyLimit(group, additionalCost) {
+		return ErrWeeklyLimitExceeded
 	}
 	return nil
 }
@@ -977,6 +1035,25 @@ func (s *SubscriptionService) CheckUsageLimits(ctx context.Context, sub *UserSub
 // 仅做内存检查，不触发 DB 写入。调用方必须在放行请求前同步完成窗口维护。
 // 返回 needsMaintenance 表示是否需要执行窗口维护并回读数据库快照。
 func (s *SubscriptionService) ValidateAndCheckLimits(sub *UserSubscription, group *Group) (needsMaintenance bool, err error) {
+	return s.validateAndCheckLimits(context.Background(), sub, group, false)
+}
+
+// ValidateAndCheckLimitsWithContext is the request-path variant. The context
+// is used for the optional shared-pool snapshot query; the legacy method above
+// stays available for callers and tests that do not have a request context.
+func (s *SubscriptionService) ValidateAndCheckLimitsWithContext(ctx context.Context, sub *UserSubscription, group *Group) (needsMaintenance bool, err error) {
+	decision, sharedEnabled := s.sharedQuotaDecision(ctx, sub, group)
+	needsMaintenance, err = s.validateAndCheckLimits(ctx, sub, group, sharedEnabled)
+	if err != nil || !sharedEnabled || decision == nil || decision.Allowed {
+		return needsMaintenance, err
+	}
+	if decision.Reason == ErrSharedQuotaMemberDisabled.Error() {
+		return needsMaintenance, ErrSharedQuotaMemberDisabled
+	}
+	return needsMaintenance, ErrSharedQuotaPoolExceeded
+}
+
+func (s *SubscriptionService) validateAndCheckLimits(_ context.Context, sub *UserSubscription, group *Group, skipWeekly bool) (needsMaintenance bool, err error) {
 	now := s.now()
 	// 1. 验证订阅状态
 	if sub.Status == SubscriptionStatusExpired {
@@ -1011,7 +1088,7 @@ func (s *SubscriptionService) ValidateAndCheckLimits(sub *UserSubscription, grou
 	if !sub.CheckDailyLimit(group, 0) {
 		return needsMaintenance, ErrDailyLimitExceeded
 	}
-	if !sub.CheckWeeklyLimit(group, 0) {
+	if !skipWeekly && !sub.CheckWeeklyLimit(group, 0) {
 		return needsMaintenance, ErrWeeklyLimitExceeded
 	}
 	if !sub.CheckMonthlyLimit(group, 0) {
@@ -1070,13 +1147,14 @@ func (s *SubscriptionService) RecordUsage(ctx context.Context, subscriptionID in
 
 // SubscriptionProgress 订阅进度
 type SubscriptionProgress struct {
-	ID            int64                `json:"id"`
-	GroupName     string               `json:"group_name"`
-	ExpiresAt     time.Time            `json:"expires_at"`
-	ExpiresInDays int                  `json:"expires_in_days"`
-	Daily         *UsageWindowProgress `json:"daily,omitempty"`
-	Weekly        *UsageWindowProgress `json:"weekly,omitempty"`
-	Monthly       *UsageWindowProgress `json:"monthly,omitempty"`
+	ID            int64                    `json:"id"`
+	GroupName     string                   `json:"group_name"`
+	ExpiresAt     time.Time                `json:"expires_at"`
+	ExpiresInDays int                      `json:"expires_in_days"`
+	Daily         *UsageWindowProgress     `json:"daily,omitempty"`
+	Weekly        *UsageWindowProgress     `json:"weekly,omitempty"`
+	Monthly       *UsageWindowProgress     `json:"monthly,omitempty"`
+	Shared        *SharedQuotaUserProgress `json:"shared,omitempty"`
 }
 
 // UsageWindowProgress 使用窗口进度
@@ -1105,7 +1183,21 @@ func (s *SubscriptionService) GetSubscriptionProgress(ctx context.Context, subsc
 		}
 	}
 
-	return s.calculateProgress(sub, group), nil
+	progress := s.calculateProgress(sub, group)
+	s.attachSharedQuotaProgress(ctx, sub, progress)
+	return progress, nil
+}
+
+func (s *SubscriptionService) attachSharedQuotaProgress(ctx context.Context, sub *UserSubscription, progress *SubscriptionProgress) {
+	if s == nil || s.sharedQuotaPool == nil || sub == nil || progress == nil {
+		return
+	}
+	shared, err := s.sharedQuotaPool.UserProgress(ctx, sub.GroupID, sub.UserID)
+	if err != nil {
+		log.Printf("shared quota progress failed group=%d user=%d: %v", sub.GroupID, sub.UserID, err)
+		return
+	}
+	progress.Shared = shared
 }
 
 // calculateProgress 根据已加载的订阅和分组数据计算使用进度（纯内存计算，无 DB 查询）
@@ -1210,7 +1302,9 @@ func (s *SubscriptionService) GetUserSubscriptionsWithProgress(ctx context.Conte
 		if group == nil {
 			continue
 		}
-		progresses = append(progresses, *s.calculateProgress(sub, group))
+		progress := s.calculateProgress(sub, group)
+		s.attachSharedQuotaProgress(ctx, sub, progress)
+		progresses = append(progresses, *progress)
 	}
 
 	return progresses, nil

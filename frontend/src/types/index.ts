@@ -1941,27 +1941,152 @@ export interface UserSubscription {
 }
 
 export interface SubscriptionProgress {
+  id: number
+  group_name: string
+  expires_at: string
+  expires_in_days: number
+  daily: UsageWindowProgress | null
+  weekly: UsageWindowProgress | null
+  monthly: UsageWindowProgress | null
+  shared?: SharedQuotaUserProgress | null
+}
+
+export interface UsageWindowProgress {
+  limit_usd: number
+  used_usd: number
+  remaining_usd: number
+  percentage: number
+  window_start: string
+  resets_at: string
+  resets_in_seconds: number
+}
+
+export interface SubscriptionProgressInfo {
+  subscription: UserSubscription
+  progress: SubscriptionProgress
+}
+
+export interface SharedQuotaUserProgress {
+  enabled: boolean
+  base_share_usd: number
+  maximum_usd: number
+  used_usd: number
+  remaining_usd: number
+  borrowed_usd: number
+  share_percent: number
+  pool_total_used_usd: number
+  pool_distributable_usd: number
+  pool_utilization_percent: number
+  soft_stop_reached: boolean
+  hard_stop_reached: boolean
+  allowed: boolean
+  window_start: string
+  window_end: string
+  windows?: SharedQuotaUserWindowProgress[]
+}
+
+export interface SharedQuotaUserWindowProgress {
+  key: string
+  window_seconds: number
+  base_share_usd: number
+  maximum_usd: number
+  used_usd: number
+  remaining_usd: number
+  borrowed_usd: number
+  share_percent: number
+  pool_total_used_usd: number
+  pool_distributable_usd: number
+  pool_utilization_percent: number
+  soft_stop_reached: boolean
+  hard_stop_reached: boolean
+  allowed: boolean
+  window_start: string
+  window_end: string
+}
+
+export interface SharedQuotaPoolConfig {
+  group_id: number
+  enabled: boolean
+  window_seconds: number
+  capacity_usd: number | null
+  reserve_ratio: number
+  soft_stop_ratio: number
+  hard_stop_ratio: number
+  borrow_enabled: boolean
+  borrow_multiplier: number
+  upstream_capacity_usd?: number | null
+  upstream_utilization_percent?: number | null
+  window_start: string
+  window_end: string
+  updated_at: string
+  windows: SharedQuotaPoolWindowConfig[]
+}
+
+export interface SharedQuotaPoolWindowConfig {
+  key: string
+  enabled: boolean
+  window_seconds: number
+  capacity_usd: number | null
+  reserve_ratio: number
+  soft_stop_ratio: number
+  hard_stop_ratio: number
+  upstream_capacity_usd?: number | null
+  upstream_utilization_percent?: number | null
+  window_start: string
+  window_end: string
+  updated_at: string
+}
+
+export interface SharedQuotaPoolMember {
+  user_id: number
   subscription_id: number
-  daily: {
-    used: number
-    limit: number | null
-    percentage: number
-    reset_in_seconds: number | null
-  } | null
-  weekly: {
-    used: number
-    limit: number | null
-    percentage: number
-    reset_in_seconds: number | null
-  } | null
-  monthly: {
-    used: number
-    limit: number | null
-    percentage: number
-    reset_in_seconds: number | null
-  } | null
-  expires_at: string | null
-  days_remaining: number | null
+  email: string
+  username: string
+  weight: number
+  enabled: boolean
+  configured: boolean
+  used_usd: number
+  base_share_usd: number
+  maximum_usd: number
+  remaining_usd: number
+  borrowed_usd: number
+  share_percent: number
+  allowed: boolean
+  decision_reason?: string
+}
+
+export interface SharedQuotaPoolSnapshot {
+  config: SharedQuotaPoolConfig
+  base_capacity_usd: number
+  distributable_usd: number
+  estimated_capacity_usd?: number
+  total_used_usd: number
+  remaining_usd: number
+  utilization_percent: number
+  soft_limit_usd: number
+  hard_limit_usd: number
+  soft_stop_reached: boolean
+  hard_stop_reached: boolean
+  active_member_count: number
+  configured_member_count: number
+  members: SharedQuotaPoolMember[]
+  windows: SharedQuotaPoolWindowSnapshot[]
+  snapshot_at: string
+}
+
+export interface SharedQuotaPoolWindowSnapshot {
+  config: SharedQuotaPoolWindowConfig
+  base_capacity_usd: number
+  distributable_usd: number
+  estimated_capacity_usd?: number
+  total_used_usd: number
+  remaining_usd: number
+  utilization_percent: number
+  soft_limit_usd: number
+  hard_limit_usd: number
+  soft_stop_reached: boolean
+  hard_stop_reached: boolean
+  members: SharedQuotaPoolMember[]
 }
 
 export interface AssignSubscriptionRequest {

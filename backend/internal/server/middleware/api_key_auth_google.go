@@ -177,7 +177,7 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 				return
 			}
 
-			needsMaintenance, err := subscriptionService.ValidateAndCheckLimits(subscription, apiKey.Group)
+			needsMaintenance, err := subscriptionService.ValidateAndCheckLimitsWithContext(c.Request.Context(), subscription, apiKey.Group)
 			if needsMaintenance {
 				refreshed, maintenanceErr := subscriptionService.EnsureWindowMaintenance(c.Request.Context(), subscription)
 				if maintenanceErr != nil {
@@ -185,13 +185,14 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 					return
 				}
 				subscription = refreshed
-				_, err = subscriptionService.ValidateAndCheckLimits(subscription, apiKey.Group)
+				_, err = subscriptionService.ValidateAndCheckLimitsWithContext(c.Request.Context(), subscription, apiKey.Group)
 			}
 			if err != nil {
 				status := 403
 				if errors.Is(err, service.ErrDailyLimitExceeded) ||
 					errors.Is(err, service.ErrWeeklyLimitExceeded) ||
-					errors.Is(err, service.ErrMonthlyLimitExceeded) {
+					errors.Is(err, service.ErrMonthlyLimitExceeded) ||
+					errors.Is(err, service.ErrSharedQuotaPoolExceeded) {
 					status = 429
 				}
 				abortWithGoogleError(c, status, err.Error())

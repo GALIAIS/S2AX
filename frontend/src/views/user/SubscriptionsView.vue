@@ -219,12 +219,56 @@
               </p>
             </div>
 
+            <!-- Shared pool usage: each window is an independent admission limit. -->
+            <div
+              v-if="getSubscriptionProgress(subscription)?.shared?.enabled"
+              class="space-y-3 border-t border-gray-100 pt-4 dark:border-dark-700"
+            >
+              <div>
+                <div class="flex items-center justify-between gap-3">
+                  <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t('userSubscriptions.sharedQuota') }}
+                  </span>
+                  <span class="text-xs text-gray-500 dark:text-dark-400">
+                    {{ t('userSubscriptions.sharedQuotaDesc') }}
+                  </span>
+                </div>
+              </div>
+              <div
+                v-for="window in getSubscriptionProgress(subscription)?.shared?.windows || []"
+                :key="window.key"
+                class="space-y-1.5"
+              >
+                <div class="flex items-center justify-between gap-3 text-xs">
+                  <span class="font-medium text-gray-700 dark:text-gray-300">
+                    {{ sharedWindowLabel(window) }}
+                  </span>
+                  <span class="text-gray-500 dark:text-dark-400">
+                    {{ t('userSubscriptions.sharedShare', { percent: window.share_percent.toFixed(2) }) }}
+                    · {{ usd(window.used_usd) }} / {{ usd(window.maximum_usd) }}
+                  </span>
+                </div>
+                <div class="relative h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-dark-600">
+                  <div
+                    class="absolute inset-y-0 left-0 rounded-full transition-all duration-300"
+                    :class="getProgressBarClass(window.used_usd, window.maximum_usd)"
+                    :style="{ width: sharedProgressWidth(window) }"
+                  ></div>
+                </div>
+                <div class="flex items-center justify-between text-[11px] text-gray-500 dark:text-dark-400">
+                  <span>{{ window.allowed ? t('userSubscriptions.sharedAllowed') : t('userSubscriptions.sharedLimited') }}</span>
+                  <span>{{ t('userSubscriptions.sharedResetIn', { time: formatSharedReset(window.window_end) }) }}</span>
+                </div>
+              </div>
+            </div>
+
             <!-- No limits configured - Unlimited badge -->
             <div
               v-if="
                 !subscription.group?.daily_limit_usd &&
                 !subscription.group?.weekly_limit_usd &&
-                !subscription.group?.monthly_limit_usd
+                !subscription.group?.monthly_limit_usd &&
+                !getSubscriptionProgress(subscription)?.shared?.enabled
               "
               class="flex items-center justify-center rounded-xl bg-gradient-to-r from-emerald-50 to-teal-50 py-6 dark:from-emerald-900/20 dark:to-teal-900/20"
             >
@@ -253,7 +297,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import subscriptionsAPI from '@/api/subscriptions'
-import type { UserSubscription } from '@/types'
+import type { SharedQuotaUserWindowProgress, SubscriptionProgress, UserSubscription } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { formatDateTimeToMinute } from '@/utils/format'
@@ -281,6 +325,7 @@ const router = useRouter()
 const appStore = useAppStore()
 
 const subscriptions = ref<UserSubscription[]>([])
+const progressBySubscription = ref<Record<number, SubscriptionProgress>>({})
 const loading = ref(true)
 
 function subscriptionHasPeakRate(subscription: UserSubscription): boolean {
@@ -295,12 +340,47 @@ async function loadSubscriptions() {
   try {
     loading.value = true
     subscriptions.value = await subscriptionsAPI.getMySubscriptions()
+    try {
+      const progress = await subscriptionsAPI.getSubscriptionsProgress()
+      progressBySubscription.value = Object.fromEntries(
+        progress.map(item => [item.subscription.id, item.progress])
+      )
+    } catch (error) {
+      // The subscription list remains useful if progress aggregation is unavailable.
+      console.error('Failed to load subscription progress:', error)
+      progressBySubscription.value = {}
+    }
   } catch (error) {
     console.error('Failed to load subscriptions:', error)
     appStore.showError(t('userSubscriptions.failedToLoad'))
   } finally {
     loading.value = false
   }
+}
+
+function getSubscriptionProgress(subscription: UserSubscription): SubscriptionProgress | undefined {
+  return progressBySubscription.value[subscription.id]
+}
+
+function usd(value: number): string {
+  return `$${(Number.isFinite(value) ? value : 0).toFixed(2)}`
+}
+
+function sharedWindowLabel(window: SharedQuotaUserWindowProgress): string {
+  if (window.key === 'short') return t('userSubscriptions.sharedWindowShort')
+  if (window.key === 'long') return t('userSubscriptions.sharedWindowLong')
+  return t('userSubscriptions.sharedWindowCustom', { seconds: window.window_seconds })
+}
+
+function sharedProgressWidth(window: SharedQuotaUserWindowProgress): string {
+  if (!window.maximum_usd || window.maximum_usd <= 0) return '0%'
+  return `${Math.min(Math.max((window.used_usd / window.maximum_usd) * 100, 0), 100)}%`
+}
+
+function formatSharedReset(windowEnd: string): string {
+  const parts = getRemainingDurationParts(windowEnd)
+  if (!parts) return t('userSubscriptions.windowNotActive')
+  return formatDurationParts(parts)
 }
 
 function getProgressWidth(used: number | undefined, limit: number | null | undefined): string {

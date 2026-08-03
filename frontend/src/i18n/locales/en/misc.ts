@@ -161,7 +161,17 @@ export default {
     resetIn: 'Resets in {time}',
     quotaEndsIn: 'Quota ends in {time}',
     windowNotActive: 'Awaiting first use',
-    usageOf: '{used} of {limit}'
+    usageOf: '{used} of {limit}',
+    sharedQuota: 'Shared quota pool',
+    sharedQuotaDesc: 'Allocated by member weight; every enabled window must pass',
+    sharedWindowShort: '5-hour window',
+    sharedWindowLong: '7-day window',
+    sharedWindowCustom: '{seconds}s window',
+    sharedShare: '{percent}% allocated',
+    sharedBorrowed: '{amount} borrowed',
+    sharedAllowed: 'Available',
+    sharedLimited: 'Limited',
+    sharedResetIn: 'Refreshes in {time}'
   },
 
   // Onboarding Tour

@@ -4069,6 +4069,14 @@
       @close="showRPMOverridesModal = false"
       @success="loadGroups"
     />
+
+    <!-- Shared quota pool modal -->
+    <SharedQuotaPoolModal
+      :show="showSharedQuotaPoolModal"
+      :group="sharedQuotaPoolGroup"
+      @close="showSharedQuotaPoolModal = false"
+      @success="loadGroups"
+    />
   </AppLayout>
 </template>
 
@@ -4104,6 +4112,7 @@ import PlatformIcon from "@/components/common/PlatformIcon.vue";
 import Icon from "@/components/icons/Icon.vue";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
+import SharedQuotaPoolModal from "@/components/admin/group/SharedQuotaPoolModal.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
 import { VueDraggable } from "vue-draggable-plus";
@@ -4716,6 +4725,8 @@ const showRateMultipliersModal = ref(false);
 const rateMultipliersGroup = ref<AdminGroup | null>(null);
 const showRPMOverridesModal = ref(false);
 const rpmOverridesGroup = ref<AdminGroup | null>(null);
+const showSharedQuotaPoolModal = ref(false);
+const sharedQuotaPoolGroup = ref<AdminGroup | null>(null);
 const groupActionItems = (group: AdminGroup): RowActionMenuItem[] => {
   const items: RowActionMenuItem[] = [
     {
@@ -4731,6 +4742,7 @@ const groupActionItems = (group: AdminGroup): RowActionMenuItem[] => {
     },
     { key: "rate-multipliers", label: t("admin.groups.rateMultipliers"), icon: "dollar" },
     { key: "rpm-overrides", label: t("admin.groups.rpmOverrides"), icon: "bolt" },
+    { key: "shared-quota", label: t("admin.sharedQuota.action"), icon: "shield" },
     { key: "delete", label: t("common.delete"), icon: "trash", tone: "danger" },
   ];
   if (group.platform === "composite") {
@@ -6081,6 +6093,7 @@ const handleGroupAction = (group: AdminGroup, action: string) => {
   else if (action === "composite-routes") void handleCompositeRoutes(group);
   else if (action === "rate-multipliers") handleRateMultipliers(group);
   else if (action === "rpm-overrides") handleRPMOverrides(group);
+  else if (action === "shared-quota") handleSharedQuotaPool(group);
   else if (action === "delete") handleDelete(group);
 };
 
@@ -6092,6 +6105,11 @@ const handleRateMultipliers = (group: AdminGroup) => {
 const handleRPMOverrides = (group: AdminGroup) => {
   rpmOverridesGroup.value = group;
   showRPMOverridesModal.value = true;
+};
+
+const handleSharedQuotaPool = (group: AdminGroup) => {
+  sharedQuotaPoolGroup.value = group;
+  showSharedQuotaPoolModal.value = true;
 };
 
 const handleDuplicate = async (group: AdminGroup) => {

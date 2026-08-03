@@ -158,7 +158,17 @@ export default {
     resetIn: '{time} 后重置',
     quotaEndsIn: '额度将在 {time} 后结束',
     windowNotActive: '等待首次使用',
-    usageOf: '已用 {used} / {limit}'
+    usageOf: '已用 {used} / {limit}',
+    sharedQuota: '共享额度池',
+    sharedQuotaDesc: '按成员权重动态分配；所有启用窗口都必须满足',
+    sharedWindowShort: '5 小时窗口',
+    sharedWindowLong: '7 天窗口',
+    sharedWindowCustom: '{seconds} 秒窗口',
+    sharedShare: '分配 {percent}%',
+    sharedBorrowed: '借用 {amount}',
+    sharedAllowed: '当前可用',
+    sharedLimited: '当前受限',
+    sharedResetIn: '{time} 后刷新'
   },
 
   // Onboarding Tour
