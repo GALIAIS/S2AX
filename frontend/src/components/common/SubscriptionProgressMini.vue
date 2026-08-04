@@ -284,7 +284,10 @@ function sharedDataReady(window: SharedQuotaUserWindowProgress): boolean {
 }
 
 function officialSnapshotPresent(window: SharedQuotaUserWindowProgress): boolean {
-  return window.official_data_available === true || Boolean(window.official_fetched_at)
+  if (window.official_data_available === true) return true
+  if (!window.official_fetched_at) return false
+  const timestamp = Date.parse(window.official_fetched_at)
+  return Number.isFinite(timestamp) && timestamp > 0
 }
 
 function sharedUsed(window: SharedQuotaUserWindowProgress): number {

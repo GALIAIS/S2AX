@@ -1523,7 +1523,13 @@ const isOfficialSharedQuota = (subscription: UserSubscription): boolean => {
 const sharedOfficialSnapshotPresent = (subscription: UserSubscription): boolean => {
   const view = sharedQuotaForRow(subscription)
   return !view || !isOfficialSharedQuota(subscription) ||
-    view.window.official_data_available === true || Boolean(view.window.official_fetched_at)
+    view.window.official_data_available === true || isValidOfficialTimestamp(view.window.official_fetched_at)
+}
+
+const isValidOfficialTimestamp = (value?: string): boolean => {
+  if (!value) return false
+  const timestamp = Date.parse(value)
+  return Number.isFinite(timestamp) && timestamp > 0
 }
 
 const formatPercent = (value: number | undefined): string => {

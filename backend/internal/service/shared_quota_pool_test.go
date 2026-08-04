@@ -107,6 +107,22 @@ func TestDefaultSharedQuotaPoolUsesFiveHourAndSevenDayWindows(t *testing.T) {
 	}
 }
 
+func TestDisabledSharedQuotaPoolDoesNotExposeActiveWindows(t *testing.T) {
+	config := sharedQuotaTestConfig()
+	config.Enabled = false
+	repo := &sharedQuotaPoolRepoStub{config: config}
+
+	snapshot, err := NewSharedQuotaPoolService(repo).GetSnapshot(context.Background(), config.GroupID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, window := range snapshot.Windows {
+		if window.Config.Enabled {
+			t.Fatalf("disabled pool exposed active window %q", window.Config.Key)
+		}
+	}
+}
+
 func TestStoredOfficialQuotaWindowUsesFreshAccountSnapshot(t *testing.T) {
 	now := time.Date(2026, 8, 4, 1, 0, 0, 0, time.UTC)
 	fetchedAt := now.Add(-time.Minute)

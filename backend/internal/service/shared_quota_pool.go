@@ -464,6 +464,14 @@ func (s *SharedQuotaPoolService) UpdateConfig(ctx context.Context, groupID int64
 		}
 	}
 	config.Windows = normalizeSharedQuotaWindows(config, windows)
+	// The master switch owns enforcement. Persisting enabled child windows while
+	// the pool is disabled creates an ambiguous state where the settings page
+	// looks active but subscriptions still use the legacy group limit.
+	if !config.Enabled {
+		for i := range config.Windows {
+			config.Windows[i].Enabled = false
+		}
+	}
 	if err := validateSharedQuotaPoolConfig(config); err != nil {
 		return nil, err
 	}
@@ -558,6 +566,10 @@ func (s *SharedQuotaPoolService) loadSnapshot(ctx context.Context, groupID int64
 		}
 	}
 	if !config.Enabled {
+		for i := range config.Windows {
+			config.Windows[i].Enabled = false
+		}
+		snapshot.Config = *config
 		for _, member := range members {
 			snapshot.Members = append(snapshot.Members, SharedQuotaPoolMemberSnapshot{
 				SharedQuotaPoolMember: member,
