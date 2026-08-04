@@ -317,12 +317,25 @@ func (r *sharedQuotaPoolRepository) GetOfficialQuotaSnapshot(ctx context.Context
 		return nil, nil
 	}
 	var snapshot service.SharedQuotaOfficialSnapshot
-	var resetAt sql.NullTime
+	var resetAt, analyticsStartAt, analyticsEndAt, analyticsFetchedAt, baselineCapturedAt, baselineResetAt sql.NullTime
+	var analyticsUsedCredits, analyticsCreditsPerUSD, analyticsConfidence, baselineUsedCredits, baselineUsedPercent sql.NullFloat64
+	var analyticsInputTokens, analyticsCachedInputTokens, analyticsOutputTokens, analyticsTotalTokens, analyticsRecordCount sql.NullInt64
+	var analyticsSource, analyticsStatus sql.NullString
 	err := r.db.QueryRowContext(ctx, `
-		SELECT account_id, used_percent, limit_window_seconds, reset_at, fetched_at
+		SELECT account_id, used_percent, limit_window_seconds, reset_at, fetched_at,
+		       analytics_used_credits, analytics_input_tokens, analytics_cached_input_tokens,
+		       analytics_output_tokens, analytics_total_tokens, analytics_start_at, analytics_end_at,
+		       analytics_fetched_at, analytics_credits_per_usd, analytics_source, analytics_status,
+		       analytics_confidence, analytics_record_count, baseline_used_credits,
+		       baseline_used_percent, baseline_captured_at, baseline_reset_at
 		FROM shared_quota_pool_official_snapshots
 		WHERE group_id = $1 AND window_key = $2`, groupID, windowKey).Scan(
-		&snapshot.AccountID, &snapshot.UsedPercent, &snapshot.LimitWindowSeconds, &resetAt, &snapshot.FetchedAt)
+		&snapshot.AccountID, &snapshot.UsedPercent, &snapshot.LimitWindowSeconds, &resetAt, &snapshot.FetchedAt,
+		&analyticsUsedCredits, &analyticsInputTokens, &analyticsCachedInputTokens,
+		&analyticsOutputTokens, &analyticsTotalTokens, &analyticsStartAt, &analyticsEndAt,
+		&analyticsFetchedAt, &analyticsCreditsPerUSD, &analyticsSource, &analyticsStatus,
+		&analyticsConfidence, &analyticsRecordCount, &baselineUsedCredits,
+		&baselineUsedPercent, &baselineCapturedAt, &baselineResetAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -331,6 +344,57 @@ func (r *sharedQuotaPoolRepository) GetOfficialQuotaSnapshot(ctx context.Context
 	}
 	if resetAt.Valid {
 		snapshot.ResetAt = resetAt.Time
+	}
+	if analyticsUsedCredits.Valid {
+		snapshot.AnalyticsUsedCredits = analyticsUsedCredits.Float64
+	}
+	if analyticsInputTokens.Valid {
+		snapshot.AnalyticsInputTokens = analyticsInputTokens.Int64
+	}
+	if analyticsCachedInputTokens.Valid {
+		snapshot.AnalyticsCachedInputTokens = analyticsCachedInputTokens.Int64
+	}
+	if analyticsOutputTokens.Valid {
+		snapshot.AnalyticsOutputTokens = analyticsOutputTokens.Int64
+	}
+	if analyticsTotalTokens.Valid {
+		snapshot.AnalyticsTotalTokens = analyticsTotalTokens.Int64
+	}
+	if analyticsStartAt.Valid {
+		snapshot.AnalyticsStartAt = analyticsStartAt.Time
+	}
+	if analyticsEndAt.Valid {
+		snapshot.AnalyticsEndAt = analyticsEndAt.Time
+	}
+	if analyticsFetchedAt.Valid {
+		snapshot.AnalyticsFetchedAt = analyticsFetchedAt.Time
+	}
+	if analyticsCreditsPerUSD.Valid {
+		snapshot.AnalyticsCreditsPerUSD = analyticsCreditsPerUSD.Float64
+	}
+	if analyticsSource.Valid {
+		snapshot.AnalyticsSource = analyticsSource.String
+	}
+	if analyticsStatus.Valid {
+		snapshot.AnalyticsStatus = analyticsStatus.String
+	}
+	if analyticsConfidence.Valid {
+		snapshot.AnalyticsConfidence = analyticsConfidence.Float64
+	}
+	if analyticsRecordCount.Valid {
+		snapshot.AnalyticsRecordCount = int(analyticsRecordCount.Int64)
+	}
+	if baselineUsedCredits.Valid {
+		snapshot.BaselineUsedCredits = baselineUsedCredits.Float64
+	}
+	if baselineUsedPercent.Valid {
+		snapshot.BaselineUsedPercent = baselineUsedPercent.Float64
+	}
+	if baselineCapturedAt.Valid {
+		snapshot.BaselineCapturedAt = baselineCapturedAt.Time
+	}
+	if baselineResetAt.Valid {
+		snapshot.BaselineResetAt = baselineResetAt.Time
 	}
 	return &snapshot, nil
 }
@@ -342,16 +406,44 @@ func (r *sharedQuotaPoolRepository) SaveOfficialQuotaSnapshot(ctx context.Contex
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO shared_quota_pool_official_snapshots (
 			group_id, window_key, account_id, used_percent, limit_window_seconds,
-			reset_at, fetched_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7)
+			reset_at, fetched_at, analytics_used_credits, analytics_input_tokens,
+			analytics_cached_input_tokens, analytics_output_tokens, analytics_total_tokens,
+			analytics_start_at, analytics_end_at, analytics_fetched_at, analytics_credits_per_usd,
+			analytics_source, analytics_status, analytics_confidence, analytics_record_count,
+			baseline_used_credits, baseline_used_percent, baseline_captured_at, baseline_reset_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
 		ON CONFLICT (group_id, window_key) DO UPDATE SET
 			account_id = EXCLUDED.account_id,
 			used_percent = EXCLUDED.used_percent,
 			limit_window_seconds = EXCLUDED.limit_window_seconds,
 			reset_at = EXCLUDED.reset_at,
 			fetched_at = EXCLUDED.fetched_at,
+			analytics_used_credits = EXCLUDED.analytics_used_credits,
+			analytics_input_tokens = EXCLUDED.analytics_input_tokens,
+			analytics_cached_input_tokens = EXCLUDED.analytics_cached_input_tokens,
+			analytics_output_tokens = EXCLUDED.analytics_output_tokens,
+			analytics_total_tokens = EXCLUDED.analytics_total_tokens,
+			analytics_start_at = EXCLUDED.analytics_start_at,
+			analytics_end_at = EXCLUDED.analytics_end_at,
+			analytics_fetched_at = EXCLUDED.analytics_fetched_at,
+			analytics_credits_per_usd = EXCLUDED.analytics_credits_per_usd,
+			analytics_source = EXCLUDED.analytics_source,
+			analytics_status = EXCLUDED.analytics_status,
+			analytics_confidence = EXCLUDED.analytics_confidence,
+			analytics_record_count = EXCLUDED.analytics_record_count,
+			baseline_used_credits = EXCLUDED.baseline_used_credits,
+			baseline_used_percent = EXCLUDED.baseline_used_percent,
+			baseline_captured_at = EXCLUDED.baseline_captured_at,
+			baseline_reset_at = EXCLUDED.baseline_reset_at,
 			updated_at = NOW()`, groupID, windowKey, snapshot.AccountID,
-		snapshot.UsedPercent, snapshot.LimitWindowSeconds, timeOrNil(snapshot.ResetAt), snapshot.FetchedAt)
+		snapshot.UsedPercent, snapshot.LimitWindowSeconds, timeOrNil(snapshot.ResetAt), snapshot.FetchedAt,
+		nilFloatValue(snapshot.AnalyticsUsedCredits), nilIntValue(snapshot.AnalyticsInputTokens),
+		nilIntValue(snapshot.AnalyticsCachedInputTokens), nilIntValue(snapshot.AnalyticsOutputTokens),
+		nilIntValue(snapshot.AnalyticsTotalTokens), timeOrNil(snapshot.AnalyticsStartAt), timeOrNil(snapshot.AnalyticsEndAt),
+		timeOrNil(snapshot.AnalyticsFetchedAt), nilFloatValue(snapshot.AnalyticsCreditsPerUSD), snapshot.AnalyticsSource,
+		snapshot.AnalyticsStatus, nilFloatValue(snapshot.AnalyticsConfidence), nilIntValue(int64(snapshot.AnalyticsRecordCount)),
+		nilFloatValue(snapshot.BaselineUsedCredits), nilFloatValue(snapshot.BaselineUsedPercent),
+		timeOrNil(snapshot.BaselineCapturedAt), timeOrNil(snapshot.BaselineResetAt))
 	return err
 }
 
@@ -449,6 +541,20 @@ func nilFloat(value *float64) any {
 		return nil
 	}
 	return *value
+}
+
+func nilFloatValue(value float64) any {
+	if value == 0 {
+		return nil
+	}
+	return value
+}
+
+func nilIntValue(value int64) any {
+	if value == 0 {
+		return nil
+	}
+	return value
 }
 
 func nilInt64(value *int64) any {

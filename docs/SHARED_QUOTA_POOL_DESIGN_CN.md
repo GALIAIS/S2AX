@@ -1,8 +1,8 @@
 # 共享订阅额度池与动态公平分配设计
 
-状态：已实现（多窗口 V1；官方滚动百分比同步为可选模式）
+状态：V2 实现中（多窗口；官方百分比 + Analytics credit 校准）
 适用版本：SAX 分支
-最后更新：2026-08-03
+最后更新：2026-08-04
 
 ## 1. 背景与目标
 
@@ -198,10 +198,10 @@ OpenAI/Codex OAuth 账号可选用现有 `OpenAIQuotaService` 调用官方 `/bac
 实现规则：
 
 1. 只保存账号、窗口长度、已用百分比、重置时间和抓取时间，不保存 access token；
-2. 官方百分比只决定总池使用率和 soft/hard 线，成员分摊仍以本地真实 `usage_logs.actual_cost` 按比例计算；
+2. V1 兼容模式下，官方百分比只决定总池使用率和 soft/hard 线，成员分摊仍以本地真实 `usage_logs.actual_cost` 按比例计算；V2 Analytics 可用时改用第 13 节的 credit 校准公式；
 3. 默认 60 秒刷新，15 分钟内的旧快照可继续用于限制并标记为 stale；超过 15 分钟或首次没有快照时，不阻塞网关请求，后台继续刷新；
 4. 配置了账号 ID 时严格使用该账号；未配置时只有分组内恰好一个活跃 OpenAI OAuth 账号才自动选择，多账号直接标记刷新失败，避免误用其它账号；
-5. analytics 的 token/credit 仅适合作为趋势和人工校准数据，不能直接用“日 credit 总和 ÷ 45%”推导滚动周容量，也不能把 `1000 credit = 40 USD` 当作所有模型和所有窗口的通用价格。
+5. V2 会将同一官方窗口内的 Analytics credit 与 `/wham/usage` 百分比配对，按第 13 节估算容量；该估算只对同窗口、同周期快照有效，换算率 `1000 credit = 40 USD` 随快照保存，不能跨供应商、跨窗口或跨价格规则复用。
 
 对于 Pro 20x 拼车，推荐启用 `long=7d` 的官方百分比模式；只有确认官方存在并返回 5h secondary window 时，再单独启用 `short=5h`。如果官方没有 5h 窗口，就不要人为填一个 5h 容量伪造限制。
 
@@ -213,7 +213,7 @@ OpenAI/Codex OAuth 账号可选用现有 `OpenAIQuotaService` 调用官方 `/bac
 
 ## 11. 部署与回滚
 
-1. 先应用只新增字段、快照表和索引的 311 迁移；
+1. 先应用 311 基础快照迁移，再应用 312 Analytics credit 与 baseline 增量迁移；
 2. 发布后默认所有池关闭，不影响旧用户；
 3. 管理员配置并观察至少一个窗口；
 4. 若策略异常，关闭 `enabled` 即回到原有分组日/周/月限额；也可只关闭异常窗口；
@@ -234,3 +234,105 @@ OpenAI/Codex OAuth 账号可选用现有 `OpenAIQuotaService` 调用官方 `/bac
 - 官方快照按窗口匹配、按账号隔离、过期后不继续作为硬限制；
 - 官方百分比 45%、三名等权且本地用量 60/40/0 时，成员分摊为 27%/18%/0%，总池仍以 45% 判定；
 - 现有订阅、余额、计费、Google middleware 测试全部保持通过。
+
+## 13. V2：官方 Analytics credit 校准与已用额度基线
+
+### 13.1 为什么不能继续只显示 USD 或直接把官方百分比分给成员
+
+`/wham/usage` 的百分比是上游滚动窗口的**绝对使用率**，不是本共享池启用后的使用率。
+如果账号在启用拼车前已经使用了 29%，把当前 29% 按成员本地费用比例分摊，会把历史用量错误计入新成员；
+如果把每个人都按 100% 的独立上限处理，又会重复出售同一份上游额度。手动 USD 只能表达管理员的保守预算，
+不能证明 OpenAI 的真实周上限，因此官方模式不再把 USD 当作计算主单位。
+
+V2 采用明确的“双层账本”：
+
+1. **上游事实层**：官方 `/wham/usage` 提供当前滚动窗口百分比、窗口长度和重置时间；
+2. **容量校准层**：官方 `daily-workspace-usage-counts?group_by=day` 提供同一时段的 credit/token 聚合；
+3. **共享池层**：启用或新周期第一次同步时保存 `baseline`，baseline 以前的上游用量不归属于任何共享池成员；
+4. **成员归属层**：官方接口没有按网关用户拆分的 credit，因此成员用量使用本项目同一窗口内的 `usage_logs.actual_cost` 比例归属，
+   并在界面明确标记为“网关本地归属”。它用于公平准入，不伪造官方的逐用户明细。
+
+因此界面和准入口径如下：
+
+- `official_percent` 仍保留为配置兼容名称，但运行时优先使用 `analytics_credit`；
+- Analytics 可用时，**credit 是计算主单位，百分比是上游事实和进度辅助显示，USD 仅是按当前换算率的展示值**；
+- Analytics 不可用时，退回 `provider_percent_fallback`，只能按官方百分比减去安全线进行保守准入，管理员看到明确的“未校准”状态，
+  不再显示看似精确的 `$600` 额度；
+- 当前实现默认 `25 credits = 1 USD`（即 1000 credits = 40 USD），该换算率随每个快照保存，便于官方价格规则变化时审计和迁移。
+
+### 13.2 Analytics 请求与数据边界
+
+后台刷新任务复用 OpenAI OAuth quota service 的 access token、代理、Agent Identity 和重试机制，异步请求：
+
+```text
+GET /backend-api/wham/analytics/daily-workspace-usage-counts
+  ?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&group_by=day
+```
+
+日期范围由当前官方窗口计算：优先取 `reset_at - limit_window_seconds` 到当前时间，按 UTC 日传递，
+不把未来的 reset 日期作为查询结束日。响应解析采用兼容字段读取，接受 `credits/credit/total_credits`、
+输入/缓存输入/输出 token 的常见命名和 `data`/`daily` 数组结构；未知字段保留为不可用，不会因为私有接口结构变动阻塞网关。
+
+Analytics 不是网关热路径：首次同步和刷新均在后台 singleflight 中执行，Analytics 失败只保留上一份有效快照，
+并将状态标为 `unavailable` 或 `stale`。默认 5 分钟认为需要刷新，15 分钟后不再作为精确校准依据。
+
+### 13.3 容量与成员分配公式
+
+令 `P` 为 `/wham/usage` 的当前使用百分比，`C` 为同窗口 Analytics 累计 credits，`B` 为共享池 baseline credits：
+
+```text
+estimated_total_credits = C / (P / 100)                    (P > 0)
+distributable_credits    = estimated_total_credits × (1 - reserve)
+hard_limit_credits       = distributable_credits × hard_stop
+available_pool_credits   = max(0, hard_limit_credits - C)
+pool_used_credits        = max(0, C - B)
+member_base_credits      = available_pool_credits × weight / Σ(enabled_weight)
+member_max_credits       = member_base_credits × borrow_multiplier
+```
+
+这里 `C` 是账号当前的绝对上游使用量，所以已有 29% 会直接减少可分配空间；`B` 只用于判断本共享池成员从何处开始计量，
+不会把历史 29% 塞给某个用户。`local_used_credits` 由本地费用乘以快照中的 credits/USD 换算率得到，
+只有在本地使用记录存在时才参与成员归属；外部或未归属的上游使用只减少池的剩余空间，不会被分摊给用户。
+
+如果 `P=0` 或 `C` 缺失，不能推导总容量，系统使用百分比回退模式：
+
+```text
+available_pool_percent = max(0, hard_limit_percent - P)
+pool_used_percent       = max(0, P - baseline_percent)
+```
+
+这是一种保守近似，必须在 API 和 UI 上标注，禁止伪装成精确金额。周期 reset_at 变化时，baseline、Analytics 范围和成员本地起点一起切换，
+旧周期只留在快照审计字段中，不参与新周期准入。
+
+### 13.4 快照、迁移和失败语义
+
+现有 `shared_quota_pool_official_snapshots` 保留一行当前投影；新增 Analytics 统计列和 baseline 列，不新增请求热路径表：
+
+- Analytics：credits、输入/缓存输入/输出 token、日期范围、抓取时间、来源、状态、置信度、换算率；
+- baseline：抓取时的上游 credits/percent、捕获时间、对应 reset_at；
+- derived：估算总容量和当前池剩余容量只在服务层计算，不重复持久化。
+
+写快照时保留已有 baseline，只有首次捕获、reset_at 进入新周期或管理员重新启用窗口才建立新 baseline。
+上游刷新失败不覆盖最后一份有效 Analytics；超过最大陈旧时间则关闭“精确校准”标志，但维持现有官方百分比的 fail-open 兼容行为。
+
+### 13.5 管理员界面验收口径
+
+官方窗口卡片必须同时给出：`上游已用百分比`、`Analytics credits`、`估算总 credits`、`可分配剩余 credits`、
+`baseline`、`最后同步时间`和状态标签。成员表在官方校准模式显示 `已用/份额/最大值` 的 credits，
+并可展开查看换算 USD；不得再把官方模式的 `100%` 与手动 `$600` 放在同一行造成二选一冲突。
+
+管理员配置仍只需选择“官方同步”并选择上游账号，不能手填官方容量；只有手动 USD 模式才显示容量输入。
+若 Analytics 私有接口不可访问，管理员可以继续使用百分比回退，也可以关闭共享池回到原订阅限额。
+
+### 13.6 V2 验收用例
+
+- 账号已有 29%、Analytics 为 290 credits、三名等权、reserve=0、hard=95%：估算总容量 1000 credits，
+  新池硬线为 950，当前可分配 660 credits，历史 290 不计入任何成员；
+- 首次启用后用户 A/B/C 产生本地费用 2/1/0 USD，Analytics 增加但未返回逐用户明细时，成员归属按 2:1:0 的本地比例，
+  总池硬线仍按官方绝对 credits 判定；
+- Analytics 返回 0 credits 且官方 P=0：状态为未校准，不显示估算容量，不因除零产生无限额度；
+- Analytics 返回错误或超 15 分钟：保留上次快照，标记 stale；没有历史快照时不阻塞网关；
+- reset_at 改变：新 baseline 建立，旧周期用量不会污染新周期；
+- 同一分组连续刷新不会重复建立 baseline，也不会把旧成员历史费用重新归属；
+- 私有接口返回未知字段、空 data、字符串数字或部分 token 字段时，解析不崩溃，状态和可用字段准确降级；
+- 现有 manual USD、日/月限额、余额扣费和官方百分比兼容测试全部保持通过。

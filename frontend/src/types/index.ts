@@ -1978,6 +1978,15 @@ export interface SharedQuotaUserProgress {
   pool_distributable_usd: number
   pool_utilization_percent: number
   capacity_mode?: 'manual_usd' | 'official_percent'
+  official_allocation_mode?: 'analytics_credit' | 'provider_percent_fallback' | 'pending'
+  official_analytics_available?: boolean
+  official_analytics_stale?: boolean
+  official_analytics_used_credits?: number
+  official_estimated_capacity_credits?: number
+  official_available_pool_credits?: number
+  official_pool_used_credits?: number
+  official_baseline_credits?: number
+  official_accounting_status?: string
   used_percent?: number
   base_share_percent?: number
   maximum_percent?: number
@@ -2004,11 +2013,36 @@ export interface SharedQuotaUserWindowProgress {
   pool_distributable_usd: number
   pool_utilization_percent: number
   capacity_mode?: 'manual_usd' | 'official_percent'
+  official_allocation_mode?: 'analytics_credit' | 'provider_percent_fallback' | 'pending'
   official_data_available?: boolean
   official_data_stale?: boolean
   official_used_percent?: number
   official_reset_at?: string
   official_fetched_at?: string
+  official_analytics_available?: boolean
+  official_analytics_stale?: boolean
+  official_analytics_used_credits?: number
+  official_analytics_input_tokens?: number
+  official_analytics_cached_input_tokens?: number
+  official_analytics_output_tokens?: number
+  official_analytics_total_tokens?: number
+  official_analytics_start_at?: string
+  official_analytics_end_at?: string
+  official_analytics_fetched_at?: string
+  official_analytics_credits_per_usd?: number
+  official_analytics_confidence?: number
+  official_estimated_capacity_credits?: number
+  official_available_pool_credits?: number
+  official_pool_used_credits?: number
+  official_baseline_credits?: number
+  official_baseline_percent?: number
+  official_baseline_captured_at?: string
+  official_accounting_status?: string
+  base_share_credits?: number
+  maximum_credits?: number
+  used_credits?: number
+  remaining_credits?: number
+  borrowed_credits?: number
   base_share_percent?: number
   maximum_percent?: number
   used_percent?: number
@@ -2071,6 +2105,11 @@ export interface SharedQuotaPoolMember {
   maximum_usd: number
   remaining_usd: number
   borrowed_usd: number
+  used_credits?: number
+  base_share_credits?: number
+  maximum_credits?: number
+  remaining_credits?: number
+  borrowed_credits?: number
   share_percent: number
   allowed: boolean
   decision_reason?: string
@@ -2120,6 +2159,30 @@ export interface SharedQuotaPoolWindowSnapshot {
   official_used_percent?: number
   official_reset_at?: string
   official_fetched_at?: string
+  official_allocation_mode?: 'analytics_credit' | 'provider_percent_fallback' | 'pending'
+  official_analytics_available?: boolean
+  official_analytics_stale?: boolean
+  official_analytics_used_credits?: number
+  official_analytics_input_tokens?: number
+  official_analytics_cached_input_tokens?: number
+  official_analytics_output_tokens?: number
+  official_analytics_total_tokens?: number
+  official_analytics_start_at?: string
+  official_analytics_end_at?: string
+  official_analytics_fetched_at?: string
+  official_analytics_credits_per_usd?: number
+  official_analytics_confidence?: number
+  official_estimated_capacity_credits?: number
+  official_available_pool_credits?: number
+  official_pool_used_credits?: number
+  official_baseline_credits?: number
+  official_baseline_percent?: number
+  official_baseline_captured_at?: string
+  official_accounting_status?: string
+  base_capacity_credits?: number
+  distributable_credits?: number
+  total_used_credits?: number
+  remaining_credits?: number
   base_capacity_percent?: number
   distributable_percent?: number
   total_used_percent?: number

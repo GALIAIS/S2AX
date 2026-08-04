@@ -18,12 +18,19 @@
             <span v-else-if="window.config.capacity_mode === 'official_percent' && !officialSnapshotPresent(window)" class="text-amber-600 dark:text-amber-400">
               {{ t('admin.sharedQuota.officialSyncing') }}
             </span>
+            <span v-else-if="window.config.capacity_mode === 'official_percent' && analyticsWindow(window)">{{ credits(window.official_analytics_used_credits ?? 0) }}</span>
             <span v-else-if="window.config.capacity_mode === 'official_percent'">{{ percent(window.official_used_percent ?? 0) }}</span>
             <span v-else>{{ window.config.capacity_usd == null ? '—' : usd(window.total_used_usd) }}</span>
-            <span class="text-xs text-gray-500 dark:text-gray-400">/ {{ windowIsActive(window) && window.config.capacity_mode === 'official_percent' ? '100%' : (window.config.capacity_usd == null ? '—' : usd(window.distributable_usd)) }}</span>
+            <span class="text-xs text-gray-500 dark:text-gray-400">/ {{ windowIsActive(window) && window.config.capacity_mode === 'official_percent' ? (analyticsWindow(window) ? credits(window.official_estimated_capacity_credits ?? 0) : '100%') : (window.config.capacity_usd == null ? '—' : usd(window.distributable_usd)) }}</span>
           </div>
           <div v-if="windowIsActive(window) && window.config.capacity_mode === 'official_percent' && window.official_data_stale" class="mt-1 text-xs text-amber-600 dark:text-amber-400">
             {{ t('admin.sharedQuota.officialStale') }}
+          </div>
+          <div v-if="windowIsActive(window) && window.config.capacity_mode === 'official_percent'" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            <span v-if="analyticsWindow(window)">{{ t('admin.sharedQuota.officialAnalytics') }}</span>
+            <span v-else-if="window.official_allocation_mode === 'provider_percent_fallback'">{{ t('admin.sharedQuota.analyticsFallback') }}</span>
+            <span v-else>{{ t('admin.sharedQuota.analyticsPending') }}</span>
+            <span v-if="window.official_baseline_credits != null"> · {{ t('admin.sharedQuota.baseline') }} {{ credits(window.official_baseline_credits) }}</span>
           </div>
         </div>
       </div>
@@ -213,6 +220,7 @@ const visibleMembers = computed(() => {
   return members.length > 0 ? members : snapshot.value?.members ?? []
 })
 const usd = (value: number) => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 4 }).format(value)
+const credits = (value: number) => `${Number(value || 0).toFixed(2)} credit`
 const percent = (value: number) => `${Number(value || 0).toFixed(2)}%`
 const windowLabel = (key: string) => key === 'short' ? '5h / 5 小时窗口' : key === 'long' ? '7d / 7 天窗口' : key
 const officialSnapshotPresent = (window: SharedQuotaPoolSnapshot['windows'][number]) =>
@@ -225,16 +233,26 @@ const isValidOfficialTimestamp = (value?: string) => {
 const windowIsActive = (window: SharedQuotaPoolSnapshot['windows'][number]) =>
   snapshot.value?.config.enabled === true && window.config.enabled
 const windowUtilization = (window: SharedQuotaPoolSnapshot['windows'][number]) =>
-  window.config.capacity_mode === 'official_percent'
+  window.config.capacity_mode === 'official_percent' && analyticsWindow(window)
+    ? `${credits(window.official_analytics_used_credits ?? 0)} / ${credits(window.official_estimated_capacity_credits ?? 0)}`
+    : window.config.capacity_mode === 'official_percent'
     ? percent(window.official_used_percent ?? 0)
     : `${window.utilization_percent.toFixed(2)}%`
-const displayAmount = (member?: SharedQuotaPoolMember) => selectedWindow.value?.config.capacity_mode === 'official_percent'
+const analyticsWindow = (window?: SharedQuotaPoolSnapshot['windows'][number]) =>
+  window?.official_allocation_mode === 'analytics_credit' && window.official_analytics_available === true
+const displayAmount = (member?: SharedQuotaPoolMember) => analyticsWindow(selectedWindow.value)
+  ? credits(member?.used_credits ?? 0)
+  : selectedWindow.value?.config.capacity_mode === 'official_percent'
   ? percent(member?.used_percent ?? 0)
   : usd(member?.used_usd ?? 0)
-const displayMaximum = (member?: SharedQuotaPoolMember) => selectedWindow.value?.config.capacity_mode === 'official_percent'
+const displayMaximum = (member?: SharedQuotaPoolMember) => analyticsWindow(selectedWindow.value)
+  ? credits(member?.maximum_credits ?? 0)
+  : selectedWindow.value?.config.capacity_mode === 'official_percent'
   ? percent(member?.maximum_percent ?? 0)
   : usd(member?.maximum_usd ?? 0)
-const displayBorrowed = (member?: SharedQuotaPoolMember) => selectedWindow.value?.config.capacity_mode === 'official_percent'
+const displayBorrowed = (member?: SharedQuotaPoolMember) => analyticsWindow(selectedWindow.value)
+  ? credits(member?.borrowed_credits ?? 0)
+  : selectedWindow.value?.config.capacity_mode === 'official_percent'
   ? percent(member?.borrowed_percent ?? 0)
   : usd(member?.borrowed_usd ?? 0)
 

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 )
@@ -330,5 +331,56 @@ func TestSharedQuotaPoolOfficialPercentPrefersFreshAccountSnapshotOverStalePoolR
 	}
 	if window.OfficialUsedPercent != 56 {
 		t.Fatalf("official used percent = %v, want 56", window.OfficialUsedPercent)
+	}
+}
+
+func TestSharedQuotaPoolOfficialAnalyticsSubtractsPrePoolBaseline(t *testing.T) {
+	now := time.Date(2026, 8, 4, 1, 0, 0, 0, time.UTC)
+	config := sharedQuotaTestConfig()
+	config.Windows[0].Enabled = false
+	config.Windows[1].CapacityUSD = nil
+	config.Windows[1].CapacityMode = SharedQuotaCapacityModeOfficialPercent
+	config.Windows[1].ReserveRatio = 0
+	config.Windows[1].HardStopRatio = 0.95
+	config.Windows[1].UpstreamAccountID = func() *int64 { id := int64(42); return &id }()
+	repo := &sharedQuotaPoolRepoStub{
+		config: config,
+		members: []SharedQuotaPoolMember{
+			{UserID: 1, Weight: 1, Enabled: true},
+			{UserID: 2, Weight: 1, Enabled: true},
+		},
+		usageByWindow: map[string]map[int64]float64{"long": {1: 2, 2: 1}},
+		totalByWindow: map[string]float64{"long": 3},
+		official: map[string]*SharedQuotaOfficialSnapshot{
+			"long": {
+				AccountID: 42, UsedPercent: 29, LimitWindowSeconds: 7 * 24 * 60 * 60,
+				FetchedAt: now, AnalyticsUsedCredits: 290, AnalyticsStatus: "available",
+				AnalyticsFetchedAt: now, AnalyticsCreditsPerUSD: 25,
+				BaselineUsedCredits: 100, BaselineUsedPercent: 10,
+				BaselineCapturedAt: now.Add(-time.Hour),
+			},
+		},
+	}
+	svc := NewSharedQuotaPoolService(repo)
+	svc.now = func() time.Time { return now }
+	snapshot, err := svc.GetSnapshot(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	window := snapshot.Windows[1]
+	if window.OfficialAllocationMode != "analytics_credit" {
+		t.Fatalf("allocation mode = %q", window.OfficialAllocationMode)
+	}
+	if math.Abs(window.OfficialEstimatedCapacityCredits-1000) > 0.0001 {
+		t.Fatalf("estimated capacity = %v, want 1000", window.OfficialEstimatedCapacityCredits)
+	}
+	if math.Abs(window.OfficialAvailablePoolCredits-660) > 0.0001 {
+		t.Fatalf("available pool credits = %v, want 660", window.OfficialAvailablePoolCredits)
+	}
+	if math.Abs(window.Members[0].BaseShareCredits-330) > 0.0001 || math.Abs(window.Members[1].BaseShareCredits-330) > 0.0001 {
+		t.Fatalf("base shares = %#v", window.Members)
+	}
+	if math.Abs(window.Members[0].UsedCredits-50) > 0.0001 || math.Abs(window.Members[1].UsedCredits-25) > 0.0001 {
+		t.Fatalf("member credits = %#v", window.Members)
 	}
 }

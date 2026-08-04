@@ -669,6 +669,8 @@ export default {
       sharedQuota: 'Shared pool',
       sharedManual: 'Shared USD',
       officialPercent: 'Official percent',
+      officialAnalytics: 'Analytics credit',
+      officialPercentFallback: 'Percent fallback (uncalibrated)',
       sharedSyncing: 'Syncing official quota',
       sharedStale: 'Using the latest official snapshot',
       sharedUnavailable: 'Shared quota is unavailable; the legacy weekly limit is hidden.',

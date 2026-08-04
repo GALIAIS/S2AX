@@ -14,10 +14,13 @@ func TestSharedQuotaPoolMigrationsDefineIndependentWindows(t *testing.T) {
 	require.NoError(t, err)
 	official, err := FS.ReadFile("311_shared_quota_official_percent.sql")
 	require.NoError(t, err)
+	analytics, err := FS.ReadFile("312_shared_quota_official_analytics.sql")
+	require.NoError(t, err)
 
 	baseSQL := strings.ToLower(string(base))
 	windowSQL := strings.ToLower(string(windows))
 	officialSQL := strings.ToLower(string(official))
+	analyticsSQL := strings.ToLower(string(analytics))
 	for _, required := range []string{
 		"create table if not exists shared_quota_pools",
 		"create table if not exists shared_quota_pool_members",
@@ -42,5 +45,13 @@ func TestSharedQuotaPoolMigrationsDefineIndependentWindows(t *testing.T) {
 		"used_percent >= 0 and used_percent <= 100",
 	} {
 		require.Contains(t, officialSQL, required)
+	}
+	for _, required := range []string{
+		"analytics_used_credits",
+		"analytics_credits_per_usd",
+		"baseline_used_credits",
+		"baseline_captured_at",
+	} {
+		require.Contains(t, analyticsSQL, required)
 	}
 }

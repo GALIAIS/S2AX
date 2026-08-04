@@ -291,16 +291,21 @@ function officialSnapshotPresent(window: SharedQuotaUserWindowProgress): boolean
 }
 
 function sharedUsed(window: SharedQuotaUserWindowProgress): number {
-  return isOfficialSharedWindow(window) ? window.used_percent || 0 : window.used_usd
+  if (!isOfficialSharedWindow(window)) return window.used_usd
+  return window.official_allocation_mode === 'analytics_credit' ? window.used_credits || 0 : window.used_percent || 0
 }
 
 function sharedMaximum(window: SharedQuotaUserWindowProgress): number {
-  return isOfficialSharedWindow(window) ? window.maximum_percent || 0 : window.maximum_usd
+  if (!isOfficialSharedWindow(window)) return window.maximum_usd
+  return window.official_allocation_mode === 'analytics_credit' ? window.maximum_credits || 0 : window.maximum_percent || 0
 }
 
 function sharedUsage(window: SharedQuotaUserWindowProgress): string {
   if (!sharedDataReady(window)) return t('subscriptionProgress.syncing')
   if (isOfficialSharedWindow(window)) {
+    if (window.official_allocation_mode === 'analytics_credit') {
+      return `${(window.used_credits || 0).toFixed(2)} / ${(window.maximum_credits || 0).toFixed(2)} credit`
+    }
     return `${(window.used_percent || 0).toFixed(2)}%/${(window.maximum_percent || 0).toFixed(2)}%`
   }
   return formatUsage(window.used_usd, window.maximum_usd)

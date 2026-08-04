@@ -403,15 +403,21 @@ function officialSnapshotPresent(window: SharedQuotaUserWindowProgress): boolean
 }
 
 function sharedUsed(window: SharedQuotaUserWindowProgress): number {
-  return isOfficialWindow(window) ? (window.used_percent ?? 0) : window.used_usd
+  if (!isOfficialWindow(window)) return window.used_usd
+  return window.official_allocation_mode === 'analytics_credit' ? (window.used_credits ?? 0) : (window.used_percent ?? 0)
 }
 
 function sharedMaximum(window: SharedQuotaUserWindowProgress): number {
-  return isOfficialWindow(window) ? (window.maximum_percent ?? 0) : window.maximum_usd
+  if (!isOfficialWindow(window)) return window.maximum_usd
+  return window.official_allocation_mode === 'analytics_credit' ? (window.maximum_credits ?? 0) : (window.maximum_percent ?? 0)
 }
 
 function sharedAmount(window: SharedQuotaUserWindowProgress, kind: 'used' | 'maximum'): string {
   if (isOfficialWindow(window) && !officialSnapshotPresent(window)) return '—'
+  if (isOfficialWindow(window) && window.official_allocation_mode === 'analytics_credit') {
+    const value = kind === 'used' ? window.used_credits : window.maximum_credits
+    return `${Number(value ?? 0).toFixed(2)} credit`
+  }
   if (isOfficialWindow(window)) return percent(kind === 'used' ? window.used_percent : window.maximum_percent)
   return usd(kind === 'used' ? window.used_usd : window.maximum_usd)
 }

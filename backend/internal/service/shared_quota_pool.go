@@ -21,6 +21,8 @@ const (
 	sharedQuotaSnapshotTTL           = 2 * time.Second
 	officialQuotaSnapshotTTL         = 60 * time.Second
 	officialQuotaMaxStale            = 15 * time.Minute
+	officialAnalyticsSnapshotTTL     = 5 * time.Minute
+	sharedQuotaCreditsPerUSD         = openAIAnalyticsCreditsPerUSD
 )
 
 const (
@@ -51,11 +53,28 @@ type SharedQuotaPoolRepository interface {
 }
 
 type SharedQuotaOfficialSnapshot struct {
-	AccountID          int64     `json:"account_id"`
-	UsedPercent        float64   `json:"used_percent"`
-	LimitWindowSeconds int64     `json:"limit_window_seconds"`
-	ResetAt            time.Time `json:"reset_at"`
-	FetchedAt          time.Time `json:"fetched_at"`
+	AccountID                  int64     `json:"account_id"`
+	UsedPercent                float64   `json:"used_percent"`
+	LimitWindowSeconds         int64     `json:"limit_window_seconds"`
+	ResetAt                    time.Time `json:"reset_at"`
+	FetchedAt                  time.Time `json:"fetched_at"`
+	AnalyticsUsedCredits       float64   `json:"analytics_used_credits,omitempty"`
+	AnalyticsInputTokens       int64     `json:"analytics_input_tokens,omitempty"`
+	AnalyticsCachedInputTokens int64     `json:"analytics_cached_input_tokens,omitempty"`
+	AnalyticsOutputTokens      int64     `json:"analytics_output_tokens,omitempty"`
+	AnalyticsTotalTokens       int64     `json:"analytics_total_tokens,omitempty"`
+	AnalyticsStartAt           time.Time `json:"analytics_start_at,omitempty"`
+	AnalyticsEndAt             time.Time `json:"analytics_end_at,omitempty"`
+	AnalyticsFetchedAt         time.Time `json:"analytics_fetched_at,omitempty"`
+	AnalyticsCreditsPerUSD     float64   `json:"analytics_credits_per_usd,omitempty"`
+	AnalyticsSource            string    `json:"analytics_source,omitempty"`
+	AnalyticsStatus            string    `json:"analytics_status,omitempty"`
+	AnalyticsConfidence        float64   `json:"analytics_confidence,omitempty"`
+	AnalyticsRecordCount       int       `json:"analytics_record_count,omitempty"`
+	BaselineUsedCredits        float64   `json:"baseline_used_credits,omitempty"`
+	BaselineUsedPercent        float64   `json:"baseline_used_percent,omitempty"`
+	BaselineCapturedAt         time.Time `json:"baseline_captured_at,omitempty"`
+	BaselineResetAt            time.Time `json:"baseline_reset_at,omitempty"`
 }
 
 type SharedQuotaOfficialQuotaSource interface {
@@ -126,6 +145,11 @@ type SharedQuotaPoolMemberSnapshot struct {
 	MaximumUSD       float64 `json:"maximum_usd"`
 	RemainingUSD     float64 `json:"remaining_usd"`
 	BorrowedUSD      float64 `json:"borrowed_usd"`
+	UsedCredits      float64 `json:"used_credits,omitempty"`
+	BaseShareCredits float64 `json:"base_share_credits,omitempty"`
+	MaximumCredits   float64 `json:"maximum_credits,omitempty"`
+	RemainingCredits float64 `json:"remaining_credits,omitempty"`
+	BorrowedCredits  float64 `json:"borrowed_credits,omitempty"`
 	SharePercent     float64 `json:"share_percent"`
 	Allowed          bool    `json:"allowed"`
 	DecisionReason   string  `json:"decision_reason,omitempty"`
@@ -158,30 +182,54 @@ type SharedQuotaPoolSnapshot struct {
 }
 
 type SharedQuotaPoolWindowSnapshot struct {
-	Config                SharedQuotaPoolWindowConfig     `json:"config"`
-	BaseCapacityUSD       float64                         `json:"base_capacity_usd"`
-	DistributableUSD      float64                         `json:"distributable_usd"`
-	EstimatedCapacityUSD  float64                         `json:"estimated_capacity_usd,omitempty"`
-	TotalUsedUSD          float64                         `json:"total_used_usd"`
-	RemainingUSD          float64                         `json:"remaining_usd"`
-	UtilizationPercent    float64                         `json:"utilization_percent"`
-	SoftLimitUSD          float64                         `json:"soft_limit_usd"`
-	HardLimitUSD          float64                         `json:"hard_limit_usd"`
-	SoftStopReached       bool                            `json:"soft_stop_reached"`
-	HardStopReached       bool                            `json:"hard_stop_reached"`
-	Members               []SharedQuotaPoolMemberSnapshot `json:"members"`
-	CapacityMode          string                          `json:"capacity_mode,omitempty"`
-	OfficialDataAvailable bool                            `json:"official_data_available,omitempty"`
-	OfficialDataStale     bool                            `json:"official_data_stale,omitempty"`
-	OfficialUsedPercent   float64                         `json:"official_used_percent,omitempty"`
-	OfficialResetAt       time.Time                       `json:"official_reset_at,omitempty"`
-	OfficialFetchedAt     time.Time                       `json:"official_fetched_at,omitempty"`
-	BaseCapacityPercent   float64                         `json:"base_capacity_percent,omitempty"`
-	DistributablePercent  float64                         `json:"distributable_percent,omitempty"`
-	TotalUsedPercent      float64                         `json:"total_used_percent,omitempty"`
-	RemainingPercent      float64                         `json:"remaining_percent,omitempty"`
-	SoftLimitPercent      float64                         `json:"soft_limit_percent,omitempty"`
-	HardLimitPercent      float64                         `json:"hard_limit_percent,omitempty"`
+	Config                             SharedQuotaPoolWindowConfig     `json:"config"`
+	BaseCapacityUSD                    float64                         `json:"base_capacity_usd"`
+	DistributableUSD                   float64                         `json:"distributable_usd"`
+	EstimatedCapacityUSD               float64                         `json:"estimated_capacity_usd,omitempty"`
+	TotalUsedUSD                       float64                         `json:"total_used_usd"`
+	RemainingUSD                       float64                         `json:"remaining_usd"`
+	UtilizationPercent                 float64                         `json:"utilization_percent"`
+	SoftLimitUSD                       float64                         `json:"soft_limit_usd"`
+	HardLimitUSD                       float64                         `json:"hard_limit_usd"`
+	SoftStopReached                    bool                            `json:"soft_stop_reached"`
+	HardStopReached                    bool                            `json:"hard_stop_reached"`
+	Members                            []SharedQuotaPoolMemberSnapshot `json:"members"`
+	CapacityMode                       string                          `json:"capacity_mode,omitempty"`
+	OfficialDataAvailable              bool                            `json:"official_data_available,omitempty"`
+	OfficialDataStale                  bool                            `json:"official_data_stale,omitempty"`
+	OfficialUsedPercent                float64                         `json:"official_used_percent,omitempty"`
+	OfficialResetAt                    time.Time                       `json:"official_reset_at,omitempty"`
+	OfficialFetchedAt                  time.Time                       `json:"official_fetched_at,omitempty"`
+	OfficialAllocationMode             string                          `json:"official_allocation_mode,omitempty"`
+	OfficialAnalyticsAvailable         bool                            `json:"official_analytics_available,omitempty"`
+	OfficialAnalyticsStale             bool                            `json:"official_analytics_stale,omitempty"`
+	OfficialAnalyticsUsedCredits       float64                         `json:"official_analytics_used_credits,omitempty"`
+	OfficialAnalyticsInputTokens       int64                           `json:"official_analytics_input_tokens,omitempty"`
+	OfficialAnalyticsCachedInputTokens int64                           `json:"official_analytics_cached_input_tokens,omitempty"`
+	OfficialAnalyticsOutputTokens      int64                           `json:"official_analytics_output_tokens,omitempty"`
+	OfficialAnalyticsTotalTokens       int64                           `json:"official_analytics_total_tokens,omitempty"`
+	OfficialAnalyticsStartAt           time.Time                       `json:"official_analytics_start_at,omitempty"`
+	OfficialAnalyticsEndAt             time.Time                       `json:"official_analytics_end_at,omitempty"`
+	OfficialAnalyticsFetchedAt         time.Time                       `json:"official_analytics_fetched_at,omitempty"`
+	OfficialAnalyticsCreditsPerUSD     float64                         `json:"official_analytics_credits_per_usd,omitempty"`
+	OfficialAnalyticsConfidence        float64                         `json:"official_analytics_confidence,omitempty"`
+	OfficialEstimatedCapacityCredits   float64                         `json:"official_estimated_capacity_credits,omitempty"`
+	OfficialAvailablePoolCredits       float64                         `json:"official_available_pool_credits,omitempty"`
+	OfficialPoolUsedCredits            float64                         `json:"official_pool_used_credits,omitempty"`
+	OfficialBaselineCredits            float64                         `json:"official_baseline_credits,omitempty"`
+	OfficialBaselinePercent            float64                         `json:"official_baseline_percent,omitempty"`
+	OfficialBaselineCapturedAt         time.Time                       `json:"official_baseline_captured_at,omitempty"`
+	OfficialAccountingStatus           string                          `json:"official_accounting_status,omitempty"`
+	BaseCapacityCredits                float64                         `json:"base_capacity_credits,omitempty"`
+	DistributableCredits               float64                         `json:"distributable_credits,omitempty"`
+	TotalUsedCredits                   float64                         `json:"total_used_credits,omitempty"`
+	RemainingCredits                   float64                         `json:"remaining_credits,omitempty"`
+	BaseCapacityPercent                float64                         `json:"base_capacity_percent,omitempty"`
+	DistributablePercent               float64                         `json:"distributable_percent,omitempty"`
+	TotalUsedPercent                   float64                         `json:"total_used_percent,omitempty"`
+	RemainingPercent                   float64                         `json:"remaining_percent,omitempty"`
+	SoftLimitPercent                   float64                         `json:"soft_limit_percent,omitempty"`
+	HardLimitPercent                   float64                         `json:"hard_limit_percent,omitempty"`
 }
 
 type SharedQuotaPoolDecision struct {
@@ -203,58 +251,86 @@ type SharedQuotaPoolDecision struct {
 // SharedQuotaUserProgress is the private, user-scoped view of a shared pool.
 // It intentionally contains no other member identity or usage data.
 type SharedQuotaUserProgress struct {
-	Enabled                bool                            `json:"enabled"`
-	BaseShareUSD           float64                         `json:"base_share_usd"`
-	MaximumUSD             float64                         `json:"maximum_usd"`
-	UsedUSD                float64                         `json:"used_usd"`
-	RemainingUSD           float64                         `json:"remaining_usd"`
-	BorrowedUSD            float64                         `json:"borrowed_usd"`
-	SharePercent           float64                         `json:"share_percent"`
-	PoolTotalUsedUSD       float64                         `json:"pool_total_used_usd"`
-	PoolDistributableUSD   float64                         `json:"pool_distributable_usd"`
-	PoolUtilizationPercent float64                         `json:"pool_utilization_percent"`
-	CapacityMode           string                          `json:"capacity_mode,omitempty"`
-	UsedPercent            float64                         `json:"used_percent,omitempty"`
-	BaseSharePercent       float64                         `json:"base_share_percent,omitempty"`
-	MaximumPercent         float64                         `json:"maximum_percent,omitempty"`
-	RemainingPercent       float64                         `json:"remaining_percent,omitempty"`
-	BorrowedPercent        float64                         `json:"borrowed_percent,omitempty"`
-	SoftStopReached        bool                            `json:"soft_stop_reached"`
-	HardStopReached        bool                            `json:"hard_stop_reached"`
-	Allowed                bool                            `json:"allowed"`
-	WindowStart            time.Time                       `json:"window_start"`
-	WindowEnd              time.Time                       `json:"window_end"`
-	Windows                []SharedQuotaUserWindowProgress `json:"windows,omitempty"`
+	Enabled                          bool                            `json:"enabled"`
+	BaseShareUSD                     float64                         `json:"base_share_usd"`
+	MaximumUSD                       float64                         `json:"maximum_usd"`
+	UsedUSD                          float64                         `json:"used_usd"`
+	RemainingUSD                     float64                         `json:"remaining_usd"`
+	BorrowedUSD                      float64                         `json:"borrowed_usd"`
+	SharePercent                     float64                         `json:"share_percent"`
+	PoolTotalUsedUSD                 float64                         `json:"pool_total_used_usd"`
+	PoolDistributableUSD             float64                         `json:"pool_distributable_usd"`
+	PoolUtilizationPercent           float64                         `json:"pool_utilization_percent"`
+	CapacityMode                     string                          `json:"capacity_mode,omitempty"`
+	OfficialAllocationMode           string                          `json:"official_allocation_mode,omitempty"`
+	OfficialAnalyticsAvailable       bool                            `json:"official_analytics_available,omitempty"`
+	OfficialAnalyticsStale           bool                            `json:"official_analytics_stale,omitempty"`
+	OfficialAnalyticsUsedCredits     float64                         `json:"official_analytics_used_credits,omitempty"`
+	OfficialEstimatedCapacityCredits float64                         `json:"official_estimated_capacity_credits,omitempty"`
+	OfficialAvailablePoolCredits     float64                         `json:"official_available_pool_credits,omitempty"`
+	OfficialPoolUsedCredits          float64                         `json:"official_pool_used_credits,omitempty"`
+	OfficialBaselineCredits          float64                         `json:"official_baseline_credits,omitempty"`
+	OfficialAccountingStatus         string                          `json:"official_accounting_status,omitempty"`
+	BaseShareCredits                 float64                         `json:"base_share_credits,omitempty"`
+	MaximumCredits                   float64                         `json:"maximum_credits,omitempty"`
+	UsedCredits                      float64                         `json:"used_credits,omitempty"`
+	RemainingCredits                 float64                         `json:"remaining_credits,omitempty"`
+	BorrowedCredits                  float64                         `json:"borrowed_credits,omitempty"`
+	UsedPercent                      float64                         `json:"used_percent,omitempty"`
+	BaseSharePercent                 float64                         `json:"base_share_percent,omitempty"`
+	MaximumPercent                   float64                         `json:"maximum_percent,omitempty"`
+	RemainingPercent                 float64                         `json:"remaining_percent,omitempty"`
+	BorrowedPercent                  float64                         `json:"borrowed_percent,omitempty"`
+	SoftStopReached                  bool                            `json:"soft_stop_reached"`
+	HardStopReached                  bool                            `json:"hard_stop_reached"`
+	Allowed                          bool                            `json:"allowed"`
+	WindowStart                      time.Time                       `json:"window_start"`
+	WindowEnd                        time.Time                       `json:"window_end"`
+	Windows                          []SharedQuotaUserWindowProgress `json:"windows,omitempty"`
 }
 
 type SharedQuotaUserWindowProgress struct {
-	Key                    string    `json:"key"`
-	WindowSeconds          int       `json:"window_seconds"`
-	BaseShareUSD           float64   `json:"base_share_usd"`
-	MaximumUSD             float64   `json:"maximum_usd"`
-	UsedUSD                float64   `json:"used_usd"`
-	RemainingUSD           float64   `json:"remaining_usd"`
-	BorrowedUSD            float64   `json:"borrowed_usd"`
-	SharePercent           float64   `json:"share_percent"`
-	PoolTotalUsedUSD       float64   `json:"pool_total_used_usd"`
-	PoolDistributableUSD   float64   `json:"pool_distributable_usd"`
-	PoolUtilizationPercent float64   `json:"pool_utilization_percent"`
-	SoftStopReached        bool      `json:"soft_stop_reached"`
-	HardStopReached        bool      `json:"hard_stop_reached"`
-	Allowed                bool      `json:"allowed"`
-	WindowStart            time.Time `json:"window_start"`
-	WindowEnd              time.Time `json:"window_end"`
-	CapacityMode           string    `json:"capacity_mode,omitempty"`
-	OfficialDataAvailable  bool      `json:"official_data_available,omitempty"`
-	OfficialDataStale      bool      `json:"official_data_stale,omitempty"`
-	OfficialUsedPercent    float64   `json:"official_used_percent,omitempty"`
-	OfficialResetAt        time.Time `json:"official_reset_at,omitempty"`
-	OfficialFetchedAt      time.Time `json:"official_fetched_at,omitempty"`
-	BaseSharePercent       float64   `json:"base_share_percent,omitempty"`
-	MaximumPercent         float64   `json:"maximum_percent,omitempty"`
-	UsedPercent            float64   `json:"used_percent,omitempty"`
-	RemainingPercent       float64   `json:"remaining_percent,omitempty"`
-	BorrowedPercent        float64   `json:"borrowed_percent,omitempty"`
+	Key                              string    `json:"key"`
+	WindowSeconds                    int       `json:"window_seconds"`
+	BaseShareUSD                     float64   `json:"base_share_usd"`
+	MaximumUSD                       float64   `json:"maximum_usd"`
+	UsedUSD                          float64   `json:"used_usd"`
+	RemainingUSD                     float64   `json:"remaining_usd"`
+	BorrowedUSD                      float64   `json:"borrowed_usd"`
+	SharePercent                     float64   `json:"share_percent"`
+	PoolTotalUsedUSD                 float64   `json:"pool_total_used_usd"`
+	PoolDistributableUSD             float64   `json:"pool_distributable_usd"`
+	PoolUtilizationPercent           float64   `json:"pool_utilization_percent"`
+	SoftStopReached                  bool      `json:"soft_stop_reached"`
+	HardStopReached                  bool      `json:"hard_stop_reached"`
+	Allowed                          bool      `json:"allowed"`
+	WindowStart                      time.Time `json:"window_start"`
+	WindowEnd                        time.Time `json:"window_end"`
+	CapacityMode                     string    `json:"capacity_mode,omitempty"`
+	OfficialAllocationMode           string    `json:"official_allocation_mode,omitempty"`
+	OfficialAnalyticsAvailable       bool      `json:"official_analytics_available,omitempty"`
+	OfficialAnalyticsStale           bool      `json:"official_analytics_stale,omitempty"`
+	OfficialAnalyticsUsedCredits     float64   `json:"official_analytics_used_credits,omitempty"`
+	OfficialEstimatedCapacityCredits float64   `json:"official_estimated_capacity_credits,omitempty"`
+	OfficialAvailablePoolCredits     float64   `json:"official_available_pool_credits,omitempty"`
+	OfficialPoolUsedCredits          float64   `json:"official_pool_used_credits,omitempty"`
+	OfficialBaselineCredits          float64   `json:"official_baseline_credits,omitempty"`
+	OfficialAccountingStatus         string    `json:"official_accounting_status,omitempty"`
+	BaseShareCredits                 float64   `json:"base_share_credits,omitempty"`
+	MaximumCredits                   float64   `json:"maximum_credits,omitempty"`
+	UsedCredits                      float64   `json:"used_credits,omitempty"`
+	RemainingCredits                 float64   `json:"remaining_credits,omitempty"`
+	BorrowedCredits                  float64   `json:"borrowed_credits,omitempty"`
+	OfficialDataAvailable            bool      `json:"official_data_available,omitempty"`
+	OfficialDataStale                bool      `json:"official_data_stale,omitempty"`
+	OfficialUsedPercent              float64   `json:"official_used_percent,omitempty"`
+	OfficialResetAt                  time.Time `json:"official_reset_at,omitempty"`
+	OfficialFetchedAt                time.Time `json:"official_fetched_at,omitempty"`
+	BaseSharePercent                 float64   `json:"base_share_percent,omitempty"`
+	MaximumPercent                   float64   `json:"maximum_percent,omitempty"`
+	UsedPercent                      float64   `json:"used_percent,omitempty"`
+	RemainingPercent                 float64   `json:"remaining_percent,omitempty"`
+	BorrowedPercent                  float64   `json:"borrowed_percent,omitempty"`
 }
 
 type sharedQuotaSnapshotCacheEntry struct {
@@ -269,12 +345,13 @@ type SharedQuotaPoolService struct {
 	repo SharedQuotaPoolRepository
 	now  func() time.Time
 
-	cacheMu             sync.Mutex
-	cache               map[int64]sharedQuotaSnapshotCacheEntry
-	flight              singleflight.Group
-	officialQuotaSource SharedQuotaOfficialQuotaSource
-	accountRepo         AccountRepository
-	officialFlight      singleflight.Group
+	cacheMu                 sync.Mutex
+	cache                   map[int64]sharedQuotaSnapshotCacheEntry
+	flight                  singleflight.Group
+	officialQuotaSource     SharedQuotaOfficialQuotaSource
+	officialAnalyticsSource SharedQuotaOfficialAnalyticsSource
+	accountRepo             AccountRepository
+	officialFlight          singleflight.Group
 }
 
 func NewSharedQuotaPoolService(repo SharedQuotaPoolRepository) *SharedQuotaPoolService {
@@ -291,6 +368,9 @@ func (s *SharedQuotaPoolService) SetOfficialQuotaSource(accountRepo AccountRepos
 	}
 	s.accountRepo = accountRepo
 	s.officialQuotaSource = source
+	if analyticsSource, ok := source.(SharedQuotaOfficialAnalyticsSource); ok {
+		s.officialAnalyticsSource = analyticsSource
+	}
 }
 
 func (s *SharedQuotaPoolService) GetSnapshot(ctx context.Context, groupID int64) (*SharedQuotaPoolSnapshot, error) {
@@ -375,12 +455,21 @@ func (s *SharedQuotaPoolService) UserProgress(ctx context.Context, groupID, user
 			PoolUtilizationPercent: window.UtilizationPercent, SoftStopReached: window.SoftStopReached,
 			HardStopReached: window.HardStopReached, Allowed: false,
 			WindowStart: window.Config.WindowStart, WindowEnd: windowEnd,
-			CapacityMode:          window.CapacityMode,
-			OfficialDataAvailable: window.OfficialDataAvailable,
-			OfficialDataStale:     window.OfficialDataStale,
-			OfficialUsedPercent:   window.OfficialUsedPercent,
-			OfficialResetAt:       window.OfficialResetAt,
-			OfficialFetchedAt:     window.OfficialFetchedAt,
+			CapacityMode:                     window.CapacityMode,
+			OfficialDataAvailable:            window.OfficialDataAvailable,
+			OfficialDataStale:                window.OfficialDataStale,
+			OfficialUsedPercent:              window.OfficialUsedPercent,
+			OfficialResetAt:                  window.OfficialResetAt,
+			OfficialFetchedAt:                window.OfficialFetchedAt,
+			OfficialAllocationMode:           window.OfficialAllocationMode,
+			OfficialAnalyticsAvailable:       window.OfficialAnalyticsAvailable,
+			OfficialAnalyticsStale:           window.OfficialAnalyticsStale,
+			OfficialAnalyticsUsedCredits:     window.OfficialAnalyticsUsedCredits,
+			OfficialEstimatedCapacityCredits: window.OfficialEstimatedCapacityCredits,
+			OfficialAvailablePoolCredits:     window.OfficialAvailablePoolCredits,
+			OfficialPoolUsedCredits:          window.OfficialPoolUsedCredits,
+			OfficialBaselineCredits:          window.OfficialBaselineCredits,
+			OfficialAccountingStatus:         window.OfficialAccountingStatus,
 		}
 		if member != nil {
 			item.BaseShareUSD = member.BaseShareUSD
@@ -394,6 +483,11 @@ func (s *SharedQuotaPoolService) UserProgress(ctx context.Context, groupID, user
 			item.MaximumPercent = member.MaximumPercent
 			item.RemainingPercent = member.RemainingPercent
 			item.BorrowedPercent = member.BorrowedPercent
+			item.BaseShareCredits = member.BaseShareCredits
+			item.MaximumCredits = member.MaximumCredits
+			item.UsedCredits = member.UsedCredits
+			item.RemainingCredits = member.RemainingCredits
+			item.BorrowedCredits = member.BorrowedCredits
 			item.Allowed = member.Allowed && member.Enabled
 		}
 		progress.Windows = append(progress.Windows, item)
@@ -419,6 +513,20 @@ func (s *SharedQuotaPoolService) UserProgress(ctx context.Context, groupID, user
 		progress.MaximumPercent = item.MaximumPercent
 		progress.RemainingPercent = item.RemainingPercent
 		progress.BorrowedPercent = item.BorrowedPercent
+		progress.OfficialAllocationMode = item.OfficialAllocationMode
+		progress.OfficialAnalyticsAvailable = item.OfficialAnalyticsAvailable
+		progress.OfficialAnalyticsStale = item.OfficialAnalyticsStale
+		progress.OfficialAnalyticsUsedCredits = item.OfficialAnalyticsUsedCredits
+		progress.OfficialEstimatedCapacityCredits = item.OfficialEstimatedCapacityCredits
+		progress.OfficialAvailablePoolCredits = item.OfficialAvailablePoolCredits
+		progress.OfficialPoolUsedCredits = item.OfficialPoolUsedCredits
+		progress.OfficialBaselineCredits = item.OfficialBaselineCredits
+		progress.OfficialAccountingStatus = item.OfficialAccountingStatus
+		progress.BaseShareCredits = item.BaseShareCredits
+		progress.MaximumCredits = item.MaximumCredits
+		progress.UsedCredits = item.UsedCredits
+		progress.RemainingCredits = item.RemainingCredits
+		progress.BorrowedCredits = item.BorrowedCredits
 		progress.PoolTotalUsedUSD = item.PoolTotalUsedUSD
 		progress.PoolDistributableUSD = item.PoolDistributableUSD
 		progress.PoolUtilizationPercent = item.PoolUtilizationPercent
@@ -700,104 +808,174 @@ func (s *SharedQuotaPoolService) calculateOfficialWindowSnapshot(ctx context.Con
 		official = nil
 	}
 	now := s.now()
-	// Prefer the newest account-level snapshot even when the shared-pool row
-	// already exists. The pool row is a derived cache; keeping an older row here
-	// made the UI stay in "syncing" after the account itself had fresh quota data.
+	// The account's codex_* extra is a fresher provider projection than the
+	// derived pool row. Preserve analytics/baseline metadata when swapping it in.
 	if s.accountRepo != nil && window.UpstreamAccountID != nil {
 		if account, accountErr := s.accountRepo.GetByID(ctx, *window.UpstreamAccountID); accountErr == nil {
 			if storedWindow, fetchedAt := storedOfficialQuotaWindow(account, int64(window.WindowSeconds), now); storedWindow != nil {
 				if official == nil || fetchedAt.After(official.FetchedAt) {
-					resetAt := time.Time{}
+					fresh := &SharedQuotaOfficialSnapshot{
+						AccountID: *window.UpstreamAccountID, UsedPercent: storedWindow.UsedPercent,
+						LimitWindowSeconds: storedWindow.LimitWindowSeconds, FetchedAt: fetchedAt,
+					}
 					if storedWindow.ResetAt > 0 {
-						resetAt = time.Unix(storedWindow.ResetAt, 0)
+						fresh.ResetAt = time.Unix(storedWindow.ResetAt, 0)
 					}
-					official = &SharedQuotaOfficialSnapshot{
-						AccountID:          *window.UpstreamAccountID,
-						UsedPercent:        storedWindow.UsedPercent,
-						LimitWindowSeconds: storedWindow.LimitWindowSeconds,
-						ResetAt:            resetAt,
-						FetchedAt:          fetchedAt,
+					if official != nil && official.AccountID == fresh.AccountID {
+						copyOfficialCalibration(fresh, official)
 					}
+					official = fresh
 				}
 			}
 		}
 	}
-	available := official != nil && official.FetchedAt.After(time.Time{}) && now.Sub(official.FetchedAt) <= officialQuotaMaxStale
-	stale := official == nil || now.Sub(official.FetchedAt) > officialQuotaSnapshotTTL
-	if stale {
+	providerAvailable := official != nil && !official.FetchedAt.IsZero() && now.Sub(official.FetchedAt) <= officialQuotaMaxStale
+	providerStale := official == nil || now.Sub(official.FetchedAt) > officialQuotaSnapshotTTL
+	if providerStale {
 		s.scheduleOfficialQuotaRefresh(groupID, window)
 	}
-
-	baseCapacity := 100.0
-	distributable := baseCapacity * (1 - window.ReserveRatio)
-	softLimit := distributable * window.SoftStopRatio
-	hardLimit := distributable * window.HardStopRatio
 	usedPercent := 0.0
-	if available {
+	if providerAvailable {
 		usedPercent = clampPercent(official.UsedPercent)
-	} else {
-		// The first provider refresh is asynchronous so enabling this mode never
-		// adds provider latency to a gateway request. Until it arrives, fail open
-		// and expose the pending state to the administrator.
-		available = false
 	}
 
 	usageStart, usageEnd := window.WindowStart, window.WindowEnd
-	if available && !official.ResetAt.IsZero() {
+	if official != nil && !official.ResetAt.IsZero() {
 		usageEnd = official.ResetAt
 		usageStart = usageEnd.Add(-time.Duration(maxInt64(official.LimitWindowSeconds, int64(window.WindowSeconds))) * time.Second)
+	}
+	if official != nil && baselineMatchesCycle(official) && official.BaselineCapturedAt.After(usageStart) && official.BaselineCapturedAt.Before(now) && !official.BaselineCapturedAt.After(usageEnd) {
+		usageStart = official.BaselineCapturedAt
 	}
 	localTotal, usageByUser, err := s.repo.GetUsage(ctx, groupID, usageStart, usageEnd)
 	if err != nil {
 		return nil, err
 	}
-	if localTotal < 0 {
-		localTotal = 0
-	}
+	localTotal = math.Max(0, localTotal)
 	totalWeight := enabledMemberWeight(members)
+	baseCapacityPercent := 100.0
+	distributablePercent := baseCapacityPercent * (1 - window.ReserveRatio)
+	softLimitPercent := distributablePercent * window.SoftStopRatio
+	hardLimitPercent := distributablePercent * window.HardStopRatio
 	windowSnapshot := &SharedQuotaPoolWindowSnapshot{
 		Config: window, CapacityMode: SharedQuotaCapacityModeOfficialPercent,
-		BaseCapacityPercent: baseCapacity, DistributablePercent: distributable,
-		SoftLimitPercent: softLimit, HardLimitPercent: hardLimit,
-		OfficialDataAvailable: available, OfficialDataStale: official != nil && stale,
+		BaseCapacityPercent: baseCapacityPercent, DistributablePercent: distributablePercent,
+		SoftLimitPercent: softLimitPercent, HardLimitPercent: hardLimitPercent,
+		OfficialDataAvailable: providerAvailable, OfficialDataStale: official != nil && providerStale,
 		Members: make([]SharedQuotaPoolMemberSnapshot, 0, len(members)),
 	}
 	if official != nil {
 		windowSnapshot.OfficialUsedPercent = clampPercent(official.UsedPercent)
 		windowSnapshot.OfficialResetAt = official.ResetAt
 		windowSnapshot.OfficialFetchedAt = official.FetchedAt
+		windowSnapshot.OfficialAnalyticsUsedCredits = math.Max(0, official.AnalyticsUsedCredits)
+		windowSnapshot.OfficialAnalyticsInputTokens = official.AnalyticsInputTokens
+		windowSnapshot.OfficialAnalyticsCachedInputTokens = official.AnalyticsCachedInputTokens
+		windowSnapshot.OfficialAnalyticsOutputTokens = official.AnalyticsOutputTokens
+		windowSnapshot.OfficialAnalyticsTotalTokens = official.AnalyticsTotalTokens
+		windowSnapshot.OfficialAnalyticsStartAt = official.AnalyticsStartAt
+		windowSnapshot.OfficialAnalyticsEndAt = official.AnalyticsEndAt
+		windowSnapshot.OfficialAnalyticsFetchedAt = official.AnalyticsFetchedAt
+		windowSnapshot.OfficialAnalyticsCreditsPerUSD = analyticsCreditsPerUSD(official)
+		windowSnapshot.OfficialAnalyticsConfidence = official.AnalyticsConfidence
+		windowSnapshot.OfficialBaselineCredits = math.Max(0, official.BaselineUsedCredits)
+		windowSnapshot.OfficialBaselinePercent = clampPercent(official.BaselineUsedPercent)
+		windowSnapshot.OfficialBaselineCapturedAt = official.BaselineCapturedAt
 	}
-	if available {
+
+	analyticsAvailable := official != nil && official.AnalyticsStatus == "available" && !official.AnalyticsFetchedAt.IsZero() && now.Sub(official.AnalyticsFetchedAt) <= officialQuotaMaxStale
+	analyticsStale := official != nil && official.AnalyticsStatus != "" && (official.AnalyticsFetchedAt.IsZero() || now.Sub(official.AnalyticsFetchedAt) > officialAnalyticsSnapshotTTL)
+	allocationMode := "pending"
+	estimatedCapacityCredits := 0.0
+	availablePoolCredits := 0.0
+	poolUsedCredits := 0.0
+	baseShareCapacity := 0.0
+	memberUsageScale := 0.0
+	creditsPerUSD := analyticsCreditsPerUSD(official)
+	if analyticsAvailable && usedPercent > 0 && official.AnalyticsUsedCredits > 0 {
+		estimatedCapacityCredits = official.AnalyticsUsedCredits / (usedPercent / 100)
+		distributableCredits := estimatedCapacityCredits * (1 - window.ReserveRatio)
+		hardLimitCredits := distributableCredits * window.HardStopRatio
+		availablePoolCredits = math.Max(0, hardLimitCredits-official.AnalyticsUsedCredits)
+		poolUsedCredits = math.Max(0, official.AnalyticsUsedCredits-official.BaselineUsedCredits)
+		baseShareCapacity = availablePoolCredits
+		allocationMode = "analytics_credit"
+		windowSnapshot.BaseCapacityCredits = estimatedCapacityCredits
+		windowSnapshot.DistributableCredits = distributableCredits
+		windowSnapshot.TotalUsedCredits = official.AnalyticsUsedCredits
+		windowSnapshot.RemainingCredits = availablePoolCredits
+		windowSnapshot.OfficialEstimatedCapacityCredits = estimatedCapacityCredits
+		windowSnapshot.OfficialAvailablePoolCredits = availablePoolCredits
+		windowSnapshot.OfficialPoolUsedCredits = poolUsedCredits
+		windowSnapshot.BaseCapacityUSD = estimatedCapacityCredits / sharedQuotaCreditsPerUSD
+		windowSnapshot.DistributableUSD = distributableCredits / sharedQuotaCreditsPerUSD
+		windowSnapshot.TotalUsedUSD = official.AnalyticsUsedCredits / sharedQuotaCreditsPerUSD
+		windowSnapshot.RemainingUSD = availablePoolCredits / sharedQuotaCreditsPerUSD
+		windowSnapshot.EstimatedCapacityUSD = windowSnapshot.BaseCapacityUSD
+		memberUsageScale = creditsPerUSD
+	} else if providerAvailable {
+		// Existing rows without a baseline keep the V1 projection until their
+		// next background refresh captures one. New rows subtract current usage.
+		allocationMode = "provider_percent_fallback"
+		if official.BaselineCapturedAt.IsZero() {
+			baseShareCapacity = distributablePercent
+			memberUsageScale = usedPercent
+		} else {
+			baseShareCapacity = math.Max(0, hardLimitPercent-usedPercent)
+			memberUsageScale = math.Max(0, usedPercent-official.BaselineUsedPercent)
+		}
+		windowSnapshot.OfficialAvailablePoolCredits = 0
+		windowSnapshot.OfficialPoolUsedCredits = 0
+	} else {
+		allocationMode = "pending"
+		baseShareCapacity = distributablePercent
+	}
+	windowSnapshot.OfficialAllocationMode = allocationMode
+	windowSnapshot.OfficialAnalyticsAvailable = analyticsAvailable
+	windowSnapshot.OfficialAnalyticsStale = analyticsStale
+	if analyticsAvailable {
+		windowSnapshot.OfficialAccountingStatus = "analytics_credit"
+	} else if providerAvailable {
+		windowSnapshot.OfficialAccountingStatus = "provider_percent_fallback"
+	} else {
+		windowSnapshot.OfficialAccountingStatus = "pending"
+	}
+	if providerAvailable {
 		windowSnapshot.TotalUsedPercent = usedPercent
-		windowSnapshot.RemainingPercent = math.Max(0, distributable-usedPercent)
-		windowSnapshot.UtilizationPercent = usedPercent / distributable * 100
-		windowSnapshot.SoftStopReached = usedPercent >= softLimit
-		windowSnapshot.HardStopReached = usedPercent >= hardLimit
+		windowSnapshot.RemainingPercent = math.Max(0, distributablePercent-usedPercent)
+		windowSnapshot.UtilizationPercent = usedPercent / distributablePercent * 100
+		windowSnapshot.SoftStopReached = usedPercent >= softLimitPercent
+		windowSnapshot.HardStopReached = usedPercent >= hardLimitPercent
 	}
 	for _, member := range members {
 		baseShare := 0.0
 		if member.Enabled && totalWeight > 0 {
-			baseShare = distributable * member.Weight / totalWeight
+			baseShare = baseShareCapacity * member.Weight / totalWeight
 		}
 		maximum := baseShare
 		if pool.BorrowEnabled {
 			maximum *= pool.BorrowMultiplier
 		}
-		localUsed := math.Max(0, usageByUser[member.UserID])
+		localUsedUSD := math.Max(0, usageByUser[member.UserID])
+		localUsedCredits := localUsedUSD * creditsPerUSD
 		memberUsed := 0.0
-		if available && localTotal > 0 {
-			memberUsed = usedPercent * localUsed / localTotal
+		memberBase := baseShare
+		memberMaximum := maximum
+		if allocationMode == "analytics_credit" {
+			memberUsed = localUsedCredits
+		} else if providerAvailable && localTotal > 0 {
+			memberUsed = memberUsageScale * localUsedUSD / localTotal
 		}
 		allowed := member.Enabled
 		reason := "official quota snapshot pending"
 		if !member.Enabled {
 			allowed, reason = false, ErrSharedQuotaMemberDisabled.Error()
-		} else if available {
+		} else if providerAvailable {
 			reason = "within base share"
-			if usedPercent >= hardLimit {
+			if usedPercent >= hardLimitPercent {
 				allowed, reason = false, "official upstream hard limit reached"
-			} else if memberUsed >= baseShare {
-				if pool.BorrowEnabled && usedPercent < softLimit && memberUsed < maximum {
+			} else if memberUsed >= memberBase {
+				if pool.BorrowEnabled && usedPercent < softLimitPercent && memberUsed < memberMaximum {
 					reason = "borrowing unused pool capacity"
 				} else {
 					allowed, reason = false, "base share exhausted"
@@ -805,22 +983,83 @@ func (s *SharedQuotaPoolService) calculateOfficialWindowSnapshot(ctx context.Con
 			}
 		}
 		sharePercent := 0.0
-		if distributable > 0 {
-			sharePercent = baseShare / distributable * 100
+		if allocationMode == "analytics_credit" && estimatedCapacityCredits > 0 {
+			sharePercent = baseShare / estimatedCapacityCredits * 100
+		} else if baseShareCapacity > 0 {
+			sharePercent = baseShare / baseShareCapacity * 100
 		}
-		windowSnapshot.Members = append(windowSnapshot.Members, SharedQuotaPoolMemberSnapshot{
-			SharedQuotaPoolMember: member,
-			Allowed:               allowed,
-			DecisionReason:        reason,
-			SharePercent:          sharePercent,
-			UsedPercent:           memberUsed,
-			BaseSharePercent:      baseShare,
-			MaximumPercent:        maximum,
-			RemainingPercent:      math.Max(0, maximum-memberUsed),
-			BorrowedPercent:       math.Max(0, memberUsed-baseShare),
-		})
+		memberSnapshot := SharedQuotaPoolMemberSnapshot{
+			SharedQuotaPoolMember: member, Allowed: allowed, DecisionReason: reason,
+			SharePercent: sharePercent,
+		}
+		if allocationMode == "analytics_credit" {
+			memberSnapshot.UsedUSD = memberUsed / creditsPerUSD
+			memberSnapshot.BaseShareUSD = memberBase / creditsPerUSD
+			memberSnapshot.MaximumUSD = memberMaximum / creditsPerUSD
+			memberSnapshot.RemainingUSD = math.Max(0, memberMaximum-memberUsed) / creditsPerUSD
+			memberSnapshot.BorrowedUSD = math.Max(0, memberUsed-memberBase) / creditsPerUSD
+			memberSnapshot.UsedCredits = memberUsed
+			memberSnapshot.BaseShareCredits = memberBase
+			memberSnapshot.MaximumCredits = memberMaximum
+			memberSnapshot.RemainingCredits = math.Max(0, memberMaximum-memberUsed)
+			memberSnapshot.BorrowedCredits = math.Max(0, memberUsed-memberBase)
+			if estimatedCapacityCredits > 0 {
+				memberSnapshot.UsedPercent = memberUsed / estimatedCapacityCredits * 100
+				memberSnapshot.BaseSharePercent = memberBase / estimatedCapacityCredits * 100
+				memberSnapshot.MaximumPercent = memberMaximum / estimatedCapacityCredits * 100
+				memberSnapshot.RemainingPercent = math.Max(0, memberMaximum-memberUsed) / estimatedCapacityCredits * 100
+				memberSnapshot.BorrowedPercent = math.Max(0, memberUsed-memberBase) / estimatedCapacityCredits * 100
+			}
+		} else {
+			memberSnapshot.UsedPercent = memberUsed
+			memberSnapshot.BaseSharePercent = memberBase
+			memberSnapshot.MaximumPercent = memberMaximum
+			memberSnapshot.RemainingPercent = math.Max(0, memberMaximum-memberUsed)
+			memberSnapshot.BorrowedPercent = math.Max(0, memberUsed-memberBase)
+		}
+		windowSnapshot.Members = append(windowSnapshot.Members, memberSnapshot)
 	}
 	return windowSnapshot, nil
+}
+
+func copyOfficialCalibration(dst, src *SharedQuotaOfficialSnapshot) {
+	if dst == nil || src == nil {
+		return
+	}
+	dst.AnalyticsUsedCredits = src.AnalyticsUsedCredits
+	dst.AnalyticsInputTokens = src.AnalyticsInputTokens
+	dst.AnalyticsCachedInputTokens = src.AnalyticsCachedInputTokens
+	dst.AnalyticsOutputTokens = src.AnalyticsOutputTokens
+	dst.AnalyticsTotalTokens = src.AnalyticsTotalTokens
+	dst.AnalyticsStartAt = src.AnalyticsStartAt
+	dst.AnalyticsEndAt = src.AnalyticsEndAt
+	dst.AnalyticsFetchedAt = src.AnalyticsFetchedAt
+	dst.AnalyticsCreditsPerUSD = src.AnalyticsCreditsPerUSD
+	dst.AnalyticsSource = src.AnalyticsSource
+	dst.AnalyticsStatus = src.AnalyticsStatus
+	dst.AnalyticsConfidence = src.AnalyticsConfidence
+	dst.AnalyticsRecordCount = src.AnalyticsRecordCount
+	dst.BaselineUsedCredits = src.BaselineUsedCredits
+	dst.BaselineUsedPercent = src.BaselineUsedPercent
+	dst.BaselineCapturedAt = src.BaselineCapturedAt
+	dst.BaselineResetAt = src.BaselineResetAt
+}
+
+func baselineMatchesCycle(snapshot *SharedQuotaOfficialSnapshot) bool {
+	if snapshot == nil || snapshot.BaselineCapturedAt.IsZero() {
+		return false
+	}
+	if snapshot.BaselineResetAt.IsZero() || snapshot.ResetAt.IsZero() {
+		return true
+	}
+	return math.Abs(snapshot.BaselineResetAt.Sub(snapshot.ResetAt).Seconds()) <= 5*60
+}
+
+func analyticsCreditsPerUSD(snapshot *SharedQuotaOfficialSnapshot) float64 {
+	if snapshot != nil && snapshot.AnalyticsCreditsPerUSD > 0 {
+		return snapshot.AnalyticsCreditsPerUSD
+	}
+	return sharedQuotaCreditsPerUSD
 }
 
 func (s *SharedQuotaPoolService) scheduleOfficialQuotaRefresh(groupID int64, window SharedQuotaPoolWindowConfig) {
@@ -866,6 +1105,10 @@ func (s *SharedQuotaPoolService) refreshOfficialQuota(ctx context.Context, group
 	if accountID <= 0 {
 		return fmt.Errorf("official quota source account is not configured for group %d", groupID)
 	}
+	previous, previousErr := s.repo.GetOfficialQuotaSnapshot(ctx, groupID, window.Key)
+	if previousErr != nil {
+		return previousErr
+	}
 	var providerWindow *OpenAIRateLimitWindow
 	var refreshErr error
 	if s.officialQuotaSource != nil {
@@ -882,7 +1125,7 @@ func (s *SharedQuotaPoolService) refreshOfficialQuota(ctx context.Context, group
 		refreshErr = fmt.Errorf("official quota upstream source is not configured")
 	}
 
-	fetchedAt := time.Now()
+	fetchedAt := s.now()
 	if providerWindow == nil && s.accountRepo != nil {
 		account, err := s.accountRepo.GetByID(ctx, accountID)
 		if err == nil {
@@ -905,11 +1148,75 @@ func (s *SharedQuotaPoolService) refreshOfficialQuota(ctx context.Context, group
 	if providerWindow.ResetAt > 0 {
 		snapshot.ResetAt = time.Unix(providerWindow.ResetAt, 0)
 	}
+	previousSameCycle := previous != nil && previous.AccountID == accountID && resetTimesMatch(previous.ResetAt, snapshot.ResetAt)
+	if previousSameCycle {
+		copyOfficialCalibration(snapshot, previous)
+	}
+	if !previousSameCycle {
+		snapshot.AnalyticsCreditsPerUSD = sharedQuotaCreditsPerUSD
+		snapshot.BaselineUsedPercent = clampPercent(providerWindow.UsedPercent)
+		snapshot.BaselineCapturedAt = fetchedAt
+		snapshot.BaselineResetAt = snapshot.ResetAt
+	}
+	if s.officialAnalyticsSource != nil && (!previousSameCycle || previous == nil || !analyticsSnapshotFresh(previous, s.now())) {
+		analyticsEnd := s.now()
+		analyticsSeconds := providerWindow.LimitWindowSeconds
+		if analyticsSeconds <= 0 {
+			analyticsSeconds = int64(window.WindowSeconds)
+		}
+		analyticsStart := analyticsEnd.Add(-time.Duration(maxInt64(analyticsSeconds, 1)) * time.Second)
+		analytics, analyticsErr := s.officialAnalyticsSource.QueryAnalytics(ctx, accountID, analyticsStart, analyticsEnd)
+		if analyticsErr != nil {
+			if !previousSameCycle {
+				snapshot.AnalyticsStatus = "unavailable"
+			}
+			log.Printf("official quota analytics refresh failed group=%d window=%s account=%d: %v", groupID, window.Key, accountID, analyticsErr)
+		} else if analytics != nil {
+			snapshot.AnalyticsUsedCredits = math.Max(0, analytics.Credits)
+			snapshot.AnalyticsInputTokens = analytics.InputTokens
+			snapshot.AnalyticsCachedInputTokens = analytics.CachedInputTokens
+			snapshot.AnalyticsOutputTokens = analytics.OutputTokens
+			snapshot.AnalyticsTotalTokens = analytics.TotalTokens
+			snapshot.AnalyticsStartAt = analytics.StartDate
+			snapshot.AnalyticsEndAt = analytics.EndDate
+			snapshot.AnalyticsFetchedAt = analytics.FetchedAt
+			snapshot.AnalyticsCreditsPerUSD = analytics.CreditsPerUSD
+			if snapshot.AnalyticsCreditsPerUSD <= 0 {
+				snapshot.AnalyticsCreditsPerUSD = sharedQuotaCreditsPerUSD
+			}
+			snapshot.AnalyticsSource = analytics.Source
+			snapshot.AnalyticsStatus = analytics.Status
+			snapshot.AnalyticsConfidence = analytics.Confidence
+			snapshot.AnalyticsRecordCount = analytics.RecordCount
+			if !previousSameCycle || previous == nil || previous.AnalyticsStatus != "available" {
+				snapshot.BaselineUsedCredits = snapshot.AnalyticsUsedCredits
+			}
+		}
+	}
+	if snapshot.AnalyticsCreditsPerUSD <= 0 {
+		snapshot.AnalyticsCreditsPerUSD = sharedQuotaCreditsPerUSD
+	}
+	if snapshot.BaselineCapturedAt.IsZero() {
+		snapshot.BaselineCapturedAt = fetchedAt
+		snapshot.BaselineUsedPercent = clampPercent(providerWindow.UsedPercent)
+		snapshot.BaselineResetAt = snapshot.ResetAt
+	}
 	if err := s.repo.SaveOfficialQuotaSnapshot(ctx, groupID, window.Key, snapshot); err != nil {
 		return err
 	}
 	s.invalidate(groupID)
 	return nil
+}
+
+func analyticsSnapshotFresh(snapshot *SharedQuotaOfficialSnapshot, now time.Time) bool {
+	return snapshot != nil && snapshot.AnalyticsStatus == "available" && !snapshot.AnalyticsFetchedAt.IsZero() && now.Sub(snapshot.AnalyticsFetchedAt) <= officialAnalyticsSnapshotTTL
+}
+
+func resetTimesMatch(left, right time.Time) bool {
+	if left.IsZero() || right.IsZero() {
+		return left.IsZero() && right.IsZero()
+	}
+	return math.Abs(left.Sub(right).Seconds()) <= 5*60
 }
 
 // storedOfficialQuotaWindow turns the latest account-level Codex snapshot into

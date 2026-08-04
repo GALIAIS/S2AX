@@ -669,6 +669,8 @@ export default {
       sharedQuota: '共享池',
       sharedManual: '共享 USD',
       officialPercent: '官方百分比',
+      officialAnalytics: 'Analytics credit',
+      officialPercentFallback: '百分比回退（未校准）',
       sharedSyncing: '官方额度同步中',
       sharedStale: '使用最近一次官方快照',
       sharedUnavailable: '共享额度状态暂不可用，未显示旧的周限额。',
