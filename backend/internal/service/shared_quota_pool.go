@@ -688,6 +688,27 @@ func (s *SharedQuotaPoolService) calculateOfficialWindowSnapshot(ctx context.Con
 		official = nil
 	}
 	now := s.now()
+	// A freshly persisted account-level snapshot is already official upstream
+	// data. Use it immediately when the shared-pool snapshot row has not been
+	// created yet; the asynchronous refresh below still promotes it to the
+	// shared-pool read model without adding provider latency to the request.
+	if official == nil && s.accountRepo != nil && window.UpstreamAccountID != nil {
+		if account, accountErr := s.accountRepo.GetByID(ctx, *window.UpstreamAccountID); accountErr == nil {
+			if storedWindow, fetchedAt := storedOfficialQuotaWindow(account, int64(window.WindowSeconds), now); storedWindow != nil {
+				resetAt := time.Time{}
+				if storedWindow.ResetAt > 0 {
+					resetAt = time.Unix(storedWindow.ResetAt, 0)
+				}
+				official = &SharedQuotaOfficialSnapshot{
+					AccountID:          *window.UpstreamAccountID,
+					UsedPercent:        storedWindow.UsedPercent,
+					LimitWindowSeconds: storedWindow.LimitWindowSeconds,
+					ResetAt:            resetAt,
+					FetchedAt:          fetchedAt,
+				}
+			}
+		}
+	}
 	available := official != nil && official.FetchedAt.After(time.Time{}) && now.Sub(official.FetchedAt) <= officialQuotaMaxStale
 	stale := official == nil || now.Sub(official.FetchedAt) > officialQuotaSnapshotTTL
 	if stale {
@@ -790,7 +811,11 @@ func (s *SharedQuotaPoolService) calculateOfficialWindowSnapshot(ctx context.Con
 }
 
 func (s *SharedQuotaPoolService) scheduleOfficialQuotaRefresh(groupID int64, window SharedQuotaPoolWindowConfig) {
-	if s == nil || s.repo == nil || s.officialQuotaSource == nil {
+	// The account snapshot is a valid fallback when the active upstream probe is
+	// temporarily unavailable. Keep the refresh scheduled as long as either
+	// source is available; otherwise an official pool would remain pending
+	// forever with no observable error.
+	if s == nil || s.repo == nil || (s.officialQuotaSource == nil && s.accountRepo == nil) {
 		return
 	}
 	key := fmt.Sprintf("official-quota:%d:%s", groupID, window.Key)
@@ -828,15 +853,38 @@ func (s *SharedQuotaPoolService) refreshOfficialQuota(ctx context.Context, group
 	if accountID <= 0 {
 		return fmt.Errorf("official quota source account is not configured for group %d", groupID)
 	}
-	usage, err := s.officialQuotaSource.QueryUsage(ctx, accountID)
-	if err != nil {
-		return err
+	var providerWindow *OpenAIRateLimitWindow
+	var refreshErr error
+	if s.officialQuotaSource != nil {
+		usage, err := s.officialQuotaSource.QueryUsage(ctx, accountID)
+		if err != nil {
+			refreshErr = err
+		} else {
+			providerWindow = selectOfficialQuotaWindow(usage, int64(window.WindowSeconds))
+			if providerWindow == nil {
+				refreshErr = fmt.Errorf("official quota window %s is not available", window.Key)
+			}
+		}
+	} else {
+		refreshErr = fmt.Errorf("official quota upstream source is not configured")
 	}
-	providerWindow := selectOfficialQuotaWindow(usage, int64(window.WindowSeconds))
-	if providerWindow == nil {
-		return fmt.Errorf("official quota window %s is not available", window.Key)
-	}
+
 	fetchedAt := time.Now()
+	if providerWindow == nil && s.accountRepo != nil {
+		account, err := s.accountRepo.GetByID(ctx, accountID)
+		if err == nil {
+			providerWindow, fetchedAt = storedOfficialQuotaWindow(account, int64(window.WindowSeconds), s.now())
+			if providerWindow != nil {
+				log.Printf("official quota refresh used account snapshot group=%d window=%s account=%d upstream_error=%v", groupID, window.Key, accountID, refreshErr)
+			}
+		}
+	}
+	if providerWindow == nil {
+		if refreshErr == nil {
+			refreshErr = fmt.Errorf("official quota window %s is not available", window.Key)
+		}
+		return refreshErr
+	}
 	snapshot := &SharedQuotaOfficialSnapshot{
 		AccountID: accountID, UsedPercent: clampPercent(providerWindow.UsedPercent),
 		LimitWindowSeconds: providerWindow.LimitWindowSeconds, FetchedAt: fetchedAt,
@@ -849,6 +897,68 @@ func (s *SharedQuotaPoolService) refreshOfficialQuota(ctx context.Context, group
 	}
 	s.invalidate(groupID)
 	return nil
+}
+
+// storedOfficialQuotaWindow turns the latest account-level Codex snapshot into
+// the same narrow window shape returned by /wham/usage. The gateway already
+// persists these fields from successful upstream traffic, so using them during
+// a temporary quota-probe failure prevents an official pool from being stuck
+// in a permanent "syncing" state while preserving the snapshot timestamp.
+func storedOfficialQuotaWindow(account *Account, windowSeconds int64, now time.Time) (*OpenAIRateLimitWindow, time.Time) {
+	if account == nil || len(account.Extra) == 0 || windowSeconds <= 0 {
+		return nil, time.Time{}
+	}
+	window := "7d"
+	if windowSeconds <= 6*60*60 {
+		window = "5h"
+	}
+
+	usedKey := "codex_" + window + "_used_percent"
+	minutesKey := "codex_" + window + "_window_minutes"
+	resetAfterKey := "codex_" + window + "_reset_after_seconds"
+	resetAtKey := "codex_" + window + "_reset_at"
+	updatedAtKey := "codex_usage_updated_at"
+	usedRaw, ok := account.Extra[usedKey]
+	if !ok {
+		return nil, time.Time{}
+	}
+	updatedRaw, ok := account.Extra[updatedAtKey]
+	if !ok {
+		return nil, time.Time{}
+	}
+	fetchedAt, err := parseTime(fmt.Sprint(updatedRaw))
+	if err != nil || fetchedAt.IsZero() {
+		return nil, time.Time{}
+	}
+
+	limitSeconds := windowSeconds
+	if minutes := parseExtraInt(account.Extra[minutesKey]); minutes > 0 {
+		limitSeconds = int64(minutes) * 60
+	}
+	if absInt64(limitSeconds-windowSeconds) > 60 {
+		return nil, time.Time{}
+	}
+
+	usedPercent := clampPercent(parseExtraFloat64(usedRaw))
+	resetAt := int64(0)
+	if raw, ok := account.Extra[resetAtKey]; ok {
+		if parsed, err := parseTime(fmt.Sprint(raw)); err == nil {
+			resetAt = parsed.Unix()
+		}
+	}
+	if resetAt == 0 {
+		if resetAfter := parseExtraInt(account.Extra[resetAfterKey]); resetAfter > 0 {
+			resetAt = fetchedAt.Add(time.Duration(resetAfter) * time.Second).Unix()
+		}
+	}
+	if resetAt > 0 && !now.Before(time.Unix(resetAt, 0)) {
+		usedPercent = 0
+	}
+
+	return &OpenAIRateLimitWindow{
+		UsedPercent: usedPercent, LimitWindowSeconds: limitSeconds, ResetAt: resetAt,
+		ResetAfterSeconds: maxInt64(resetAt-now.Unix(), 0),
+	}, fetchedAt
 }
 
 func selectOfficialQuotaWindow(usage *OpenAIQuotaUsage, seconds int64) *OpenAIRateLimitWindow {

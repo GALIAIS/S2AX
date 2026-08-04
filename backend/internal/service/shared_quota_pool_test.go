@@ -98,6 +98,29 @@ func TestDefaultSharedQuotaPoolUsesFiveHourAndSevenDayWindows(t *testing.T) {
 	}
 }
 
+func TestStoredOfficialQuotaWindowUsesFreshAccountSnapshot(t *testing.T) {
+	now := time.Date(2026, 8, 4, 1, 0, 0, 0, time.UTC)
+	fetchedAt := now.Add(-time.Minute)
+	resetAt := now.Add(6 * 24 * time.Hour)
+	account := &Account{Extra: map[string]any{
+		"codex_7d_used_percent":   55,
+		"codex_7d_window_minutes": 10080,
+		"codex_7d_reset_at":       resetAt.Format(time.RFC3339),
+		"codex_usage_updated_at":  fetchedAt.Format(time.RFC3339),
+	}}
+
+	window, gotFetchedAt := storedOfficialQuotaWindow(account, 7*24*60*60, now)
+	if window == nil {
+		t.Fatal("stored official quota window = nil")
+	}
+	if window.UsedPercent != 55 || window.LimitWindowSeconds != 7*24*60*60 {
+		t.Fatalf("stored official quota window = %#v", window)
+	}
+	if window.ResetAt != resetAt.Unix() || !gotFetchedAt.Equal(fetchedAt) {
+		t.Fatalf("stored official quota timestamps = reset %d fetched %s", window.ResetAt, gotFetchedAt)
+	}
+}
+
 func TestSharedQuotaPoolWeightedSharesAndBorrowing(t *testing.T) {
 	repo := &sharedQuotaPoolRepoStub{
 		config: sharedQuotaTestConfig(),
