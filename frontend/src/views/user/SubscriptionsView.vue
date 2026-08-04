@@ -266,8 +266,11 @@
                   ></div>
                 </div>
                 <div class="flex items-center justify-between text-[11px] text-gray-500 dark:text-dark-400">
-                  <span v-if="isOfficialWindow(window) && window.official_data_available !== true" class="text-amber-600 dark:text-amber-400">
+                  <span v-if="isOfficialWindow(window) && !officialSnapshotPresent(window)" class="text-amber-600 dark:text-amber-400">
                     {{ t('userSubscriptions.sharedSyncing') }}
+                  </span>
+                  <span v-else-if="isOfficialWindow(window) && window.official_data_stale" class="text-amber-600 dark:text-amber-400">
+                    {{ t('userSubscriptions.sharedStale') }}
                   </span>
                   <span v-else>{{ window.allowed ? t('userSubscriptions.sharedAllowed') : t('userSubscriptions.sharedLimited') }}</span>
                   <span>{{ t('userSubscriptions.sharedResetIn', { time: formatSharedReset(sharedWindowEnd(window)) }) }}</span>
@@ -392,6 +395,10 @@ function isOfficialWindow(window: SharedQuotaUserWindowProgress): boolean {
   return window.capacity_mode === 'official_percent'
 }
 
+function officialSnapshotPresent(window: SharedQuotaUserWindowProgress): boolean {
+  return window.official_data_available === true || Boolean(window.official_fetched_at)
+}
+
 function sharedUsed(window: SharedQuotaUserWindowProgress): number {
   return isOfficialWindow(window) ? (window.used_percent ?? 0) : window.used_usd
 }
@@ -401,7 +408,7 @@ function sharedMaximum(window: SharedQuotaUserWindowProgress): number {
 }
 
 function sharedAmount(window: SharedQuotaUserWindowProgress, kind: 'used' | 'maximum'): string {
-  if (isOfficialWindow(window) && window.official_data_available !== true) return '—'
+  if (isOfficialWindow(window) && !officialSnapshotPresent(window)) return '—'
   if (isOfficialWindow(window)) return percent(kind === 'used' ? window.used_percent : window.maximum_percent)
   return usd(kind === 'used' ? window.used_usd : window.maximum_usd)
 }
@@ -413,7 +420,7 @@ function sharedWindowLabel(window: SharedQuotaUserWindowProgress): string {
 }
 
 function sharedProgressWidth(window: SharedQuotaUserWindowProgress): string {
-  if (isOfficialWindow(window) && window.official_data_available !== true) return '0%'
+  if (isOfficialWindow(window) && !officialSnapshotPresent(window)) return '0%'
   const maximum = sharedMaximum(window)
   if (!maximum || maximum <= 0) return '0%'
   return `${Math.min(Math.max((sharedUsed(window) / maximum) * 100, 0), 100)}%`

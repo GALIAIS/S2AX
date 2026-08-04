@@ -16,6 +16,15 @@ type sharedQuotaPoolRepoStub struct {
 	official      map[string]*SharedQuotaOfficialSnapshot
 }
 
+type sharedQuotaAccountRepoStub struct {
+	AccountRepository
+	accounts map[int64]*Account
+}
+
+func (r *sharedQuotaAccountRepoStub) GetByID(_ context.Context, id int64) (*Account, error) {
+	return r.accounts[id], nil
+}
+
 func (r *sharedQuotaPoolRepoStub) GetOfficialQuotaSnapshot(_ context.Context, _ int64, windowKey string) (*SharedQuotaOfficialSnapshot, error) {
 	if r.official == nil {
 		return nil, nil
@@ -265,5 +274,45 @@ func TestSharedQuotaPoolOfficialPercentUsesProviderWindowAndLocalFairness(t *tes
 	}
 	if got := window.Members[1].UsedPercent; got != 18 {
 		t.Fatalf("user 2 provider-normalized usage = %v, want 18", got)
+	}
+}
+
+func TestSharedQuotaPoolOfficialPercentPrefersFreshAccountSnapshotOverStalePoolRow(t *testing.T) {
+	now := time.Date(2026, 8, 4, 1, 0, 0, 0, time.UTC)
+	config := sharedQuotaTestConfig()
+	config.Windows[0].Enabled = false
+	config.Windows[1].CapacityUSD = nil
+	config.Windows[1].CapacityMode = SharedQuotaCapacityModeOfficialPercent
+	config.Windows[1].UpstreamAccountID = func() *int64 { id := int64(42); return &id }()
+	staleFetchedAt := now.Add(-20 * time.Minute)
+	freshFetchedAt := now.Add(-time.Minute)
+	repo := &sharedQuotaPoolRepoStub{
+		config:  config,
+		members: []SharedQuotaPoolMember{{UserID: 1, Weight: 1, Enabled: true}},
+		official: map[string]*SharedQuotaOfficialSnapshot{
+			"long": {AccountID: 42, UsedPercent: 12, LimitWindowSeconds: 7 * 24 * 60 * 60, FetchedAt: staleFetchedAt},
+		},
+	}
+	accountRepo := &sharedQuotaAccountRepoStub{accounts: map[int64]*Account{
+		42: {ID: 42, Extra: map[string]any{
+			"codex_7d_used_percent":   56,
+			"codex_7d_window_minutes": 10080,
+			"codex_usage_updated_at":  freshFetchedAt.Format(time.RFC3339),
+		}},
+	}}
+	svc := NewSharedQuotaPoolService(repo)
+	svc.accountRepo = accountRepo
+	svc.now = func() time.Time { return now }
+
+	snapshot, err := svc.GetSnapshot(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	window := snapshot.Windows[1]
+	if !window.OfficialDataAvailable || window.OfficialDataStale {
+		t.Fatalf("official data state = available:%v stale:%v", window.OfficialDataAvailable, window.OfficialDataStale)
+	}
+	if window.OfficialUsedPercent != 56 {
+		t.Fatalf("official used percent = %v, want 56", window.OfficialUsedPercent)
 	}
 }

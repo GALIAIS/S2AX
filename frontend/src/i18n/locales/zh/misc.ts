@@ -173,6 +173,7 @@ export default {
     sharedLimited: '当前受限',
     sharedResetIn: '{time} 后刷新',
     sharedSyncing: '官方额度同步中',
+    sharedStale: '使用最近一次官方快照',
     sharedUnavailable: '额度状态暂不可用，已隐藏可能冲突的周限额。'
   },
 

@@ -670,6 +670,7 @@ export default {
       sharedManual: '共享 USD',
       officialPercent: '官方百分比',
       sharedSyncing: '官方额度同步中',
+      sharedStale: '使用最近一次官方快照',
       sharedUnavailable: '共享额度状态暂不可用，未显示旧的周限额。',
       sharedMemberMissing: '未加入共享池',
       sharedResetIn: '{time} 后刷新',

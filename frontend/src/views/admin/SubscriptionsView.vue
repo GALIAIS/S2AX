@@ -323,8 +323,11 @@
                 </div>
                 <div class="reset-info flex flex-wrap items-center gap-x-2">
                   <span>{{ sharedModeLabel(row) }}</span>
-                  <span v-if="!sharedOfficialDataReady(row)" class="text-amber-600 dark:text-amber-400">
+                  <span v-if="!sharedOfficialSnapshotPresent(row)" class="text-amber-600 dark:text-amber-400">
                     {{ t('admin.subscriptions.sharedSyncing') }}
+                  </span>
+                  <span v-else-if="sharedQuotaForRow(row)?.window.official_data_stale" class="text-amber-600 dark:text-amber-400">
+                    {{ t('admin.subscriptions.sharedStale') }}
                   </span>
                   <span v-else-if="isOfficialSharedQuota(row)">
                     {{ t('admin.subscriptions.sharedProviderUsage', { percent: formatPercent(sharedQuotaForRow(row)?.window.official_used_percent ?? 0) }) }}
@@ -1517,9 +1520,10 @@ const isOfficialSharedQuota = (subscription: UserSubscription): boolean => {
   )
 }
 
-const sharedOfficialDataReady = (subscription: UserSubscription): boolean => {
+const sharedOfficialSnapshotPresent = (subscription: UserSubscription): boolean => {
   const view = sharedQuotaForRow(subscription)
-  return !view || !isOfficialSharedQuota(subscription) || view.window.official_data_available === true
+  return !view || !isOfficialSharedQuota(subscription) ||
+    view.window.official_data_available === true || Boolean(view.window.official_fetched_at)
 }
 
 const formatPercent = (value: number | undefined): string => {
@@ -1531,7 +1535,7 @@ const sharedUsageDisplay = (subscription: UserSubscription): string => {
   const view = sharedQuotaForRow(subscription)
   if (!view?.member) return '—'
   if (isOfficialSharedQuota(subscription)) {
-    return sharedOfficialDataReady(subscription)
+    return sharedOfficialSnapshotPresent(subscription)
       ? formatPercent(view.member.used_percent)
       : t('admin.subscriptions.sharedSyncing')
   }
@@ -1542,16 +1546,14 @@ const sharedMaximumDisplay = (subscription: UserSubscription): string => {
   const view = sharedQuotaForRow(subscription)
   if (!view?.member) return '—'
   if (isOfficialSharedQuota(subscription)) {
-    return sharedOfficialDataReady(subscription)
-      ? formatPercent(view.member.maximum_percent)
-      : '—'
+    return formatPercent(view.member.maximum_percent)
   }
   return `$${(Number.isFinite(view.member.maximum_usd) ? view.member.maximum_usd : 0).toFixed(2)}`
 }
 
 const sharedProgressValue = (subscription: UserSubscription): number => {
   const view = sharedQuotaForRow(subscription)
-  if (!view?.member || !sharedOfficialDataReady(subscription)) return 0
+  if (!view?.member || (isOfficialSharedQuota(subscription) && !sharedOfficialSnapshotPresent(subscription))) return 0
 
   const used = isOfficialSharedQuota(subscription)
     ? view.member.used_percent ?? 0

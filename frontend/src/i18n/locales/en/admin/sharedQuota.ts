@@ -9,6 +9,7 @@ export default {
     manualMode: 'Manual USD',
     officialMode: 'Official percentage sync',
     officialSyncing: 'Syncing official quota',
+    officialStale: 'Using the latest official snapshot (may be stale)',
     upstreamAccount: 'Official account (optional)',
     autoAccount: 'Leave empty to auto-select the only OpenAI OAuth account in this group',
     officialHint: 'Reads the provider rolling-window percentage in the background; it does not add first-token latency. This window is displayed and enforced only as a percentage when enabled.',

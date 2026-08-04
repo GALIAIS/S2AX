@@ -280,7 +280,11 @@ function isOfficialSharedWindow(window: SharedQuotaUserWindowProgress): boolean 
 }
 
 function sharedDataReady(window: SharedQuotaUserWindowProgress): boolean {
-  return !isOfficialSharedWindow(window) || window.official_data_available === true
+  return !isOfficialSharedWindow(window) || officialSnapshotPresent(window)
+}
+
+function officialSnapshotPresent(window: SharedQuotaUserWindowProgress): boolean {
+  return window.official_data_available === true || Boolean(window.official_fetched_at)
 }
 
 function sharedUsed(window: SharedQuotaUserWindowProgress): number {

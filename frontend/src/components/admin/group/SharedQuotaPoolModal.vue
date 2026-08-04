@@ -8,16 +8,19 @@
           <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
             <span>{{ windowLabel(window.config.key) }}</span>
             <span :class="window.hard_stop_reached ? 'text-red-600 dark:text-red-400' : window.soft_stop_reached ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'">
-              {{ window.config.enabled ? `${window.utilization_percent.toFixed(2)}%` : t('admin.sharedQuota.disabled') }}
+              {{ window.config.enabled ? windowUtilization(window) : t('admin.sharedQuota.disabled') }}
             </span>
           </div>
           <div class="mt-1 flex items-baseline justify-between gap-3 font-mono text-sm text-gray-900 dark:text-white">
-            <span v-if="window.config.capacity_mode === 'official_percent' && window.official_data_available !== true" class="text-amber-600 dark:text-amber-400">
+            <span v-if="window.config.capacity_mode === 'official_percent' && !officialSnapshotPresent(window)" class="text-amber-600 dark:text-amber-400">
               {{ t('admin.sharedQuota.officialSyncing') }}
             </span>
             <span v-else-if="window.config.capacity_mode === 'official_percent'">{{ percent(window.official_used_percent ?? 0) }}</span>
             <span v-else>{{ window.config.capacity_usd == null ? '—' : usd(window.total_used_usd) }}</span>
             <span class="text-xs text-gray-500 dark:text-gray-400">/ {{ window.config.capacity_mode === 'official_percent' ? '100%' : (window.config.capacity_usd == null ? '—' : usd(window.distributable_usd)) }}</span>
+          </div>
+          <div v-if="window.config.capacity_mode === 'official_percent' && window.official_data_stale" class="mt-1 text-xs text-amber-600 dark:text-amber-400">
+            {{ t('admin.sharedQuota.officialStale') }}
           </div>
         </div>
       </div>
@@ -209,6 +212,12 @@ const visibleMembers = computed(() => {
 const usd = (value: number) => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 4 }).format(value)
 const percent = (value: number) => `${Number(value || 0).toFixed(2)}%`
 const windowLabel = (key: string) => key === 'short' ? '5h / 5 小时窗口' : key === 'long' ? '7d / 7 天窗口' : key
+const officialSnapshotPresent = (window: SharedQuotaPoolSnapshot['windows'][number]) =>
+  window.official_data_available === true || Boolean(window.official_fetched_at)
+const windowUtilization = (window: SharedQuotaPoolSnapshot['windows'][number]) =>
+  window.config.capacity_mode === 'official_percent'
+    ? percent(window.official_used_percent ?? 0)
+    : `${window.utilization_percent.toFixed(2)}%`
 const displayAmount = (member?: SharedQuotaPoolMember) => selectedWindow.value?.config.capacity_mode === 'official_percent'
   ? percent(member?.used_percent ?? 0)
   : usd(member?.used_usd ?? 0)

@@ -688,23 +688,24 @@ func (s *SharedQuotaPoolService) calculateOfficialWindowSnapshot(ctx context.Con
 		official = nil
 	}
 	now := s.now()
-	// A freshly persisted account-level snapshot is already official upstream
-	// data. Use it immediately when the shared-pool snapshot row has not been
-	// created yet; the asynchronous refresh below still promotes it to the
-	// shared-pool read model without adding provider latency to the request.
-	if official == nil && s.accountRepo != nil && window.UpstreamAccountID != nil {
+	// Prefer the newest account-level snapshot even when the shared-pool row
+	// already exists. The pool row is a derived cache; keeping an older row here
+	// made the UI stay in "syncing" after the account itself had fresh quota data.
+	if s.accountRepo != nil && window.UpstreamAccountID != nil {
 		if account, accountErr := s.accountRepo.GetByID(ctx, *window.UpstreamAccountID); accountErr == nil {
 			if storedWindow, fetchedAt := storedOfficialQuotaWindow(account, int64(window.WindowSeconds), now); storedWindow != nil {
-				resetAt := time.Time{}
-				if storedWindow.ResetAt > 0 {
-					resetAt = time.Unix(storedWindow.ResetAt, 0)
-				}
-				official = &SharedQuotaOfficialSnapshot{
-					AccountID:          *window.UpstreamAccountID,
-					UsedPercent:        storedWindow.UsedPercent,
-					LimitWindowSeconds: storedWindow.LimitWindowSeconds,
-					ResetAt:            resetAt,
-					FetchedAt:          fetchedAt,
+				if official == nil || fetchedAt.After(official.FetchedAt) {
+					resetAt := time.Time{}
+					if storedWindow.ResetAt > 0 {
+						resetAt = time.Unix(storedWindow.ResetAt, 0)
+					}
+					official = &SharedQuotaOfficialSnapshot{
+						AccountID:          *window.UpstreamAccountID,
+						UsedPercent:        storedWindow.UsedPercent,
+						LimitWindowSeconds: storedWindow.LimitWindowSeconds,
+						ResetAt:            resetAt,
+						FetchedAt:          fetchedAt,
+					}
 				}
 			}
 		}
@@ -746,7 +747,7 @@ func (s *SharedQuotaPoolService) calculateOfficialWindowSnapshot(ctx context.Con
 		Config: window, CapacityMode: SharedQuotaCapacityModeOfficialPercent,
 		BaseCapacityPercent: baseCapacity, DistributablePercent: distributable,
 		SoftLimitPercent: softLimit, HardLimitPercent: hardLimit,
-		OfficialDataAvailable: available, OfficialDataStale: available && stale,
+		OfficialDataAvailable: available, OfficialDataStale: official != nil && stale,
 		Members: make([]SharedQuotaPoolMemberSnapshot, 0, len(members)),
 	}
 	if official != nil {

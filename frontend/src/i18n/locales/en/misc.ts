@@ -176,6 +176,7 @@ export default {
     sharedLimited: 'Limited',
     sharedResetIn: 'Refreshes in {time}',
     sharedSyncing: 'Syncing official quota',
+    sharedStale: 'Using the latest official snapshot',
     sharedUnavailable: 'Quota status is unavailable; the potentially conflicting weekly limit is hidden.'
   },
 

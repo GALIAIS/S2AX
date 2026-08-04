@@ -9,6 +9,7 @@ export default {
     manualMode: '手动 USD',
     officialMode: '官方百分比同步',
     officialSyncing: '官方额度同步中',
+    officialStale: '使用最近一次官方快照（可能已过期）',
     upstreamAccount: '官方账号（可选）',
     autoAccount: '留空：分组仅有一个 OpenAI OAuth 账号时自动选择',
     officialHint: '读取官方滚动窗口百分比；首次同步在后台完成，不增加请求首字延迟。启用后该窗口只按百分比显示和控制。',
