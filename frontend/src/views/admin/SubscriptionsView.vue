@@ -213,6 +213,20 @@
 
           <template #cell-usage="{ row }">
             <div class="min-w-[280px] space-y-2">
+              <div
+                v-if="isSharedQuotaLoading(row)"
+                class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400"
+              >
+                <Icon name="refresh" size="sm" class="animate-spin" />
+                {{ t('admin.subscriptions.sharedSyncing') }}
+              </div>
+              <div
+                v-else-if="isSharedQuotaUnavailable(row)"
+                class="text-xs text-amber-600 dark:text-amber-400"
+              >
+                {{ t('admin.subscriptions.sharedUnavailable') }}
+              </div>
+
               <!-- Daily Usage -->
               <div v-if="row.group?.daily_limit_usd" class="usage-row">
                 <div class="flex items-center gap-2">
@@ -251,7 +265,10 @@
               </div>
 
               <!-- Weekly Usage -->
-              <div v-if="row.group?.weekly_limit_usd" class="usage-row">
+              <div
+                v-if="row.group?.weekly_limit_usd && !hasSharedQuota(row) && !isSharedQuotaLoading(row) && !isSharedQuotaUnavailable(row)"
+                class="usage-row"
+              >
                 <div class="flex items-center gap-2">
                   <span class="usage-label">{{ t('admin.subscriptions.weekly') }}</span>
                   <div class="h-1.5 flex-1 rounded-full bg-gray-200 dark:bg-dark-600">
@@ -284,6 +301,38 @@
                     />
                   </svg>
                   <span>{{ formatResetTime(row.weekly_window_start, 'weekly') }}</span>
+                </div>
+              </div>
+
+              <!-- Shared quota replaces the legacy weekly USD limit for this group. -->
+              <div v-if="sharedQuotaForRow(row)" class="usage-row">
+                <div class="flex items-center gap-2">
+                  <span class="usage-label">{{ t('admin.subscriptions.sharedQuota') }}</span>
+                  <div class="h-1.5 flex-1 rounded-full bg-gray-200 dark:bg-dark-600">
+                    <div
+                      class="h-1.5 rounded-full transition-all"
+                      :class="getSharedProgressClass(row)"
+                      :style="{ width: getSharedProgressWidth(row) }"
+                    ></div>
+                  </div>
+                  <span class="usage-amount">
+                    {{ sharedUsageDisplay(row) }}
+                    <span class="text-gray-400">/</span>
+                    {{ sharedMaximumDisplay(row) }}
+                  </span>
+                </div>
+                <div class="reset-info flex flex-wrap items-center gap-x-2">
+                  <span>{{ sharedModeLabel(row) }}</span>
+                  <span v-if="!sharedOfficialDataReady(row)" class="text-amber-600 dark:text-amber-400">
+                    {{ t('admin.subscriptions.sharedSyncing') }}
+                  </span>
+                  <span v-else-if="isOfficialSharedQuota(row)">
+                    {{ t('admin.subscriptions.sharedProviderUsage', { percent: formatPercent(sharedQuotaForRow(row)?.window.official_used_percent ?? 0) }) }}
+                  </span>
+                  <span v-if="!sharedQuotaForRow(row)?.member" class="text-amber-600 dark:text-amber-400">
+                    {{ t('admin.subscriptions.sharedMemberMissing') }}
+                  </span>
+                  <span>{{ t('admin.subscriptions.sharedResetIn', { time: sharedResetText(row) }) }}</span>
                 </div>
               </div>
 
@@ -327,9 +376,12 @@
               <!-- No Limits - Unlimited badge -->
               <div
                 v-if="
-                  !row.group?.daily_limit_usd &&
+                !row.group?.daily_limit_usd &&
                   !row.group?.weekly_limit_usd &&
-                  !row.group?.monthly_limit_usd
+                  !row.group?.monthly_limit_usd &&
+                  !hasSharedQuota(row) &&
+                  !isSharedQuotaLoading(row) &&
+                  !isSharedQuotaUnavailable(row)
                 "
                 class="flex items-center gap-2 rounded-lg bg-gradient-to-r from-emerald-50 to-teal-50 px-3 py-2 dark:from-emerald-900/20 dark:to-teal-900/20"
               >
@@ -766,7 +818,15 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
-import type { UserSubscription, Group, GroupPlatform, SubscriptionType } from '@/types'
+import type {
+  UserSubscription,
+  Group,
+  GroupPlatform,
+  SubscriptionType,
+  SharedQuotaPoolSnapshot,
+  SharedQuotaPoolWindowSnapshot,
+  SharedQuotaPoolMember
+} from '@/types'
 import type { SimpleUser } from '@/api/admin/usage'
 import type { Column } from '@/components/common/types'
 import { formatDateTimeToMinute } from '@/utils/format'
@@ -799,6 +859,12 @@ interface GroupOption {
   platform: GroupPlatform
   subscriptionType: SubscriptionType
   rate: number
+}
+
+interface SharedQuotaRowView {
+  snapshot: SharedQuotaPoolSnapshot
+  window: SharedQuotaPoolWindowSnapshot
+  member?: SharedQuotaPoolMember
 }
 
 // Guide modal state
@@ -928,6 +994,8 @@ const statusOptions = computed(() => [
 const subscriptions = ref<UserSubscription[]>([])
 const groups = ref<Group[]>([])
 const loading = ref(false)
+const sharedQuotaLoading = ref(false)
+const sharedQuotaByGroup = ref<Record<number, SharedQuotaPoolSnapshot | null>>({})
 let abortController: AbortController | null = null
 
 // Toolbar user filter (fuzzy search -> select user_id)
@@ -1050,6 +1118,7 @@ const loadSubscriptions = async () => {
     subscriptions.value = response.items
     pagination.total = response.total
     pagination.pages = response.pages
+    await loadSharedQuotaForSubscriptions(response.items, signal)
   } catch (error: any) {
     if (signal.aborted || error?.name === 'AbortError' || error?.code === 'ERR_CANCELED') {
       return
@@ -1061,6 +1130,35 @@ const loadSubscriptions = async () => {
       loading.value = false
       abortController = null
     }
+  }
+}
+
+const loadSharedQuotaForSubscriptions = async (
+  items: UserSubscription[],
+  signal: AbortSignal
+) => {
+  const groupIds = [...new Set(items.map(subscription => subscription.group_id).filter(id => id > 0))]
+  sharedQuotaByGroup.value = {}
+  sharedQuotaLoading.value = groupIds.length > 0
+  if (groupIds.length === 0) return
+
+  try {
+    const entries = await Promise.all(groupIds.map(async groupId => {
+      try {
+        return [groupId, await adminAPI.groups.getSharedQuota(groupId, { signal })] as const
+      } catch (error) {
+        if (signal.aborted) throw error
+        // Groups without access to the optional snapshot keep the legacy USD view.
+        console.error(`Error loading shared quota for group ${groupId}:`, error)
+        return [groupId, null] as const
+      }
+    }))
+    if (signal.aborted) return
+    const next: Record<number, SharedQuotaPoolSnapshot | null> = {}
+    for (const [groupId, snapshot] of entries) next[groupId] = snapshot
+    sharedQuotaByGroup.value = next
+  } finally {
+    if (!signal.aborted) sharedQuotaLoading.value = false
   }
 }
 
@@ -1378,6 +1476,115 @@ const getProgressClass = (used: number | null | undefined, limit: number | null)
   if (percentage >= 90) return 'bg-red-500'
   if (percentage >= 70) return 'bg-orange-500'
   return 'bg-green-500'
+}
+
+const hasSharedQuotaRecord = (groupId: number): boolean =>
+  Object.prototype.hasOwnProperty.call(sharedQuotaByGroup.value, groupId)
+
+const sharedQuotaForRow = (subscription: UserSubscription): SharedQuotaRowView | null => {
+  const snapshot = sharedQuotaByGroup.value[subscription.group_id]
+  if (!snapshot?.config.enabled) return null
+
+  const enabledWindows = snapshot.windows.filter(window => window.config.enabled)
+  const window =
+    enabledWindows.find(item => item.config.key === 'long') ??
+    enabledWindows[0]
+  if (!window) return null
+
+  return {
+    snapshot,
+    window,
+    member: window.members.find(member => member.user_id === subscription.user_id)
+  }
+}
+
+const hasSharedQuota = (subscription: UserSubscription): boolean =>
+  sharedQuotaForRow(subscription) !== null
+
+const isSharedQuotaLoading = (subscription: UserSubscription): boolean =>
+  sharedQuotaLoading.value && !hasSharedQuotaRecord(subscription.group_id)
+
+const isSharedQuotaUnavailable = (subscription: UserSubscription): boolean =>
+  hasSharedQuotaRecord(subscription.group_id) &&
+  sharedQuotaByGroup.value[subscription.group_id] === null
+
+const isOfficialSharedQuota = (subscription: UserSubscription): boolean => {
+  const view = sharedQuotaForRow(subscription)
+  return (
+    view?.window.config.capacity_mode === 'official_percent' ||
+    view?.window.capacity_mode === 'official_percent' ||
+    view?.snapshot.capacity_mode === 'official_percent'
+  )
+}
+
+const sharedOfficialDataReady = (subscription: UserSubscription): boolean => {
+  const view = sharedQuotaForRow(subscription)
+  return !view || !isOfficialSharedQuota(subscription) || view.window.official_data_available === true
+}
+
+const formatPercent = (value: number | undefined): string => {
+  const normalized = typeof value === 'number' && Number.isFinite(value) ? value : 0
+  return `${normalized.toFixed(2)}%`
+}
+
+const sharedUsageDisplay = (subscription: UserSubscription): string => {
+  const view = sharedQuotaForRow(subscription)
+  if (!view?.member) return '—'
+  if (isOfficialSharedQuota(subscription)) {
+    return sharedOfficialDataReady(subscription)
+      ? formatPercent(view.member.used_percent)
+      : t('admin.subscriptions.sharedSyncing')
+  }
+  return `$${(Number.isFinite(view.member.used_usd) ? view.member.used_usd : 0).toFixed(2)}`
+}
+
+const sharedMaximumDisplay = (subscription: UserSubscription): string => {
+  const view = sharedQuotaForRow(subscription)
+  if (!view?.member) return '—'
+  if (isOfficialSharedQuota(subscription)) {
+    return sharedOfficialDataReady(subscription)
+      ? formatPercent(view.member.maximum_percent)
+      : '—'
+  }
+  return `$${(Number.isFinite(view.member.maximum_usd) ? view.member.maximum_usd : 0).toFixed(2)}`
+}
+
+const sharedProgressValue = (subscription: UserSubscription): number => {
+  const view = sharedQuotaForRow(subscription)
+  if (!view?.member || !sharedOfficialDataReady(subscription)) return 0
+
+  const used = isOfficialSharedQuota(subscription)
+    ? view.member.used_percent ?? 0
+    : view.member.used_usd
+  const maximum = isOfficialSharedQuota(subscription)
+    ? view.member.maximum_percent ?? 0
+    : view.member.maximum_usd
+  if (!maximum || maximum <= 0) return 0
+  return Math.min(Math.max((used / maximum) * 100, 0), 100)
+}
+
+const getSharedProgressWidth = (subscription: UserSubscription): string =>
+  `${sharedProgressValue(subscription)}%`
+
+const getSharedProgressClass = (subscription: UserSubscription): string => {
+  const value = sharedProgressValue(subscription)
+  if (value >= 90) return 'bg-red-500'
+  if (value >= 70) return 'bg-orange-500'
+  return 'bg-green-500'
+}
+
+const sharedModeLabel = (subscription: UserSubscription): string =>
+  isOfficialSharedQuota(subscription)
+    ? t('admin.subscriptions.officialPercent')
+    : t('admin.subscriptions.sharedManual')
+
+const sharedResetText = (subscription: UserSubscription): string => {
+  const view = sharedQuotaForRow(subscription)
+  const resetAt = isOfficialSharedQuota(subscription)
+    ? view?.window.official_reset_at
+    : view?.window.config.window_end
+  const parts = resetAt ? getRemainingDurationParts(resetAt) : null
+  return parts ? formatResetDuration(parts) : t('admin.subscriptions.windowNotActive')
 }
 
 const formatResetDuration = (parts: RemainingDurationParts): string => {

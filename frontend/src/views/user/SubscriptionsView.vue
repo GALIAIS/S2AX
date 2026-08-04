@@ -82,6 +82,13 @@
 
           <!-- Usage Progress -->
           <div class="space-y-4 p-4">
+            <div
+              v-if="progressError"
+              class="text-xs text-amber-600 dark:text-amber-400"
+            >
+              {{ t('userSubscriptions.sharedUnavailable') }}
+            </div>
+
             <!-- Expiration Info -->
             <div v-if="subscription.expires_at" class="flex items-center justify-between text-sm">
               <span class="text-gray-500 dark:text-dark-400">{{
@@ -138,7 +145,10 @@
             </div>
 
             <!-- Weekly Usage -->
-            <div v-if="subscription.group?.weekly_limit_usd" class="space-y-2">
+            <div
+              v-if="subscription.group?.weekly_limit_usd && !progressError && !getSubscriptionProgress(subscription)?.shared?.enabled"
+              class="space-y-2"
+            >
               <div class="flex items-center justify-between">
                 <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
                   {{ t('userSubscriptions.weekly') }}
@@ -256,7 +266,10 @@
                   ></div>
                 </div>
                 <div class="flex items-center justify-between text-[11px] text-gray-500 dark:text-dark-400">
-                  <span>{{ window.allowed ? t('userSubscriptions.sharedAllowed') : t('userSubscriptions.sharedLimited') }}</span>
+                  <span v-if="isOfficialWindow(window) && window.official_data_available !== true" class="text-amber-600 dark:text-amber-400">
+                    {{ t('userSubscriptions.sharedSyncing') }}
+                  </span>
+                  <span v-else>{{ window.allowed ? t('userSubscriptions.sharedAllowed') : t('userSubscriptions.sharedLimited') }}</span>
                   <span>{{ t('userSubscriptions.sharedResetIn', { time: formatSharedReset(sharedWindowEnd(window)) }) }}</span>
                 </div>
               </div>
@@ -268,7 +281,8 @@
                 !subscription.group?.daily_limit_usd &&
                 !subscription.group?.weekly_limit_usd &&
                 !subscription.group?.monthly_limit_usd &&
-                !getSubscriptionProgress(subscription)?.shared?.enabled
+                !getSubscriptionProgress(subscription)?.shared?.enabled &&
+                !progressError
               "
               class="flex items-center justify-center rounded-xl bg-gradient-to-r from-emerald-50 to-teal-50 py-6 dark:from-emerald-900/20 dark:to-teal-900/20"
             >
@@ -327,6 +341,7 @@ const appStore = useAppStore()
 const subscriptions = ref<UserSubscription[]>([])
 const progressBySubscription = ref<Record<number, SubscriptionProgress>>({})
 const loading = ref(true)
+const progressError = ref(false)
 
 function subscriptionHasPeakRate(subscription: UserSubscription): boolean {
   return hasPeakRate(subscription.group)
@@ -340,6 +355,7 @@ async function loadSubscriptions() {
   try {
     loading.value = true
     subscriptions.value = await subscriptionsAPI.getMySubscriptions()
+    progressError.value = false
     try {
       const progress = await subscriptionsAPI.getSubscriptionsProgress()
       progressBySubscription.value = Object.fromEntries(
@@ -349,6 +365,7 @@ async function loadSubscriptions() {
       // The subscription list remains useful if progress aggregation is unavailable.
       console.error('Failed to load subscription progress:', error)
       progressBySubscription.value = {}
+      progressError.value = true
     }
   } catch (error) {
     console.error('Failed to load subscriptions:', error)
@@ -384,6 +401,7 @@ function sharedMaximum(window: SharedQuotaUserWindowProgress): number {
 }
 
 function sharedAmount(window: SharedQuotaUserWindowProgress, kind: 'used' | 'maximum'): string {
+  if (isOfficialWindow(window) && window.official_data_available !== true) return '—'
   if (isOfficialWindow(window)) return percent(kind === 'used' ? window.used_percent : window.maximum_percent)
   return usd(kind === 'used' ? window.used_usd : window.maximum_usd)
 }
@@ -395,6 +413,7 @@ function sharedWindowLabel(window: SharedQuotaUserWindowProgress): string {
 }
 
 function sharedProgressWidth(window: SharedQuotaUserWindowProgress): string {
+  if (isOfficialWindow(window) && window.official_data_available !== true) return '0%'
   const maximum = sharedMaximum(window)
   if (!maximum || maximum <= 0) return '0%'
   return `${Math.min(Math.max((sharedUsed(window) / maximum) * 100, 0), 100)}%`

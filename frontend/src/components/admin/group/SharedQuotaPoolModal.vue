@@ -12,7 +12,10 @@
             </span>
           </div>
           <div class="mt-1 flex items-baseline justify-between gap-3 font-mono text-sm text-gray-900 dark:text-white">
-            <span v-if="window.config.capacity_mode === 'official_percent'">{{ percent(window.official_used_percent ?? 0) }}</span>
+            <span v-if="window.config.capacity_mode === 'official_percent' && window.official_data_available !== true" class="text-amber-600 dark:text-amber-400">
+              {{ t('admin.sharedQuota.officialSyncing') }}
+            </span>
+            <span v-else-if="window.config.capacity_mode === 'official_percent'">{{ percent(window.official_used_percent ?? 0) }}</span>
             <span v-else>{{ window.config.capacity_usd == null ? '—' : usd(window.total_used_usd) }}</span>
             <span class="text-xs text-gray-500 dark:text-gray-400">/ {{ window.config.capacity_mode === 'official_percent' ? '100%' : (window.config.capacity_usd == null ? '—' : usd(window.distributable_usd)) }}</span>
           </div>

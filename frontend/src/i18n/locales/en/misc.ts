@@ -7,6 +7,9 @@ export default {
     activeCount: '{count} active subscription(s)',
     daily: 'Daily',
     weekly: 'Weekly',
+    shared: 'Shared',
+    syncing: 'Syncing',
+    sharedUnavailable: 'Quota status unavailable',
     monthly: 'Monthly',
     daysRemaining: '{days} days left',
     expired: 'Expired',
@@ -171,7 +174,9 @@ export default {
     sharedBorrowed: '{amount} borrowed',
     sharedAllowed: 'Available',
     sharedLimited: 'Limited',
-    sharedResetIn: 'Refreshes in {time}'
+    sharedResetIn: 'Refreshes in {time}',
+    sharedSyncing: 'Syncing official quota',
+    sharedUnavailable: 'Quota status is unavailable; the potentially conflicting weekly limit is hidden.'
   },
 
   // Onboarding Tour

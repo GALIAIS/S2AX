@@ -7,6 +7,9 @@ export default {
     activeCount: '{count} 个有效订阅',
     daily: '每日',
     weekly: '每周',
+    shared: '共享',
+    syncing: '同步中',
+    sharedUnavailable: '额度状态暂不可用',
     monthly: '每月',
     daysRemaining: '剩余 {days} 天',
     expired: '已过期',
@@ -168,7 +171,9 @@ export default {
     sharedBorrowed: '借用 {amount}',
     sharedAllowed: '当前可用',
     sharedLimited: '当前受限',
-    sharedResetIn: '{time} 后刷新'
+    sharedResetIn: '{time} 后刷新',
+    sharedSyncing: '官方额度同步中',
+    sharedUnavailable: '额度状态暂不可用，已隐藏可能冲突的周限额。'
   },
 
   // Onboarding Tour

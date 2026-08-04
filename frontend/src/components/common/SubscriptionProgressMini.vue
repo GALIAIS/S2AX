@@ -72,6 +72,9 @@
 
               <!-- Progress bars for limited subscriptions -->
               <template v-else>
+                <div v-if="progressError" class="text-[10px] text-amber-600 dark:text-amber-400">
+                  {{ t('subscriptionProgress.sharedUnavailable') }}
+                </div>
                 <div v-if="subscription.group?.daily_limit_usd" class="flex items-center gap-2">
                   <span class="w-8 flex-shrink-0 text-[10px] text-gray-500">{{
                     t('subscriptionProgress.daily')
@@ -100,7 +103,10 @@
                   </span>
                 </div>
 
-                <div v-if="subscription.group?.weekly_limit_usd" class="flex items-center gap-2">
+                <div
+                  v-if="subscription.group?.weekly_limit_usd && !hasSharedQuota(subscription) && !progressLoading && !progressError"
+                  class="flex items-center gap-2"
+                >
                   <span class="w-8 flex-shrink-0 text-[10px] text-gray-500">{{
                     t('subscriptionProgress.weekly')
                   }}</span>
@@ -125,6 +131,25 @@
                     {{
                       formatUsage(subscription.weekly_usage_usd, subscription.group?.weekly_limit_usd)
                     }}
+                  </span>
+                </div>
+
+                <div
+                  v-if="!progressLoading && hasSharedQuota(subscription) && sharedWindow(subscription)"
+                  class="flex items-center gap-2"
+                >
+                  <span class="w-8 flex-shrink-0 text-[10px] text-gray-500">
+                    {{ t('subscriptionProgress.shared') }}
+                  </span>
+                  <div class="h-1.5 min-w-0 flex-1 rounded-full bg-gray-200 dark:bg-dark-600">
+                    <div
+                      class="h-1.5 rounded-full transition-all"
+                      :class="getSharedProgressBarClass(subscription)"
+                      :style="{ width: getSharedProgressWidth(subscription) }"
+                    ></div>
+                  </div>
+                  <span class="w-24 flex-shrink-0 text-right text-[10px] text-gray-500">
+                    {{ sharedUsageForSubscription(subscription) }}
                   </span>
                 </div>
 
@@ -182,7 +207,12 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import { useSubscriptionStore } from '@/stores'
-import type { UserSubscription } from '@/types'
+import subscriptionsAPI from '@/api/subscriptions'
+import type {
+  SharedQuotaUserWindowProgress,
+  SubscriptionProgress,
+  UserSubscription
+} from '@/types'
 
 const { t } = useI18n()
 
@@ -190,6 +220,9 @@ const subscriptionStore = useSubscriptionStore()
 
 const containerRef = ref<HTMLElement | null>(null)
 const tooltipOpen = ref(false)
+const progressLoading = ref(true)
+const progressBySubscription = ref<Record<number, SubscriptionProgress>>({})
+const progressError = ref(false)
 
 // Use store data instead of local state
 const activeSubscriptions = computed(() => subscriptionStore.activeSubscriptions)
@@ -209,21 +242,76 @@ function getMaxUsagePercentage(sub: UserSubscription): number {
   if (sub.group?.daily_limit_usd) {
     percentages.push(((sub.daily_usage_usd || 0) / sub.group.daily_limit_usd) * 100)
   }
-  if (sub.group?.weekly_limit_usd) {
+  if (sub.group?.weekly_limit_usd && !hasSharedQuota(sub)) {
     percentages.push(((sub.weekly_usage_usd || 0) / sub.group.weekly_limit_usd) * 100)
   }
   if (sub.group?.monthly_limit_usd) {
     percentages.push(((sub.monthly_usage_usd || 0) / sub.group.monthly_limit_usd) * 100)
+  }
+  const shared = sharedWindow(sub)
+  if (shared && sharedDataReady(shared)) {
+    const maximum = sharedMaximum(shared)
+    if (maximum > 0) percentages.push((sharedUsed(shared) / maximum) * 100)
   }
   return percentages.length > 0 ? Math.max(...percentages) : 0
 }
 
 function isUnlimited(sub: UserSubscription): boolean {
   return (
+    !progressLoading.value &&
     !sub.group?.daily_limit_usd &&
     !sub.group?.weekly_limit_usd &&
-    !sub.group?.monthly_limit_usd
+    !sub.group?.monthly_limit_usd &&
+    !hasSharedQuota(sub)
   )
+}
+
+function sharedWindow(sub: UserSubscription): SharedQuotaUserWindowProgress | undefined {
+  const windows = progressBySubscription.value[sub.id]?.shared?.windows || []
+  return windows.find(window => window.key === 'long') || windows[0]
+}
+
+function hasSharedQuota(sub: UserSubscription): boolean {
+  return progressBySubscription.value[sub.id]?.shared?.enabled === true
+}
+
+function isOfficialSharedWindow(window: SharedQuotaUserWindowProgress): boolean {
+  return window.capacity_mode === 'official_percent'
+}
+
+function sharedDataReady(window: SharedQuotaUserWindowProgress): boolean {
+  return !isOfficialSharedWindow(window) || window.official_data_available === true
+}
+
+function sharedUsed(window: SharedQuotaUserWindowProgress): number {
+  return isOfficialSharedWindow(window) ? window.used_percent || 0 : window.used_usd
+}
+
+function sharedMaximum(window: SharedQuotaUserWindowProgress): number {
+  return isOfficialSharedWindow(window) ? window.maximum_percent || 0 : window.maximum_usd
+}
+
+function sharedUsage(window: SharedQuotaUserWindowProgress): string {
+  if (!sharedDataReady(window)) return t('subscriptionProgress.syncing')
+  if (isOfficialSharedWindow(window)) {
+    return `${(window.used_percent || 0).toFixed(2)}%/${(window.maximum_percent || 0).toFixed(2)}%`
+  }
+  return formatUsage(window.used_usd, window.maximum_usd)
+}
+
+function getSharedProgressBarClass(sub: UserSubscription): string {
+  const window = sharedWindow(sub)
+  return window ? getProgressBarClass(sharedUsed(window), sharedMaximum(window)) : 'bg-gray-400'
+}
+
+function getSharedProgressWidth(sub: UserSubscription): string {
+  const window = sharedWindow(sub)
+  return window ? getProgressWidth(sharedUsed(window), sharedMaximum(window)) : '0%'
+}
+
+function sharedUsageForSubscription(sub: UserSubscription): string {
+  const window = sharedWindow(sub)
+  return window ? sharedUsage(window) : t('subscriptionProgress.syncing')
 }
 
 function getProgressDotClass(sub: UserSubscription): string {
@@ -255,6 +343,23 @@ function formatUsage(used: number | undefined, limit: number | null | undefined)
   const usedValue = (used || 0).toFixed(2)
   const limitValue = limit?.toFixed(2) || '∞'
   return `$${usedValue}/$${limitValue}`
+}
+
+async function loadProgress() {
+  progressLoading.value = true
+  try {
+    const progress = await subscriptionsAPI.getSubscriptionsProgress()
+    progressBySubscription.value = Object.fromEntries(
+      progress.map(item => [item.subscription.id, item.progress])
+    )
+    progressError.value = false
+  } catch (error) {
+    progressBySubscription.value = {}
+    progressError.value = true
+    console.error('Failed to load subscription progress in header:', error)
+  } finally {
+    progressLoading.value = false
+  }
 }
 
 function formatDaysRemaining(expiresAt: string): string {
@@ -294,6 +399,7 @@ function handleClickOutside(event: MouseEvent) {
 
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
+  loadProgress()
   // Trigger initial fetch if not already loaded
   // The actual data loading is handled by App.vue globally
   subscriptionStore.fetchActiveSubscriptions().catch((error) => {

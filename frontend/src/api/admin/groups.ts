@@ -492,8 +492,13 @@ export interface UpdateSharedQuotaPoolRequest {
   members: Array<{ user_id: number; weight: number; enabled: boolean }>
 }
 
-export async function getSharedQuota(id: number): Promise<SharedQuotaPoolSnapshot> {
-  const { data } = await apiClient.get<SharedQuotaPoolSnapshot>(`/admin/groups/${id}/shared-quota`)
+export async function getSharedQuota(
+  id: number,
+  options?: { signal?: AbortSignal }
+): Promise<SharedQuotaPoolSnapshot> {
+  const { data } = await apiClient.get<SharedQuotaPoolSnapshot>(`/admin/groups/${id}/shared-quota`, {
+    signal: options?.signal
+  })
   return data
 }
 
