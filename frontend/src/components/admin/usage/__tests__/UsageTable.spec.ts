@@ -26,6 +26,16 @@ const messages: Record<string, string> = {
   'usage.serviceTierPriority': 'Fast',
   'usage.serviceTierFlex': 'Flex',
   'usage.serviceTierStandard': 'Standard',
+  'usage.pricingBasis': 'Pricing basis',
+  'usage.pricingBasisFast': 'Fast unit prices',
+  'usage.pricingBasisFlex': 'Flex unit prices',
+  'usage.pricingBasisStandard': 'Standard unit prices',
+  'usage.groupMultiplier': 'Group rate',
+  'usage.pricingChannel': 'Pricing channel',
+  'usage.billingSubtotal': 'Billing subtotal',
+  'usage.tokenCostFormula': 'Quantity x unit price',
+  'usage.longContextBilling': 'Long-context billing',
+  'usage.cost': 'Cost',
   'usage.speedFast': 'Fast',
   'usage.speedStandard': 'Standard',
   'usage.rate': 'Rate',
@@ -194,7 +204,9 @@ describe('admin UsageTable tooltip', () => {
     const text = wrapper.text()
     expect(text).toContain('Service tier')
     expect(text).toContain('Fast')
-    expect(text).toContain('Rate')
+    expect(text).toContain('Pricing basis')
+    expect(text).toContain('Fast unit prices')
+    expect(text).toContain('Group rate')
     expect(text).toContain('1.00x')
     expect(text).toContain('Account rate')
     expect(text).toContain('User billed')
