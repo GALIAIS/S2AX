@@ -1,4 +1,4 @@
-import type { InvocationArchivePayloadFrame, InvocationArchivePayloadView } from './types'
+import type { InvocationArchivePayloadChunk, InvocationArchivePayloadFrame, InvocationArchivePayloadView } from './types'
 
 export type InvocationArchivePayloadViewMode = 'structured' | 'formatted' | 'raw' | 'repaired'
 export type InvocationArchivePayloadFormat = 'json' | 'ndjson' | 'sse' | 'form' | 'text' | 'base64'
@@ -11,6 +11,12 @@ export interface InvocationArchiveTranscriptEntry {
   metadata: string[]
 }
 
+export interface InvocationArchiveImagePreview {
+  src: string
+  mime_type: string
+  label: string
+}
+
 export interface InvocationArchivePayloadPresentation {
   raw: string
   formatted: string
@@ -20,6 +26,7 @@ export interface InvocationArchivePayloadPresentation {
   canSelectCharset: boolean
   repaired?: string
   transcript: InvocationArchiveTranscriptEntry[]
+  images: InvocationArchiveImagePreview[]
   warnings: InvocationArchivePayloadWarning[]
 }
 
@@ -27,6 +34,8 @@ export const invocationArchivePayloadCharsets = ['auto', 'utf-8', 'gb18030', 'bi
 
 const FORMAT_LIMIT_BYTES = 2 * 1024 * 1024
 const TRANSCRIPT_ENTRY_LIMIT = 80
+const IMAGE_PREVIEW_LIMIT_BYTES = 12 * 1024 * 1024
+const IMAGE_PREVIEW_LIMIT = 8
 
 export function presentInvocationArchivePayload(
   payload: InvocationArchivePayloadView,
@@ -40,16 +49,23 @@ export function presentInvocationArchivePayload(
   if (payload.frames_truncated) warnings.push('frame_metadata_limit')
   let text = raw
   let charset = 'utf-8'
+  let bytes: Uint8Array | undefined
+  let images: InvocationArchiveImagePreview[] = []
 
   if (isBase64) {
-    const bytes = decodeBase64(raw)
+    bytes = decodeBase64(raw)
     if (!bytes) return unavailableTextPresentation(raw, 'invalid_base64', frameTranscript.entries, warnings)
     const decoded = decodeText(bytes, decoderCandidates(payload.content_type, charsetChoice))
-    if (!decoded) return unavailableTextPresentation(raw, 'charset_failed', frameTranscript.entries, warnings)
-    if (!isLikelyText(decoded.value)) return unavailableTextPresentation(raw, 'binary', frameTranscript.entries, warnings)
+    images = extractImagePreviews(payload, bytes, decoded?.value || '')
+    if (!decoded) return unavailableTextPresentation(raw, 'charset_failed', frameTranscript.entries, warnings, images)
+    if (!isLikelyText(decoded.value)) return unavailableTextPresentation(raw, 'binary', frameTranscript.entries, warnings, images)
     text = decoded.value
     charset = decoded.charset
+  } else if (isImageContentType(payload.content_type) || isMultipartContentType(payload.content_type)) {
+    bytes = payloadBytes(payload)
   }
+
+  if (images.length === 0) images = extractImagePreviews(payload, bytes, text)
 
   if (text.includes('\uFFFD')) warnings.push('replacement_character')
   const repaired = text.includes('\uFFFD') ? undefined : recoverSingleByteMojibake(text)
@@ -65,6 +81,7 @@ export function presentInvocationArchivePayload(
       canSelectCharset: isBase64,
       repaired,
       transcript: frameTranscript.entries,
+      images,
       warnings,
     }
   }
@@ -80,6 +97,7 @@ export function presentInvocationArchivePayload(
     canSelectCharset: isBase64,
     repaired,
     transcript: frameTranscript.entries.length > 0 ? frameTranscript.entries : formatted.transcript,
+    images,
     warnings,
   }
 }
@@ -89,6 +107,7 @@ function unavailableTextPresentation(
   warning: InvocationArchivePayloadWarning,
   transcript: InvocationArchiveTranscriptEntry[] = [],
   warnings: InvocationArchivePayloadWarning[] = [],
+  images: InvocationArchiveImagePreview[] = [],
 ): InvocationArchivePayloadPresentation {
   return {
     raw,
@@ -98,8 +117,176 @@ function unavailableTextPresentation(
     canFormat: false,
     canSelectCharset: true,
     transcript,
+    images,
     warnings: [...warnings, warning],
   }
+}
+
+export function mergeInvocationArchivePayloadChunks(chunks: InvocationArchivePayloadChunk[]): InvocationArchivePayloadChunk {
+  if (chunks.length === 0) throw new Error('cannot merge an empty payload')
+  const first = chunks[0]
+  const payloads = chunks.map((chunk) => chunk.payload)
+  const encoding = first.payload.encoding?.toLowerCase()
+  const data = encoding === 'base64'
+    ? encodeBase64(concatBytes(payloads.map((payload) => decodeBase64(payload.data || '') || new Uint8Array())))
+    : payloads.map((payload) => payload.data || '').join('')
+  const frames = payloads.flatMap((payload) => payload.frames || [])
+    .filter((frame, index, all) => all.findIndex((candidate) => candidate.sequence === frame.sequence && candidate.offset === frame.offset) === index)
+    .sort((left, right) => left.offset - right.offset)
+  const last = chunks[chunks.length - 1]
+  const loadedBytes = payloads.reduce((total, payload) => total + (payload.loaded_bytes ?? 0), 0)
+  return {
+    ...last,
+    next_offset: last.next_offset,
+    payload: {
+      ...first.payload,
+      data,
+      offset: 0,
+      loaded_bytes: loadedBytes,
+      complete: last.payload.complete,
+      frames,
+      frames_truncated: payloads.some((payload) => payload.frames_truncated),
+    },
+  }
+}
+
+function concatBytes(parts: Uint8Array[]): Uint8Array {
+  const total = parts.reduce((size, part) => size + part.byteLength, 0)
+  const result = new Uint8Array(total)
+  let offset = 0
+  for (const part of parts) {
+    result.set(part, offset)
+    offset += part.byteLength
+  }
+  return result
+}
+
+function extractImagePreviews(payload: InvocationArchivePayloadView, bytes?: Uint8Array, text = ''): InvocationArchiveImagePreview[] {
+  if (!payload.complete || payload.truncated) return []
+  const result: InvocationArchiveImagePreview[] = []
+  const seen = new Set<string>()
+  const addBytes = (source: Uint8Array, declaredMime: string, label: string) => {
+    if (result.length >= IMAGE_PREVIEW_LIMIT || source.byteLength === 0 || source.byteLength > IMAGE_PREVIEW_LIMIT_BYTES) return
+    const mimeType = imageMimeType(declaredMime, source)
+    if (!mimeType) return
+    const src = `data:${mimeType};base64,${encodeBase64(source)}`
+    if (seen.has(src)) return
+    seen.add(src)
+    result.push({ src, mime_type: mimeType, label: label || `image_${result.length + 1}` })
+  }
+  const addDataURL = (value: string, label: string) => {
+    const match = value.match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i)
+    if (!match) return
+    const decoded = decodeBase64(match[2])
+    if (decoded) addBytes(decoded, match[1], label)
+  }
+
+  if (bytes && (isImageContentType(payload.content_type) || Boolean(imageMimeType('', bytes)))) addBytes(bytes, mediaType(payload.content_type), 'image')
+  if (bytes && isMultipartContentType(payload.content_type)) extractMultipartImages(bytes, payload.content_type, addBytes)
+  if (text) {
+    addDataURL(text.trim(), 'image')
+    const parsed = parseJSON(text)
+    if (parsed.ok) visitImageValue(parsed.value, 'image', addBytes, addDataURL)
+  }
+  return result
+}
+
+function visitImageValue(
+  value: unknown,
+  label: string,
+  addBytes: (bytes: Uint8Array, declaredMime: string, label: string) => void,
+  addDataURL: (value: string, label: string) => void,
+  depth = 0,
+): void {
+  if (depth > 6) return
+  if (typeof value === 'string') {
+    addDataURL(value.trim(), label)
+    return
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => visitImageValue(item, `${label}_${index + 1}`, addBytes, addDataURL, depth + 1))
+    return
+  }
+  if (!isRecord(value)) return
+  const mimeType = stringValue(firstDefined(value.mime_type, value.mimeType, value.content_type, value.media_type))
+  for (const key of ['url', 'src', 'image_url']) {
+    const candidate = value[key]
+    if (typeof candidate === 'string') addDataURL(candidate.trim(), label)
+    else if (isRecord(candidate)) visitImageValue(candidate, label, addBytes, addDataURL, depth + 1)
+  }
+  for (const key of ['b64_json', 'image_base64', 'base64']) {
+    const candidate = value[key]
+    if (typeof candidate !== 'string' || candidate.length < 16) continue
+    const decoded = decodeBase64(candidate)
+    if (decoded) addBytes(decoded, mimeType, label)
+  }
+  for (const [key, candidate] of Object.entries(value)) {
+    if (key === 'b64_json' || key === 'image_base64' || key === 'base64' || key === 'url' || key === 'src' || key === 'image_url') continue
+    if (typeof candidate === 'object') visitImageValue(candidate, key, addBytes, addDataURL, depth + 1)
+  }
+}
+
+function extractMultipartImages(
+  bytes: Uint8Array,
+  contentType: string,
+  addBytes: (bytes: Uint8Array, declaredMime: string, label: string) => void,
+): void {
+  const boundary = contentType.match(/(?:^|;)\s*boundary\s*=\s*(?:"([^"]+)"|([^;\s]+))/i)?.[1]
+    || contentType.match(/(?:^|;)\s*boundary\s*=\s*(?:"([^"]+)"|([^;\s]+))/i)?.[2]
+  if (!boundary) return
+  const marker = new TextEncoder().encode(`--${boundary}`)
+  const headerSeparator = new Uint8Array([13, 10, 13, 10])
+  const lineBreak = new Uint8Array([13, 10])
+  let cursor = 0
+  while (cursor < bytes.length) {
+    const markerStart = indexOfBytes(bytes, marker, cursor)
+    if (markerStart < 0) return
+    let partStart = markerStart + marker.length
+    if (bytes[partStart] === 45 && bytes[partStart + 1] === 45) return
+    if (matchesBytes(bytes, lineBreak, partStart)) partStart += lineBreak.length
+    const headerEnd = indexOfBytes(bytes, headerSeparator, partStart)
+    if (headerEnd < 0) return
+    const bodyStart = headerEnd + headerSeparator.length
+    const nextMarker = indexOfBytes(bytes, marker, bodyStart)
+    if (nextMarker < 0) return
+    let bodyEnd = nextMarker
+    if (bodyEnd >= 2 && bytes[bodyEnd - 2] === 13 && bytes[bodyEnd - 1] === 10) bodyEnd -= 2
+    const headers = new TextDecoder('latin1').decode(bytes.slice(partStart, headerEnd))
+    const partType = headers.match(/^content-type:\s*([^\r\n]+)/im)?.[1]?.trim() || ''
+    if (isImageContentType(partType)) {
+      const label = headers.match(/(?:^|;)\s*filename\*?\s*=\s*(?:"([^"]+)"|([^;\r\n]+))/im)?.[1]
+        || headers.match(/(?:^|;)\s*filename\*?\s*=\s*(?:"([^"]+)"|([^;\r\n]+))/im)?.[2]
+        || 'image'
+      addBytes(bytes.slice(bodyStart, bodyEnd), mediaType(partType), label.trim())
+    }
+    cursor = nextMarker
+  }
+}
+
+function indexOfBytes(source: Uint8Array, needle: Uint8Array, from: number): number {
+  outer: for (let index = from; index <= source.length - needle.length; index++) {
+    for (let offset = 0; offset < needle.length; offset++) if (source[index + offset] !== needle[offset]) continue outer
+    return index
+  }
+  return -1
+}
+
+function matchesBytes(source: Uint8Array, needle: Uint8Array, offset: number): boolean {
+  return offset >= 0 && offset + needle.length <= source.length && needle.every((byte, index) => source[offset + index] === byte)
+}
+
+function isImageContentType(contentType: string): boolean { return mediaType(contentType).startsWith('image/') }
+function isMultipartContentType(contentType: string): boolean { return ['multipart/form-data', 'multipart/mixed'].includes(mediaType(contentType)) }
+function mediaType(contentType: string): string { return contentType.split(';', 1)[0].trim().toLowerCase() }
+
+function imageMimeType(declared: string, bytes: Uint8Array): string | undefined {
+  const normalized = mediaType(declared)
+  if (normalized.startsWith('image/')) return normalized
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'image/png'
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg'
+  if (bytes.length >= 6 && new TextDecoder('ascii').decode(bytes.slice(0, 6)) === 'GIF89a') return 'image/gif'
+  if (bytes.length >= 12 && new TextDecoder('ascii').decode(bytes.slice(0, 4)) === 'RIFF' && new TextDecoder('ascii').decode(bytes.slice(8, 12)) === 'WEBP') return 'image/webp'
+  return undefined
 }
 
 function decodeBase64(value: string): Uint8Array | undefined {

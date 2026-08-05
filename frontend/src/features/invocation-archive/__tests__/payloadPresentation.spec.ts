@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { presentInvocationArchivePayload } from '../payloadPresentation'
+import { mergeInvocationArchivePayloadChunks, presentInvocationArchivePayload } from '../payloadPresentation'
+import type { InvocationArchivePayloadChunk } from '../types'
 import type { InvocationArchivePayloadView } from '../types'
 
 function payload(overrides: Partial<InvocationArchivePayloadView> = {}): InvocationArchivePayloadView {
@@ -165,5 +166,58 @@ describe('Invocation Archive payload presentation', () => {
     expect(presentation.transcript).toEqual(expect.arrayContaining([
       expect.objectContaining({ role: 'assistant', content: 'hello', metadata: expect.arrayContaining(['choice: 0']) }),
     ]))
+  })
+
+  it('previews raw image responses without sending the archived bytes anywhere else', () => {
+    const pngHeader = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    const binary = String.fromCharCode(...pngHeader)
+    const presentation = presentInvocationArchivePayload(payload({
+      content_type: 'image/png',
+      encoding: 'base64',
+      data: btoa(binary),
+      total_bytes: pngHeader.byteLength,
+      captured_bytes: pngHeader.byteLength,
+      complete: true,
+    }))
+
+    expect(presentation.images).toHaveLength(1)
+    expect(presentation.images[0]).toMatchObject({ mime_type: 'image/png' })
+    expect(presentation.images[0].src).toMatch(/^data:image\/png;base64,/)
+  })
+
+  it('extracts image parts from a complete multipart request', () => {
+    const boundary = 'archive-boundary'
+    const binary = String.fromCharCode(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)
+    const body = [
+      `--${boundary}\r\nContent-Disposition: form-data; name="prompt"\r\n\r\nhello\r\n`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="input.png"\r\nContent-Type: image/png\r\n\r\n${binary}\r\n`,
+      `--${boundary}--\r\n`,
+    ].join('')
+    const presentation = presentInvocationArchivePayload(payload({
+      content_type: `multipart/form-data; boundary="${boundary}"`,
+      encoding: 'base64',
+      data: btoa(body),
+      total_bytes: body.length,
+      captured_bytes: body.length,
+      complete: true,
+    }))
+
+    expect(presentation.images).toMatchObject([{ label: 'input.png', mime_type: 'image/png' }])
+  })
+
+  it('merges independently loaded Base64 segments before previewing them', () => {
+    const first: InvocationArchivePayloadChunk = {
+      record_id: 1, slot: 'response', next_offset: 4,
+      payload: payload({ encoding: 'base64', data: btoa('imag'), total_bytes: 8, captured_bytes: 8, offset: 0, loaded_bytes: 4, complete: false }),
+    }
+    const second: InvocationArchivePayloadChunk = {
+      record_id: 1, slot: 'response', next_offset: 8,
+      payload: payload({ encoding: 'base64', data: btoa('e-ok'), total_bytes: 8, captured_bytes: 8, offset: 4, loaded_bytes: 4, complete: true }),
+    }
+
+    const merged = mergeInvocationArchivePayloadChunks([first, second])
+    expect(merged.payload.data).toBe(btoa('image-ok'))
+    expect(merged.payload.loaded_bytes).toBe(8)
+    expect(merged.payload.complete).toBe(true)
   })
 })

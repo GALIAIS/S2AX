@@ -118,6 +118,9 @@ func TestMediaTypeRetainsDeclaredCharsetForPayloadReview(t *testing.T) {
 	if got := mediaType("Application/JSON; Charset=GB18030"); got != "application/json; charset=gb18030" {
 		t.Fatalf("unexpected normalized content type: %q", got)
 	}
+	if got := mediaType(`multipart/form-data; boundary="ArchiveBoundary"`); got != "multipart/form-data; boundary=ArchiveBoundary" {
+		t.Fatalf("multipart boundary must remain available for payload review: %q", got)
+	}
 }
 
 func TestConfigAcceptsGatewaySizedArchiveCaptureLimit(t *testing.T) {
@@ -328,6 +331,44 @@ func TestGatewayMiddlewareCapturesBoundedRequestAndResponseWithoutChangingHandle
 		}
 	default:
 		t.Fatal("gateway response did not enqueue archive candidate")
+	}
+}
+
+func TestGatewayMiddlewareDrainsUnconsumedLengthDelimitedRequest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	archive := NewService(nil, nil, nil)
+	config := DefaultConfig()
+	config.DefaultMode = ModeFull
+	config.MaxRequestBytes = 1024
+	config.MaxResponseBytes = 1024
+	archive.snapshot.Store(&config)
+	archive.accepting = true
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{ID: 34, UserID: 12, Name: "archive-drain-test"})
+	})
+	router.Use(archive.GatewayMiddleware())
+	router.POST("/v1/partial", func(c *gin.Context) {
+		prefix := make([]byte, 1)
+		_, _ = c.Request.Body.Read(prefix)
+		c.Status(http.StatusNoContent)
+	})
+
+	requestBody := []byte(`{"image":"complete-request-body"}`)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/partial", bytes.NewReader(requestBody))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+	requireStatus(t, recorder.Code, http.StatusNoContent)
+
+	select {
+	case candidate := <-archive.queue:
+		if string(candidate.request.bytes) != string(requestBody) || candidate.request.total != int64(len(requestBody)) || candidate.request.truncated {
+			t.Fatalf("request archive did not drain the complete body: captured=%q total=%d truncated=%t", candidate.request.bytes, candidate.request.total, candidate.request.truncated)
+		}
+	default:
+		t.Fatal("partial request did not enqueue archive candidate")
 	}
 }
 

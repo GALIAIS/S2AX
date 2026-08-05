@@ -41,7 +41,7 @@ export default {
     detail: {
       title: '归档记录 #{id}', createdAt: '创建时间', expiresAt: '过期时间', outcome: '执行结果', identity: '调用主体', group: '分组', route: '路由', model: '模型', requestId: '请求 ID', client: '客户端',
       payloads: '加密载荷', payloadsHint: '正文不会随元数据加载。大载荷会按段读取，明文仅保留在本对话框内存中，关闭后立即清除；展示切换和字符集预览不会修改归档原文。', directViewDisabled: '当前策略未启用直接查看。请在“归档策略”中启用后保存；启用本身也需要二次验证。', reveal: '验证并查看载荷', revealHint: '本次查看会记录管理员、时间、结果和客户端信息。可在结构化、美化和原始载荷间切换。',
-      viewMode: '展示模式', structured: '结构化', formatted: '美化', repaired: '修复预览', raw: '原始', charset: '文本编码', copyCurrent: '复制当前视图', copyRaw: '复制原始载荷', copyLoaded: '复制已加载视图', copyRawLoaded: '复制已加载原文', previousSegment: '上一段', nextSegment: '下一段', loadedRange: '已加载 {from}–{to} / {total}',
+      viewMode: '展示模式', structured: '结构化', formatted: '美化', repaired: '修复预览', raw: '原始', charset: '文本编码', copyCurrent: '复制当前视图', copyRaw: '复制原始载荷', copyLoaded: '复制已加载视图', copyRawLoaded: '复制已加载原文', previousSegment: '上一段', nextSegment: '下一段', loadAll: '加载全部已捕获', loadingAll: '正在加载全部…', loadedRange: '已加载 {from}–{to} / {total}',
       formats: { json: 'JSON', ndjson: 'JSON Lines', sse: 'SSE 事件流', form: '表单字段', text: '文本', base64: 'Base64' },
       encodings: { utf8: 'UTF-8', base64: 'Base64 → {charset}' },
       charsets: { auto: '自动（声明字符集 / UTF-8）', utf_8: 'UTF-8', gb18030: 'GB18030（简体中文）', big5: 'Big5（繁体中文）', shift_jis: 'Shift_JIS（日文）', windows_1252: 'Windows-1252', utf_16le: 'UTF-16 LE', utf_16be: 'UTF-16 BE' },

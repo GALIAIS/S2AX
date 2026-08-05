@@ -373,10 +373,11 @@
                   <p v-if="payload.payload.available" class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ payloadSegmentLabel(payload.payload) }}</p>
                 </div>
                 <div v-if="payload.payload.available" class="flex flex-wrap items-center gap-2">
-                  <button type="button" class="btn btn-secondary btn-sm" @click="copyText(payload.display)">{{ payload.payload.complete ? t('admin.invocationArchive.detail.copyCurrent') : t('admin.invocationArchive.detail.copyLoaded') }}</button>
-                  <button v-if="payload.mode !== 'raw'" type="button" class="btn btn-ghost btn-sm" @click="copyText(payload.presentation.raw)">{{ payload.payload.complete ? t('admin.invocationArchive.detail.copyRaw') : t('admin.invocationArchive.detail.copyRawLoaded') }}</button>
+                  <button type="button" class="btn btn-secondary btn-sm" @click="copyText(payload.display)">{{ payloadFullyCaptured(payload.payload) ? t('admin.invocationArchive.detail.copyCurrent') : t('admin.invocationArchive.detail.copyLoaded') }}</button>
+                  <button v-if="payload.mode !== 'raw'" type="button" class="btn btn-ghost btn-sm" @click="copyText(payload.presentation.raw)">{{ payloadFullyCaptured(payload.payload) ? t('admin.invocationArchive.detail.copyRaw') : t('admin.invocationArchive.detail.copyRawLoaded') }}</button>
                   <button v-if="hasPreviousPayload(payload.slot)" type="button" class="btn btn-ghost btn-sm" :disabled="payloadLoading[payload.slot]" @click="loadPreviousPayload(payload.slot)">{{ t('admin.invocationArchive.detail.previousSegment') }}</button>
                   <button v-if="!payload.payload.complete" type="button" class="btn btn-ghost btn-sm" :disabled="payloadLoading[payload.slot]" @click="loadNextPayload(payload.slot)">{{ payloadLoading[payload.slot] ? t('common.loading') : t('admin.invocationArchive.detail.nextSegment') }}</button>
+                  <button v-if="!payload.payload.complete" type="button" class="btn btn-primary btn-sm" :disabled="payloadLoading[payload.slot]" @click="loadAllPayload(payload.slot)">{{ payloadFullLoading[payload.slot] ? t('admin.invocationArchive.detail.loadingAll') : t('admin.invocationArchive.detail.loadAll') }}</button>
                 </div>
               </div>
               <template v-if="payload.payload.available">
@@ -398,6 +399,14 @@
                   <p v-for="warning in payload.presentation.warnings" :key="warning" role="status" class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200">{{ payloadWarningLabel(warning) }}</p>
                 </div>
                 <div class="archive-payload-viewer bg-gray-50 dark:bg-dark-900/70">
+                  <div v-if="payload.presentation.images.length" class="grid gap-3 border-b border-gray-200 p-4 dark:border-dark-700 sm:grid-cols-2">
+                    <figure v-for="image in payload.presentation.images" :key="`${image.label}:${image.src.slice(0, 32)}`" class="overflow-hidden border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800/70">
+                      <div class="flex min-h-32 items-center justify-center bg-gray-100 p-2 dark:bg-dark-900">
+                        <img :src="image.src" :alt="image.label" loading="lazy" class="max-h-[28rem] max-w-full object-contain" />
+                      </div>
+                      <figcaption class="border-t border-gray-200 px-3 py-2 text-xs text-gray-500 dark:border-dark-700 dark:text-dark-300">{{ image.label }} · {{ image.mime_type }}</figcaption>
+                    </figure>
+                  </div>
                   <div v-if="payload.mode === 'structured' && payload.presentation.transcript.length" class="space-y-3 p-4">
                     <article v-for="(entry, index) in payload.presentation.transcript" :key="`${entry.role}:${entry.title || ''}:${index}`" class="border border-gray-200 bg-white p-3 dark:border-dark-700 dark:bg-dark-800/70">
                       <div class="flex flex-wrap items-center gap-2 text-xs">
@@ -469,6 +478,7 @@ import { extractApiErrorCode, extractApiErrorMessage } from '@/utils/apiError'
 import invocationArchiveAPI from './api'
 import {
   invocationArchivePayloadCharsets,
+  mergeInvocationArchivePayloadChunks,
   presentInvocationArchivePayload,
   type InvocationArchivePayloadPresentation,
   type InvocationArchivePayloadViewMode,
@@ -524,10 +534,12 @@ const detailOpen = ref(false)
 const activeRecord = ref<InvocationArchiveRecord | null>(null)
 const accessLogs = ref<InvocationArchiveAccessLog[]>([])
 const payloadChunks = reactive<Record<ArchivePayloadSlot, InvocationArchivePayloadChunk | null>>({ request: null, response: null })
+const payloadSegments = reactive<Record<ArchivePayloadSlot, InvocationArchivePayloadChunk[]>>({ request: [], response: [] })
 const payloadHistory = reactive<Record<ArchivePayloadSlot, number[]>>({ request: [], response: [] })
 const payloadViewModes = reactive<Record<ArchivePayloadSlot, InvocationArchivePayloadViewMode>>({ request: 'formatted', response: 'formatted' })
 const payloadCharsets = reactive<Record<ArchivePayloadSlot, string>>({ request: 'auto', response: 'auto' })
 const payloadLoading = reactive<Record<ArchivePayloadSlot, boolean>>({ request: false, response: false })
+const payloadFullLoading = reactive<Record<ArchivePayloadSlot, boolean>>({ request: false, response: false })
 const cleanupStrategy = ref<'expired' | 'all' | null>(null)
 const loading = reactive({ config: false, runtime: false, records: false, saving: false, subjects: false, detail: false, revealing: false, deleting: false, cleanup: false })
 const errors = reactive({ config: '', runtime: '', records: '', subjects: '' })
@@ -844,6 +856,8 @@ async function revealPayloads() {
     if (!result) return
     payloadChunks.request = result.request
     payloadChunks.response = result.response
+    payloadSegments.request.splice(0, payloadSegments.request.length, result.request)
+    payloadSegments.response.splice(0, payloadSegments.response.length, result.response)
     payloadHistory.request.splice(0)
     payloadHistory.response.splice(0)
     resetPayloadReview({ request: result.request.payload, response: result.response.payload })
@@ -857,10 +871,14 @@ async function revealPayloads() {
 function clearPayloadChunks() {
   payloadChunks.request = null
   payloadChunks.response = null
+  payloadSegments.request.splice(0)
+  payloadSegments.response.splice(0)
   payloadHistory.request.splice(0)
   payloadHistory.response.splice(0)
   payloadLoading.request = false
   payloadLoading.response = false
+  payloadFullLoading.request = false
+  payloadFullLoading.response = false
 }
 async function loadPayloadSegment(slot: ArchivePayloadSlot, offset: number): Promise<boolean> {
   if (!activeRecord.value || payloadLoading[slot] || loading.revealing) return false
@@ -869,12 +887,42 @@ async function loadPayloadSegment(slot: ArchivePayloadSlot, offset: number): Pro
     const chunk = await runSensitive(() => invocationArchiveAPI.revealPayloadChunk(activeRecord.value!.id, slot, offset))
     if (!chunk) return false
     payloadChunks[slot] = chunk
+    if (!payloadSegments[slot].some((segment) => (segment.payload.offset || 0) === (chunk.payload.offset || 0))) payloadSegments[slot].push(chunk)
     return true
   } catch (error) {
     appStore.showError(errorMessage(error, 'admin.invocationArchive.errors.reveal'))
     return false
   } finally {
     payloadLoading[slot] = false
+  }
+}
+async function loadAllPayload(slot: ArchivePayloadSlot) {
+  const current = payloadChunks[slot]
+  if (!activeRecord.value || !current || current.payload.complete || payloadFullLoading[slot] || loading.revealing) return
+  payloadFullLoading[slot] = true
+  payloadLoading[slot] = true
+  try {
+    const chunks = await runSensitive(async () => {
+      const loaded: InvocationArchivePayloadChunk[] = []
+      let nextOffset = 0
+      while (true) {
+        const chunk = await invocationArchiveAPI.revealPayloadChunk(activeRecord.value!.id, slot, nextOffset)
+        loaded.push(chunk)
+        if (chunk.payload.complete) break
+        if (chunk.next_offset <= nextOffset) throw new Error('archive payload segment made no progress')
+        nextOffset = chunk.next_offset
+      }
+      return loaded
+    })
+    if (!chunks || chunks.length === 0) return
+    payloadSegments[slot].splice(0, payloadSegments[slot].length, ...chunks)
+    payloadHistory[slot].splice(0)
+    payloadChunks[slot] = mergeInvocationArchivePayloadChunks(chunks)
+  } catch (error) {
+    appStore.showError(errorMessage(error, 'admin.invocationArchive.errors.reveal'))
+  } finally {
+    payloadLoading[slot] = false
+    payloadFullLoading[slot] = false
   }
 }
 function hasPreviousPayload(slot: ArchivePayloadSlot): boolean { return payloadHistory[slot].length > 0 }
@@ -996,6 +1044,9 @@ function payloadDisplayText(payload: InvocationArchivePayloadView, presentation:
   if (mode === 'repaired' && presentation.repaired) return presentation.repaired
   if (mode === 'raw') return presentation.raw
   return presentation.formatted
+}
+function payloadFullyCaptured(payload: InvocationArchivePayloadView): boolean {
+  return Boolean(payload.complete && !payload.truncated && payload.captured_bytes >= payload.total_bytes)
 }
 function resetPayloadReview(value: Partial<Record<ArchivePayloadSlot, InvocationArchivePayloadView>> = {}) {
   for (const slot of ['request', 'response'] as const) {

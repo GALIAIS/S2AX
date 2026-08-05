@@ -399,12 +399,21 @@ func (s *Service) GatewayMiddleware() gin.HandlerFunc {
 		}
 
 		requestCapture := newBoundedCapture(cfg.MaxRequestBytes)
+		var observedRequestBody *observingReadCloser
 		if c.Request != nil && c.Request.Body != nil {
-			c.Request.Body = &observingReadCloser{ReadCloser: c.Request.Body, capture: requestCapture}
+			observedRequestBody = &observingReadCloser{ReadCloser: c.Request.Body, capture: requestCapture}
+			c.Request.Body = observedRequestBody
 		}
 		responseCapture := newBoundedCapture(cfg.MaxResponseBytes)
 		c.Writer = &captureResponseWriter{ResponseWriter: c.Writer, capture: responseCapture}
 		c.Next()
+		// Some handlers validate only a prefix and return without consuming the
+		// remainder. Drain a finite, length-delimited body after the handler so
+		// the archive reflects the complete request without pre-buffering it or
+		// blocking on an unbounded chunked stream.
+		if observedRequestBody != nil && c.Request != nil && c.Request.Body == observedRequestBody && c.Request.ContentLength > 0 {
+			_, _ = io.Copy(requestCapture, observedRequestBody.ReadCloser)
+		}
 		s.enqueueHTTP(c, apiKey, cfg, mode, requestCapture, responseCapture)
 	}
 }
@@ -482,11 +491,18 @@ func mediaType(value string) string {
 	}
 	parsed, parameters, err := mime.ParseMediaType(value)
 	if err == nil {
-		charset := strings.TrimSpace(parameters["charset"])
-		if charset != "" {
-			return trimText(strings.ToLower(parsed)+"; charset="+strings.ToLower(charset), 255)
+		normalized := make(map[string]string, len(parameters))
+		for key, parameter := range parameters {
+			key = strings.ToLower(strings.TrimSpace(key))
+			parameter = strings.TrimSpace(parameter)
+			if key == "charset" {
+				parameter = strings.ToLower(parameter)
+			}
+			normalized[key] = parameter
 		}
-		return trimText(strings.ToLower(parsed), 255)
+		// Keep parameters such as multipart boundaries. Dropping them makes an
+		// archived multipart image impossible to parse back into a preview.
+		return trimText(mime.FormatMediaType(strings.ToLower(parsed), normalized), 255)
 	}
 	return trimText(strings.ToLower(value), 255)
 }
