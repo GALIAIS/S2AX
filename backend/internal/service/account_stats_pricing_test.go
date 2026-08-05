@@ -242,8 +242,9 @@ func TestCalculateStatsCost_TokenBilling_WithImageOutput(t *testing.T) {
 	}
 	result := calculateStatsCost(pricing, tokens, 1)
 	require.NotNil(t, result)
-	// 100*0.001 + 50*0.002 + 10*0.01 = 0.1 + 0.1 + 0.1 = 0.3
-	require.InDelta(t, 0.3, *result, 1e-12)
+	// OutputTokens includes image output tokens; subtract them before applying
+	// the text output price: 100*0.001 + 40*0.002 + 10*0.01 = 0.28.
+	require.InDelta(t, 0.28, *result, 1e-12)
 }
 
 func TestCalculateStatsCost_TokenBilling_PartialPricesNil(t *testing.T) {
@@ -271,8 +272,9 @@ func TestCalculateStatsCost_TokenBilling_AllTokensZero(t *testing.T) {
 	}
 	tokens := UsageTokens{} // all zeros
 	result := calculateStatsCost(pricing, tokens, 1)
-	// totalCost == 0 → returns nil (does not override, falls back to default formula)
-	require.Nil(t, result)
+	// Explicit zero-token pricing still overrides the fallback formula.
+	require.NotNil(t, result)
+	require.Zero(t, *result)
 }
 
 func TestCalculateStatsCost_PerRequestBilling(t *testing.T) {
@@ -302,8 +304,9 @@ func TestCalculateStatsCost_PerRequestBilling_PriceZero(t *testing.T) {
 		PerRequestPrice: testPtrFloat64(0),
 	}
 	result := calculateStatsCost(pricing, UsageTokens{}, 1)
-	// price == 0 → condition *pricing.PerRequestPrice > 0 is false → returns nil
-	require.Nil(t, result)
+	// An explicit zero price is a valid free tier and must not fall back.
+	require.NotNil(t, result)
+	require.Zero(t, *result)
 }
 
 func TestCalculateStatsCost_ImageBilling(t *testing.T) {
@@ -315,6 +318,35 @@ func TestCalculateStatsCost_ImageBilling(t *testing.T) {
 	require.NotNil(t, result)
 	// 0.10 * 2 = 0.20
 	require.InDelta(t, 0.20, *result, 1e-12)
+}
+
+func TestCalculateStatsCost_PerRequestBilling_UsesSizeTierInterval(t *testing.T) {
+	pricing := &ChannelModelPricing{
+		BillingMode:     BillingModePerRequest,
+		PerRequestPrice: testPtrFloat64(0.10),
+		Intervals: []PricingInterval{{
+			TierLabel:       "2K",
+			PerRequestPrice: testPtrFloat64(0.25),
+		}},
+	}
+	result := calculateStatsCost(pricing, UsageTokens{}, 2, "", "2K")
+	require.NotNil(t, result)
+	require.InDelta(t, 0.50, *result, 1e-12)
+}
+
+func TestCalculateStatsCost_PerRequestBilling_UsesContextIntervalBeforeDefault(t *testing.T) {
+	pricing := &ChannelModelPricing{
+		BillingMode:     BillingModeImage,
+		PerRequestPrice: testPtrFloat64(0.10),
+		Intervals: []PricingInterval{{
+			MinTokens:       100,
+			MaxTokens:       testPtrInt(200),
+			PerRequestPrice: testPtrFloat64(0.25),
+		}},
+	}
+	result := calculateStatsCost(pricing, UsageTokens{InputTokens: 150}, 2)
+	require.NotNil(t, result)
+	require.InDelta(t, 0.50, *result, 1e-12)
 }
 
 func TestCalculateStatsCost_ImageBilling_PriceNil(t *testing.T) {
@@ -339,6 +371,34 @@ func TestCalculateStatsCost_DefaultBillingMode_FallsToToken(t *testing.T) {
 	result := calculateStatsCost(pricing, tokens, 1)
 	require.NotNil(t, result)
 	require.InDelta(t, 0.2, *result, 1e-12)
+}
+
+func TestCalculateTokenStatsCost_IntervalUsesContextTokens(t *testing.T) {
+	pricing := &ChannelModelPricing{
+		InputPrice:  testPtrFloat64(0.001),
+		OutputPrice: testPtrFloat64(0.003),
+		Intervals: []PricingInterval{{
+			MinTokens:  100,
+			MaxTokens:  testPtrInt(200),
+			InputPrice: testPtrFloat64(0.002),
+		}},
+	}
+
+	// The billing path selects intervals by context tokens (input + cache),
+	// not output tokens. 150 context tokens must therefore use the interval
+	// even though the request has 100 additional output tokens.
+	result := calculateTokenStatsCost(pricing, UsageTokens{InputTokens: 150, OutputTokens: 100})
+	require.NotNil(t, result)
+	require.InDelta(t, 0.6, *result, 1e-12)
+}
+
+func TestCalculateTokenStatsCost_ExplicitZeroPriorityPriceIsPreserved(t *testing.T) {
+	zero := 0.0
+	pricing := &ChannelModelPricing{InputPricePriority: &zero}
+
+	result := calculateTokenStatsCost(pricing, UsageTokens{InputTokens: 100}, "priority")
+	require.NotNil(t, result)
+	require.Zero(t, *result)
 }
 
 // ---------------------------------------------------------------------------
@@ -525,8 +585,8 @@ func TestTryModelFilePricing_WithImageOutput(t *testing.T) {
 	}
 	result := tryModelFilePricing(bs, "claude-sonnet-4", tokens)
 	require.NotNil(t, result)
-	// 100*0.001 + 50*0.002 + 10*0.01 = 0.1 + 0.1 + 0.1 = 0.3
-	require.InDelta(t, 0.3, *result, 1e-12)
+	// OutputTokens includes image output tokens, so the text portion is 40.
+	require.InDelta(t, 0.28, *result, 1e-12)
 }
 
 func TestTryModelFilePricing_WithCacheTokens(t *testing.T) {

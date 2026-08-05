@@ -579,6 +579,7 @@ type ForwardResult struct {
 	// UpstreamModel is the actual upstream model after mapping.
 	// Prefer empty when it is identical to Model; persistence normalizes equal values away as no-op mappings.
 	UpstreamModel    string
+	ServiceTier      *string // OpenAI service tier normalized for billing (priority/fast/flex)
 	Stream           bool
 	Duration         time.Duration
 	FirstTokenMs     *int // 首字时间（流式请求）

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -545,7 +546,7 @@ func normalizeLimit(limit *float64) *float64 {
 
 // normalizePrice 将负数转换为 nil（表示使用默认价格），0 保留（表示免费）
 func normalizePrice(price *float64) *float64 {
-	if price == nil || *price < 0 {
+	if price == nil || *price < 0 || math.IsNaN(*price) || math.IsInf(*price, 0) {
 		return nil
 	}
 	return price

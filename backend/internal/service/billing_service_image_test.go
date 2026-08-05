@@ -3,10 +3,30 @@
 package service
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestCalculateMediaCost_InvalidConfiguredPricesFallBackToDefaults(t *testing.T) {
+	svc := &BillingService{}
+	invalid := math.Inf(1)
+	imageCost := svc.CalculateImageCost("gemini-3-pro-image", "2K", 1, &ImagePriceConfig{Price2K: &invalid}, 1)
+	require.InDelta(t, 0.201, imageCost.TotalCost, 1e-12)
+	videoCost := svc.CalculateVideoCost("grok-imagine-video", "480p", 1, 10, &VideoPriceConfig{Price480P: &invalid}, 1)
+	require.InDelta(t, 0.50, videoCost.TotalCost, 1e-12)
+	webCost := svc.CalculateWebSearchCost(1, &invalid, 1)
+	require.InDelta(t, 0.01, webCost.TotalCost, 1e-12)
+}
+
+func TestNormalizePrice_RejectsNonFiniteValues(t *testing.T) {
+	for _, value := range []float64{math.NaN(), math.Inf(1), math.Inf(-1), -0.01} {
+		require.Nil(t, normalizePrice(&value))
+	}
+	zero := 0.0
+	require.NotNil(t, normalizePrice(&zero))
+}
 
 // TestCalculateImageCost_DefaultPricing 测试无分组配置时使用默认价格
 func TestCalculateImageCost_DefaultPricing(t *testing.T) {

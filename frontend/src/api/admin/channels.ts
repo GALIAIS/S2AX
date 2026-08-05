@@ -14,9 +14,13 @@ export interface PricingInterval {
   max_tokens: number | null
   tier_label: string
   input_price: number | null
+  input_price_priority: number | null
   output_price: number | null
+  output_price_priority: number | null
   cache_write_price: number | null
+  cache_write_price_priority: number | null
   cache_read_price: number | null
+  cache_read_price_priority: number | null
   per_request_price: number | null
   sort_order: number
 }
@@ -27,9 +31,13 @@ export interface ChannelModelPricing {
   models: string[]
   billing_mode: BillingMode
   input_price: number | null
+  input_price_priority: number | null
   output_price: number | null
+  output_price_priority: number | null
   cache_write_price: number | null
+  cache_write_price_priority: number | null
   cache_read_price: number | null
+  cache_read_price_priority: number | null
   image_input_price: number | null
   image_output_price: number | null
   per_request_price: number | null
@@ -152,9 +160,13 @@ export async function remove(id: number): Promise<void> {
 export interface ModelDefaultPricing {
   found: boolean
   input_price?: number    // per-token price
+  input_price_priority?: number
   output_price?: number
+  output_price_priority?: number
   cache_write_price?: number
+  cache_write_price_priority?: number
   cache_read_price?: number
+  cache_read_price_priority?: number
   image_input_price?: number
   image_output_price?: number
 }

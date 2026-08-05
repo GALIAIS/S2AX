@@ -1,5 +1,5 @@
 <template>
-  <div class="flex items-start gap-2 rounded border p-2"
+  <div class="flex flex-wrap items-start gap-2 rounded border p-2"
        :class="isEmpty ? 'border-red-400 bg-red-50 dark:border-red-500 dark:bg-red-950/20' : 'border-gray-200 bg-white dark:border-dark-500 dark:bg-dark-700'">
     <!-- Token mode: context range + prices ($/MTok) -->
     <template v-if="mode === 'token'">
@@ -34,6 +34,29 @@
           type="number" step="any" min="0" class="input mt-0.5 text-xs" />
       </div>
     </template>
+
+    <div v-if="mode === 'token'" class="mt-2 grid basis-full grid-cols-2 gap-2 border-t border-dashed border-gray-200 pt-2 dark:border-dark-500 sm:grid-cols-4">
+      <div>
+        <label class="text-xs text-gray-400">{{ t('admin.channels.form.inputPricePriority') }}</label>
+        <input :value="interval.input_price_priority" @input="emitField('input_price_priority', ($event.target as HTMLInputElement).value)"
+          type="number" step="any" min="0" class="input mt-0.5 text-xs" :placeholder="t('admin.channels.form.inheritStandardPrice')" />
+      </div>
+      <div>
+        <label class="text-xs text-gray-400">{{ t('admin.channels.form.outputPricePriority') }}</label>
+        <input :value="interval.output_price_priority" @input="emitField('output_price_priority', ($event.target as HTMLInputElement).value)"
+          type="number" step="any" min="0" class="input mt-0.5 text-xs" :placeholder="t('admin.channels.form.inheritStandardPrice')" />
+      </div>
+      <div>
+        <label class="text-xs text-gray-400">{{ t('admin.channels.form.cacheWritePricePriorityShort') }}</label>
+        <input :value="interval.cache_write_price_priority" @input="emitField('cache_write_price_priority', ($event.target as HTMLInputElement).value)"
+          type="number" step="any" min="0" class="input mt-0.5 text-xs" :placeholder="t('admin.channels.form.inheritStandardPrice')" />
+      </div>
+      <div>
+        <label class="text-xs text-gray-400">{{ t('admin.channels.form.cacheReadPricePriorityShort') }}</label>
+        <input :value="interval.cache_read_price_priority" @input="emitField('cache_read_price_priority', ($event.target as HTMLInputElement).value)"
+          type="number" step="any" min="0" class="input mt-0.5 text-xs" :placeholder="t('admin.channels.form.inheritStandardPrice')" />
+      </div>
+    </div>
 
     <!-- Per-request / Image mode: tier label + context range + price -->
     <template v-else>
@@ -91,8 +114,12 @@ const isEmpty = computed(() => {
   const iv = props.interval
   return (iv.input_price == null || iv.input_price === '') &&
     (iv.output_price == null || iv.output_price === '') &&
+    (iv.input_price_priority == null || iv.input_price_priority === '') &&
+    (iv.output_price_priority == null || iv.output_price_priority === '') &&
     (iv.cache_write_price == null || iv.cache_write_price === '') &&
+    (iv.cache_write_price_priority == null || iv.cache_write_price_priority === '') &&
     (iv.cache_read_price == null || iv.cache_read_price === '') &&
+    (iv.cache_read_price_priority == null || iv.cache_read_price_priority === '') &&
     (iv.per_request_price == null || iv.per_request_price === '')
 })
 

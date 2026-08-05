@@ -1040,7 +1040,7 @@ func (s *BatchImagePublicService) resolvePricingSnapshot(ctx context.Context, ow
 		if group.BatchImageHoldMultiplier >= 0 {
 			holdMultiplier = group.BatchImageHoldMultiplier
 		}
-		if configuredUnit := group.GetImagePrice(req.ImageSize); configuredUnit != nil && *configuredUnit >= 0 {
+		if configuredUnit := group.GetImagePrice(req.ImageSize); configuredUnit != nil && isValidBillingPrice(*configuredUnit) {
 			unit = *configuredUnit
 		}
 	}

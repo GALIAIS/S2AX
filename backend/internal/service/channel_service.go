@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -676,26 +677,58 @@ func checkPricesNotNegative(p ChannelModelPricing) error {
 		val   *float64
 	}{
 		{"input_price", p.InputPrice},
+		{"input_price_priority", p.InputPricePriority},
 		{"output_price", p.OutputPrice},
+		{"output_price_priority", p.OutputPricePriority},
 		{"cache_write_price", p.CacheWritePrice},
+		{"cache_write_price_priority", p.CacheWritePricePriority},
 		{"cache_read_price", p.CacheReadPrice},
+		{"cache_read_price_priority", p.CacheReadPricePriority},
 		{"image_input_price", p.ImageInputPrice},
 		{"image_output_price", p.ImageOutputPrice},
 		{"per_request_price", p.PerRequestPrice},
 	}
 	for _, c := range checks {
-		if c.val != nil && *c.val < 0 {
-			return infraerrors.BadRequest("NEGATIVE_PRICE", fmt.Sprintf("%s must be >= 0", c.field))
+		if c.val != nil {
+			if math.IsNaN(*c.val) || math.IsInf(*c.val, 0) {
+				return infraerrors.BadRequest("INVALID_PRICE", fmt.Sprintf("%s must be finite", c.field))
+			}
+			if *c.val < 0 {
+				return infraerrors.BadRequest("NEGATIVE_PRICE", fmt.Sprintf("%s must be >= 0", c.field))
+			}
 		}
 	}
 	return nil
 }
 
 func checkIntervalsHavePrices(p ChannelModelPricing) error {
+	tierMode := p.BillingMode == BillingModePerRequest || p.BillingMode == BillingModeImage
+	seenTierLabels := make(map[string]struct{})
 	for _, iv := range p.Intervals {
+		if tierMode {
+			if iv.PerRequestPrice == nil {
+				return infraerrors.BadRequest(
+					"INTERVAL_MISSING_PRICE",
+					fmt.Sprintf("interval [%d, %s] has no price fields set for per_request/image billing mode; per_request_price is required for model %v",
+						iv.MinTokens, formatMaxTokens(iv.MaxTokens), p.Models),
+				)
+			}
+			label := strings.ToLower(strings.TrimSpace(iv.TierLabel))
+			if label != "" {
+				if _, exists := seenTierLabels[label]; exists {
+					return infraerrors.BadRequest(
+						"DUPLICATE_PRICING_TIER",
+						fmt.Sprintf("duplicate tier_label %q for model %v", iv.TierLabel, p.Models),
+					)
+				}
+				seenTierLabels[label] = struct{}{}
+			}
+			continue
+		}
 		if iv.InputPrice == nil && iv.OutputPrice == nil &&
+			iv.InputPricePriority == nil && iv.OutputPricePriority == nil &&
 			iv.CacheWritePrice == nil && iv.CacheReadPrice == nil &&
-			iv.PerRequestPrice == nil {
+			iv.CacheWritePricePriority == nil && iv.CacheReadPricePriority == nil {
 			return infraerrors.BadRequest(
 				"INTERVAL_MISSING_PRICE",
 				fmt.Sprintf("interval [%d, %s] has no price fields set for model %v",

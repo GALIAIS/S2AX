@@ -26,6 +26,7 @@ func resolveAccountStatsCost(
 	tokens UsageTokens,
 	requestCount int,
 	totalCost float64,
+	serviceTier ...string,
 ) *float64 {
 	if channelService == nil || upstreamModel == "" {
 		return nil
@@ -37,8 +38,9 @@ func resolveAccountStatsCost(
 
 	platform := channelService.GetGroupPlatform(ctx, groupID)
 
-	// 优先级 1：自定义规则（始终尝试）
-	if cost := tryCustomRules(channel, accountID, groupID, platform, upstreamModel, tokens, requestCount); cost != nil {
+	// 优先级 1：自定义规则（始终尝试）。保留服务档位与按次/图片层级。
+	tier := optionalServiceTier(serviceTier)
+	if cost := tryCustomRules(channel, accountID, groupID, platform, upstreamModel, tokens, requestCount, serviceTier...); cost != nil {
 		return cost
 	}
 
@@ -53,40 +55,37 @@ func resolveAccountStatsCost(
 
 	// 优先级 3：模型定价文件（LiteLLM）默认价格
 	if billingService != nil {
-		return tryModelFilePricing(billingService, upstreamModel, tokens)
+		return tryModelFilePricing(billingService, upstreamModel, tokens, tier)
 	}
 
 	return nil
 }
 
 // tryModelFilePricing 使用模型定价文件（LiteLLM/fallback）中的标准价格计算费用。
-func tryModelFilePricing(billingService *BillingService, model string, tokens UsageTokens) *float64 {
+func tryModelFilePricing(billingService *BillingService, model string, tokens UsageTokens, serviceTier ...string) *float64 {
 	pricing, err := billingService.GetModelPricing(model)
 	if err != nil || pricing == nil {
 		return nil
 	}
+	tier := optionalServiceTier(serviceTier)
 	if billingService.shouldApplySessionLongContextPricing(tokens, pricing) {
-		breakdown, err := billingService.CalculateCost(model, tokens, 1)
+		breakdown, err := billingService.CalculateCostWithServiceTier(model, tokens, 1, tier)
 		if err != nil || breakdown == nil || breakdown.TotalCost <= 0 {
 			return nil
 		}
 		return &breakdown.TotalCost
 	}
-	cost := float64(tokens.InputTokens)*pricing.InputPricePerToken +
-		float64(tokens.OutputTokens)*pricing.OutputPricePerToken +
-		float64(tokens.CacheCreationTokens)*pricing.CacheCreationPricePerToken +
-		float64(tokens.CacheReadTokens)*pricing.CacheReadPricePerToken +
-		float64(tokens.ImageOutputTokens)*pricing.ImageOutputPricePerToken
-	if cost <= 0 {
+	breakdown, err := billingService.CalculateCostWithServiceTier(model, tokens, 1, tier)
+	if err != nil || breakdown == nil || breakdown.TotalCost <= 0 {
 		return nil
 	}
-	return &cost
+	return &breakdown.TotalCost
 }
 
 // tryCustomRules 遍历自定义规则，按数组顺序先命中为准。
 func tryCustomRules(
 	channel *Channel, accountID, groupID int64,
-	platform, model string, tokens UsageTokens, requestCount int,
+	platform, model string, tokens UsageTokens, requestCount int, serviceTier ...string,
 ) *float64 {
 	modelLower := strings.ToLower(model)
 	for _, rule := range channel.AccountStatsPricingRules {
@@ -97,7 +96,7 @@ func tryCustomRules(
 		if pricing == nil {
 			continue // 规则匹配但模型不在规则定价中，继续下一条
 		}
-		return calculateStatsCost(pricing, tokens, requestCount)
+		return calculateStatsCost(pricing, tokens, requestCount, serviceTier...)
 	}
 	return nil
 }
@@ -166,42 +165,83 @@ func isPlatformMatch(queryPlatform, pricingPlatform string) bool {
 }
 
 // calculateStatsCost 使用给定的定价计算费用（不含任何倍率，原始费用）。
-func calculateStatsCost(pricing *ChannelModelPricing, tokens UsageTokens, requestCount int) *float64 {
+func calculateStatsCost(pricing *ChannelModelPricing, tokens UsageTokens, requestCount int, serviceTier ...string) *float64 {
 	if pricing == nil {
 		return nil
 	}
+	tokens = normalizeUsageTokens(tokens)
+	sizeTier := optionalAccountStatsSizeTier(serviceTier)
 	switch pricing.BillingMode {
 	case BillingModePerRequest, BillingModeImage:
-		return calculatePerRequestStatsCost(pricing, requestCount)
+		return calculatePerRequestStatsCost(pricing, tokens, requestCount, sizeTier)
 	default:
-		return calculateTokenStatsCost(pricing, tokens)
+		return calculateTokenStatsCost(pricing, tokens, optionalServiceTier(serviceTier))
 	}
 }
 
 // calculatePerRequestStatsCost 按次/图片计费。
-func calculatePerRequestStatsCost(pricing *ChannelModelPricing, requestCount int) *float64 {
-	if pricing.PerRequestPrice == nil || *pricing.PerRequestPrice <= 0 {
+func calculatePerRequestStatsCost(pricing *ChannelModelPricing, tokens UsageTokens, requestCount int, sizeTier string) *float64 {
+	var unitPrice *float64
+	if strings.TrimSpace(sizeTier) != "" {
+		if interval := pricing.GetTierByLabel(sizeTier); interval != nil {
+			unitPrice = interval.PerRequestPrice
+		}
+	}
+	if unitPrice == nil {
+		totalTokens := tokens.InputTokens + tokens.CacheCreationTokens + tokens.CacheReadTokens
+		if interval := FindMatchingInterval(pricing.Intervals, totalTokens); interval != nil {
+			unitPrice = interval.PerRequestPrice
+		}
+	}
+	if unitPrice == nil {
+		unitPrice = pricing.PerRequestPrice
+	}
+	if unitPrice == nil {
 		return nil
 	}
-	cost := *pricing.PerRequestPrice * float64(requestCount)
+	cost := *unitPrice * float64(requestCount)
 	return &cost
 }
 
 // calculateTokenStatsCost Token 计费。
-// If the pricing has intervals, find the matching interval by total token count
-// and use its prices instead of the flat pricing fields.
-func calculateTokenStatsCost(pricing *ChannelModelPricing, tokens UsageTokens) *float64 {
+// Interval selection uses the same context-token definition as the actual
+// customer billing path (input + cache tokens), so account statistics do not
+// select a different price tier merely because output is large.
+func calculateTokenStatsCost(pricing *ChannelModelPricing, tokens UsageTokens, serviceTier ...string) *float64 {
 	p := pricing
 	if len(pricing.Intervals) > 0 {
-		totalTokens := tokens.InputTokens + tokens.OutputTokens + tokens.CacheCreationTokens + tokens.CacheReadTokens
+		totalTokens := tokens.InputTokens + tokens.CacheCreationTokens + tokens.CacheReadTokens
 		if iv := FindMatchingInterval(pricing.Intervals, totalTokens); iv != nil {
-			p = &ChannelModelPricing{
-				InputPrice:      iv.InputPrice,
-				OutputPrice:     iv.OutputPrice,
-				CacheWritePrice: iv.CacheWritePrice,
-				CacheReadPrice:  iv.CacheReadPrice,
-				PerRequestPrice: iv.PerRequestPrice,
+			merged := *pricing
+			merged.Intervals = nil
+			if iv.InputPrice != nil {
+				merged.InputPrice = iv.InputPrice
 			}
+			if iv.InputPricePriority != nil {
+				merged.InputPricePriority = iv.InputPricePriority
+			}
+			if iv.OutputPrice != nil {
+				merged.OutputPrice = iv.OutputPrice
+			}
+			if iv.OutputPricePriority != nil {
+				merged.OutputPricePriority = iv.OutputPricePriority
+			}
+			if iv.CacheWritePrice != nil {
+				merged.CacheWritePrice = iv.CacheWritePrice
+			}
+			if iv.CacheWritePricePriority != nil {
+				merged.CacheWritePricePriority = iv.CacheWritePricePriority
+			}
+			if iv.CacheReadPrice != nil {
+				merged.CacheReadPrice = iv.CacheReadPrice
+			}
+			if iv.CacheReadPricePriority != nil {
+				merged.CacheReadPricePriority = iv.CacheReadPricePriority
+			}
+			if iv.PerRequestPrice != nil {
+				merged.PerRequestPrice = iv.PerRequestPrice
+			}
+			p = &merged
 		}
 	}
 	deref := func(ptr *float64) float64 {
@@ -210,15 +250,64 @@ func calculateTokenStatsCost(pricing *ChannelModelPricing, tokens UsageTokens) *
 		}
 		return *ptr
 	}
-	cost := float64(tokens.InputTokens)*deref(p.InputPrice) +
-		float64(tokens.OutputTokens)*deref(p.OutputPrice) +
-		float64(tokens.CacheCreationTokens)*deref(p.CacheWritePrice) +
-		float64(tokens.CacheReadTokens)*deref(p.CacheReadPrice) +
+	tier := optionalServiceTier(serviceTier)
+	inputPrice := selectServiceTierPrice(p.InputPrice, p.InputPricePriority, tier)
+	outputPrice := selectServiceTierPrice(p.OutputPrice, p.OutputPricePriority, tier)
+	cacheWritePrice := selectServiceTierPrice(p.CacheWritePrice, p.CacheWritePricePriority, tier)
+	cacheReadPrice := selectServiceTierPrice(p.CacheReadPrice, p.CacheReadPricePriority, tier)
+	imageInputPrice := deref(p.ImageInputPrice)
+	if p.ImageInputPrice == nil {
+		imageInputPrice = inputPrice
+	}
+	imageInputTokens := tokens.ImageInputTokens
+	textInputTokens := tokens.InputTokens - imageInputTokens
+	if textInputTokens < 0 {
+		textInputTokens = 0
+		imageInputTokens = tokens.InputTokens
+	}
+	textOutputTokens := tokens.OutputTokens - tokens.ImageOutputTokens
+	if textOutputTokens < 0 {
+		textOutputTokens = 0
+	}
+	cost := float64(textInputTokens)*inputPrice +
+		float64(imageInputTokens)*imageInputPrice +
+		float64(textOutputTokens)*outputPrice +
+		float64(tokens.CacheCreationTokens)*cacheWritePrice +
+		float64(tokens.CacheReadTokens)*cacheReadPrice +
 		float64(tokens.ImageOutputTokens)*deref(p.ImageOutputPrice)
-	if cost <= 0 {
+	hasExplicitPrice := p.InputPrice != nil || p.InputPricePriority != nil ||
+		p.OutputPrice != nil || p.OutputPricePriority != nil ||
+		p.CacheWritePrice != nil || p.CacheWritePricePriority != nil ||
+		p.CacheReadPrice != nil || p.CacheReadPricePriority != nil ||
+		p.ImageInputPrice != nil || p.ImageOutputPrice != nil
+	if cost <= 0 && !hasExplicitPrice {
 		return nil
 	}
 	return &cost
+}
+
+func selectServiceTierPrice(standard, priority *float64, serviceTier string) float64 {
+	if normalizeBillingServiceTier(serviceTier) == "priority" && priority != nil {
+		return *priority
+	}
+	if standard == nil {
+		return 0
+	}
+	return *standard
+}
+
+func optionalServiceTier(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
+}
+
+func optionalAccountStatsSizeTier(values []string) string {
+	if len(values) < 2 {
+		return ""
+	}
+	return values[1]
 }
 
 // applyAccountStatsCost resolves the account stats cost for a usage log entry.
@@ -232,16 +321,34 @@ func applyAccountStatsCost(
 	upstreamModel, requestedModel string,
 	tokens UsageTokens,
 	totalCost float64,
+	serviceTier string,
 ) {
 	model := upstreamModel
 	if model == "" {
 		model = requestedModel
 	}
 	requestCount := 1
-	if usageLog != nil && usageLog.ImageCount > 0 {
-		requestCount = usageLog.ImageCount
+	if usageLog != nil {
+		if usageLog.ImageCount > 0 {
+			requestCount = usageLog.ImageCount
+		} else if usageLog.VideoCount > 0 {
+			requestCount = usageLog.VideoCount
+		}
+	}
+	sizeTier := ""
+	if usageLog != nil {
+		if usageLog.BillingTier != nil {
+			sizeTier = strings.TrimSpace(*usageLog.BillingTier)
+		}
+		if sizeTier == "" && usageLog.ImageSize != nil {
+			sizeTier = strings.TrimSpace(*usageLog.ImageSize)
+		}
+		if sizeTier == "" && usageLog.VideoResolution != nil {
+			sizeTier = strings.TrimSpace(*usageLog.VideoResolution)
+		}
 	}
 	usageLog.AccountStatsCost = resolveAccountStatsCost(
-		ctx, cs, bs, accountID, groupID, model, tokens, requestCount, totalCost,
+		ctx, cs, bs, accountID, groupID, model, tokens, requestCount, totalCost, serviceTier,
+		sizeTier,
 	)
 }

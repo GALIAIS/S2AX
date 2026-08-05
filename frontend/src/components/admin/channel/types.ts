@@ -7,9 +7,13 @@ export interface IntervalFormEntry {
   max_tokens: number | null
   tier_label: string
   input_price: number | string | null
+  input_price_priority: number | string | null
   output_price: number | string | null
+  output_price_priority: number | string | null
   cache_write_price: number | string | null
+  cache_write_price_priority: number | string | null
   cache_read_price: number | string | null
+  cache_read_price_priority: number | string | null
   per_request_price: number | string | null
   sort_order: number
 }
@@ -18,9 +22,13 @@ export interface PricingFormEntry {
   models: string[]
   billing_mode: BillingMode
   input_price: number | string | null
+  input_price_priority: number | string | null
   output_price: number | string | null
+  output_price_priority: number | string | null
   cache_write_price: number | string | null
+  cache_write_price_priority: number | string | null
   cache_read_price: number | string | null
+  cache_read_price_priority: number | string | null
   image_input_price: number | string | null
   image_output_price: number | string | null
   per_request_price: number | string | null
@@ -55,9 +63,13 @@ export function apiIntervalsToForm(intervals: PricingInterval[]): IntervalFormEn
     max_tokens: iv.max_tokens,
     tier_label: iv.tier_label || '',
     input_price: perTokenToMTok(iv.input_price),
+    input_price_priority: perTokenToMTok(iv.input_price_priority),
     output_price: perTokenToMTok(iv.output_price),
+    output_price_priority: perTokenToMTok(iv.output_price_priority),
     cache_write_price: perTokenToMTok(iv.cache_write_price),
+    cache_write_price_priority: perTokenToMTok(iv.cache_write_price_priority),
     cache_read_price: perTokenToMTok(iv.cache_read_price),
+    cache_read_price_priority: perTokenToMTok(iv.cache_read_price_priority),
     per_request_price: iv.per_request_price,
     sort_order: iv.sort_order
   }))
@@ -69,9 +81,13 @@ export function formIntervalsToAPI(intervals: IntervalFormEntry[]): PricingInter
     max_tokens: iv.max_tokens,
     tier_label: iv.tier_label,
     input_price: mTokToPerToken(iv.input_price),
+    input_price_priority: mTokToPerToken(iv.input_price_priority),
     output_price: mTokToPerToken(iv.output_price),
+    output_price_priority: mTokToPerToken(iv.output_price_priority),
     cache_write_price: mTokToPerToken(iv.cache_write_price),
+    cache_write_price_priority: mTokToPerToken(iv.cache_write_price_priority),
     cache_read_price: mTokToPerToken(iv.cache_read_price),
+    cache_read_price_priority: mTokToPerToken(iv.cache_read_price_priority),
     per_request_price: toNullableNumber(iv.per_request_price),
     sort_order: iv.sort_order
   }))

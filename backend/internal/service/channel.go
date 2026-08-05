@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -83,38 +84,46 @@ type AccountStatsPricingRule struct {
 
 // ChannelModelPricing 渠道模型定价条目
 type ChannelModelPricing struct {
-	ID               int64
-	ChannelID        int64
-	Platform         string            // 所属平台（anthropic/openai/gemini/...）
-	Models           []string          // 绑定的模型列表
-	BillingMode      BillingMode       // 计费模式
-	InputPrice       *float64          // 每 token 输入价格（USD）— 向后兼容 flat 定价
-	OutputPrice      *float64          // 每 token 输出价格（USD）
-	CacheWritePrice  *float64          // 缓存写入价格
-	CacheReadPrice   *float64          // 缓存读取价格
-	ImageInputPrice  *float64          // 图片输入 token 价格（如 gpt-image-2 图片编辑）；未配置时回退文本输入价
-	ImageOutputPrice *float64          // 图片输出价格（向后兼容）
-	PerRequestPrice  *float64          // 默认按次计费价格（USD）
-	Intervals        []PricingInterval // 区间定价列表
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ID                      int64
+	ChannelID               int64
+	Platform                string            // 所属平台（anthropic/openai/gemini/...）
+	Models                  []string          // 绑定的模型列表
+	BillingMode             BillingMode       // 计费模式
+	InputPrice              *float64          // 每 token 输入价格（USD）— 向后兼容 flat 定价
+	InputPricePriority      *float64          // priority/Fast 档输入价格；nil 时沿用 InputPrice
+	OutputPrice             *float64          // 每 token 输出价格（USD）
+	OutputPricePriority     *float64          // priority/Fast 档输出价格；nil 时沿用 OutputPrice
+	CacheWritePrice         *float64          // 缓存写入价格
+	CacheWritePricePriority *float64          // priority/Fast 档缓存写入价格；nil 时沿用 CacheWritePrice
+	CacheReadPrice          *float64          // 缓存读取价格
+	CacheReadPricePriority  *float64          // priority/Fast 档缓存读取价格；nil 时沿用 CacheReadPrice
+	ImageInputPrice         *float64          // 图片输入 token 价格（如 gpt-image-2 图片编辑）；未配置时回退文本输入价
+	ImageOutputPrice        *float64          // 图片输出价格（向后兼容）
+	PerRequestPrice         *float64          // 默认按次计费价格（USD）
+	Intervals               []PricingInterval // 区间定价列表
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
 }
 
 // PricingInterval 定价区间（token 区间 / 按次分层 / 图片分辨率分层）
 type PricingInterval struct {
-	ID              int64
-	PricingID       int64
-	MinTokens       int      // 区间下界（含）
-	MaxTokens       *int     // 区间上界（不含），nil = 无上限
-	TierLabel       string   // 层级标签（按次/图片模式：1K, 2K, 4K, HD 等）
-	InputPrice      *float64 // token 模式：每 token 输入价
-	OutputPrice     *float64 // token 模式：每 token 输出价
-	CacheWritePrice *float64 // token 模式：缓存写入价
-	CacheReadPrice  *float64 // token 模式：缓存读取价
-	PerRequestPrice *float64 // 按次/图片模式：每次请求价格
-	SortOrder       int
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID                      int64
+	PricingID               int64
+	MinTokens               int      // 区间下界（含）
+	MaxTokens               *int     // 区间上界（不含），nil = 无上限
+	TierLabel               string   // 层级标签（按次/图片模式：1K, 2K, 4K, HD 等）
+	InputPrice              *float64 // token 模式：每 token 输入价
+	InputPricePriority      *float64 // token 模式：priority/Fast 档输入价；nil 时沿用 InputPrice
+	OutputPrice             *float64 // token 模式：每 token 输出价
+	OutputPricePriority     *float64 // token 模式：priority/Fast 档输出价；nil 时沿用 OutputPrice
+	CacheWritePrice         *float64 // token 模式：缓存写入价
+	CacheWritePricePriority *float64 // token 模式：priority/Fast 档缓存写入价；nil 时沿用 CacheWritePrice
+	CacheReadPrice          *float64 // token 模式：缓存读取价
+	CacheReadPricePriority  *float64 // token 模式：priority/Fast 档缓存读取价；nil 时沿用 CacheReadPrice
+	PerRequestPrice         *float64 // 按次/图片模式：每次请求价格
+	SortOrder               int
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
 }
 
 // IsActive 判断渠道是否启用
@@ -341,14 +350,23 @@ func validateIntervalPrices(iv *PricingInterval, idx int) error {
 		val  *float64
 	}{
 		{"input_price", iv.InputPrice},
+		{"input_price_priority", iv.InputPricePriority},
 		{"output_price", iv.OutputPrice},
+		{"output_price_priority", iv.OutputPricePriority},
 		{"cache_write_price", iv.CacheWritePrice},
+		{"cache_write_price_priority", iv.CacheWritePricePriority},
 		{"cache_read_price", iv.CacheReadPrice},
+		{"cache_read_price_priority", iv.CacheReadPricePriority},
 		{"per_request_price", iv.PerRequestPrice},
 	}
 	for _, p := range prices {
-		if p.val != nil && *p.val < 0 {
-			return fmt.Errorf("interval #%d: %s must be >= 0", idx+1, p.name)
+		if p.val != nil {
+			if math.IsNaN(*p.val) || math.IsInf(*p.val, 0) {
+				return fmt.Errorf("interval #%d: %s must be finite", idx+1, p.name)
+			}
+			if *p.val < 0 {
+				return fmt.Errorf("interval #%d: %s must be >= 0", idx+1, p.name)
+			}
 		}
 	}
 	return nil

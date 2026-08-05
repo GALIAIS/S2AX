@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -2388,6 +2389,15 @@ func TestValidatePricingBillingMode(t *testing.T) {
 			errMsg:  "input_price must be >= 0",
 		},
 		{
+			name: "priority input price NaN - invalid",
+			pricing: []ChannelModelPricing{{
+				BillingMode:        BillingModeToken,
+				InputPricePriority: testPtrFloat64(math.NaN()),
+			}},
+			wantErr: true,
+			errMsg:  "input_price_priority must be finite",
+		},
+		{
 			name: "interval with no price fields - invalid",
 			pricing: []ChannelModelPricing{{
 				BillingMode:     BillingModePerRequest,
@@ -2396,6 +2406,36 @@ func TestValidatePricingBillingMode(t *testing.T) {
 			}},
 			wantErr: true,
 			errMsg:  "has no price fields set",
+		},
+		{
+			name: "token interval with only per request price - invalid",
+			pricing: []ChannelModelPricing{{
+				BillingMode: BillingModeToken,
+				Intervals:   []PricingInterval{{MinTokens: 0, MaxTokens: testPtrInt(1000), PerRequestPrice: testPtrFloat64(0.1)}},
+			}},
+			wantErr: true,
+			errMsg:  "has no price fields set",
+		},
+		{
+			name: "image interval with only token price - invalid",
+			pricing: []ChannelModelPricing{{
+				BillingMode: BillingModeImage,
+				Intervals:   []PricingInterval{{TierLabel: "2K", InputPrice: testPtrFloat64(0.1)}},
+			}},
+			wantErr: true,
+			errMsg:  "has no price fields set",
+		},
+		{
+			name: "image interval duplicate tier label - invalid",
+			pricing: []ChannelModelPricing{{
+				BillingMode: BillingModeImage,
+				Intervals: []PricingInterval{
+					{TierLabel: "2K", PerRequestPrice: testPtrFloat64(0.1)},
+					{TierLabel: "2k", PerRequestPrice: testPtrFloat64(0.2)},
+				},
+			}},
+			wantErr: true,
+			errMsg:  "duplicate tier_label",
 		},
 	}
 

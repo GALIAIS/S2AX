@@ -751,7 +751,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 				CacheReadTokens:     result.Usage.CacheReadInputTokens,
 				ImageOutputTokens:   result.Usage.ImageOutputTokens,
 			},
-			cost.TotalCost,
+			cost.TotalCost, forwardResultServiceTier(result),
 		)
 	}
 
@@ -910,6 +910,7 @@ func (s *GatewayService) calculateImageCost(
 			RequestCount:   result.ImageCount,
 			SizeTier:       sizeTier,
 			RateMultiplier: multiplier,
+			ServiceTier:    forwardResultServiceTier(result),
 			Resolver:       s.resolver,
 			Resolved:       resolved,
 		})
@@ -944,6 +945,7 @@ func (s *GatewayService) calculateTokenCost(
 
 	var cost *CostBreakdown
 	var err error
+	serviceTier := forwardResultServiceTier(result)
 
 	// 优先尝试渠道定价 → CalculateCostUnified
 	if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved != nil {
@@ -955,14 +957,15 @@ func (s *GatewayService) calculateTokenCost(
 			Tokens:         tokens,
 			RequestCount:   1,
 			RateMultiplier: multiplier,
+			ServiceTier:    serviceTier,
 			Resolver:       s.resolver,
 			Resolved:       resolved,
 		})
 	} else if opts.LongContextThreshold > 0 {
 		// 长上下文双倍计费（如 Gemini 200K 阈值）
-		cost, err = s.billingService.CalculateCostWithLongContext(billingModel, tokens, multiplier, opts.LongContextThreshold, opts.LongContextMultiplier)
+		cost, err = s.billingService.calculateCostWithLongContextAndServiceTier(billingModel, tokens, multiplier, opts.LongContextThreshold, opts.LongContextMultiplier, serviceTier)
 	} else {
-		cost, err = s.billingService.CalculateCost(billingModel, tokens, multiplier)
+		cost, err = s.billingService.CalculateCostWithServiceTier(billingModel, tokens, multiplier, serviceTier)
 	}
 	if err != nil {
 		logger.LegacyPrintf("service.gateway", "Calculate cost failed: %v", err)
@@ -999,6 +1002,7 @@ func (s *GatewayService) buildRecordUsageLog(
 		Model:                 result.Model,
 		RequestedModel:        requestedModel,
 		UpstreamModel:         optionalTrimmedStringPtr(result.UpstreamModel),
+		ServiceTier:           result.ServiceTier,
 		ReasoningEffort:       result.ReasoningEffort,
 		InboundEndpoint:       optionalTrimmedStringPtr(input.InboundEndpoint),
 		UpstreamEndpoint:      optionalTrimmedStringPtr(input.UpstreamEndpoint),
@@ -1047,6 +1051,13 @@ func (s *GatewayService) buildRecordUsageLog(
 	}
 
 	return usageLog
+}
+
+func forwardResultServiceTier(result *ForwardResult) string {
+	if result == nil || result.ServiceTier == nil {
+		return ""
+	}
+	return strings.TrimSpace(*result.ServiceTier)
 }
 
 // resolveBillingMode 根据计费结果和请求类型确定计费模式。

@@ -207,6 +207,53 @@ func TestGetRequestTierPrice_NilPerRequestPrice(t *testing.T) {
 	require.InDelta(t, 0.0, r.GetRequestTierPrice(resolved, "1K"), 1e-12)
 }
 
+func TestCalculateCostUnified_PerRequestExplicitZeroDoesNotFallback(t *testing.T) {
+	bs := newTestBillingServiceForResolver()
+	resolver := NewModelPricingResolver(nil, bs)
+	zero := 0.0
+	resolved := &ResolvedPricing{
+		Mode:                      BillingModePerRequest,
+		DefaultPerRequestPrice:    0.25,
+		DefaultPerRequestPriceSet: true,
+		RequestTiers: []PricingInterval{{
+			TierLabel:       "free",
+			PerRequestPrice: &zero,
+		}},
+	}
+
+	cost, err := bs.CalculateCostUnified(CostInput{
+		Model:          "claude-sonnet-4",
+		RequestCount:   2,
+		SizeTier:       "free",
+		RateMultiplier: 1,
+		Resolver:       resolver,
+		Resolved:       resolved,
+	})
+	require.NoError(t, err)
+	require.Zero(t, cost.TotalCost)
+}
+
+func TestGetIntervalPricing_InheritsFlatPricesForMissingFields(t *testing.T) {
+	bs := newTestBillingServiceForResolver()
+	r := NewModelPricingResolver(nil, bs)
+	resolved := &ResolvedPricing{
+		Mode: BillingModeToken,
+		BasePricing: &ModelPricing{
+			InputPricePerToken:  5e-6,
+			OutputPricePerToken: 15e-6,
+		},
+		Intervals: []PricingInterval{{
+			MinTokens:  0,
+			MaxTokens:  testPtrInt(1000),
+			InputPrice: testPtrFloat64(7e-6),
+		}},
+	}
+
+	pricing := r.GetIntervalPricing(resolved, 500)
+	require.InDelta(t, 7e-6, pricing.InputPricePerToken, 1e-12)
+	require.InDelta(t, 15e-6, pricing.OutputPricePerToken, 1e-12)
+}
+
 // ===========================================================================
 // Channel override tests — exercises applyChannelOverrides via Resolve
 // ===========================================================================

@@ -871,8 +871,8 @@ func TestComputeTokenBreakdown_GptImage2ImageEditIssue4386(t *testing.T) {
 
 	cost := svc.computeTokenBreakdown(pricing, tokens, 1.0, "", false)
 
-	wantTextInput := float64(19) * 5e-6    // 0.000095
-	wantImageInput := float64(352) * 8e-6  // 0.002816
+	wantTextInput := float64(19) * 5e-6     // 0.000095
+	wantImageInput := float64(352) * 8e-6   // 0.002816
 	wantImageOutput := float64(439) * 30e-6 // 0.013170
 	require.InDelta(t, wantTextInput, cost.InputCost, 1e-15, "InputCost 仅含文本输入")
 	require.InDelta(t, wantImageInput, cost.ImageInputCost, 1e-15, "图片输入按 $8/1M 独立计费")
@@ -945,6 +945,26 @@ func TestCalculateCostWithLongContext_AboveThreshold_CacheBelowThreshold(t *test
 	// 正常费用不含长上下文
 	normalCost, _ := svc.CalculateCost("claude-sonnet-4", tokens, 1.0)
 	require.True(t, cost.ActualCost > normalCost.ActualCost, "长上下文费用应高于正常费用")
+}
+
+func TestCalculateCostWithLongContext_PreservesImageInputTokensAcrossRanges(t *testing.T) {
+	svc := &BillingService{
+		cfg: &config.Config{},
+		fallbackPrices: map[string]*ModelPricing{
+			"claude-sonnet-4": {
+				InputPricePerToken:      3e-6,
+				ImageInputPricePerToken: 8e-6,
+				OutputPricePerToken:     15e-6,
+			},
+		},
+	}
+	cost, err := svc.CalculateCostWithLongContext("claude-sonnet-4", UsageTokens{
+		InputTokens:      250000,
+		ImageInputTokens: 100000,
+	}, 1, 200000, 2)
+	require.NoError(t, err)
+	// 100k image + 100k text in-range, 50k text out-of-range ×2.
+	require.InDelta(t, 1.4, cost.ActualCost, 1e-10)
 }
 
 func TestCalculateCostWithLongContext_MarkerRequiresActualCostIncrease(t *testing.T) {
@@ -1246,6 +1266,33 @@ func TestCalculateCost_SupportsCacheBreakdown(t *testing.T) {
 	require.InDelta(t, expected5m+expected1h, cost.CacheCreationCost, 1e-10)
 }
 
+func TestCalculateCostWithServiceTier_PriorityCacheBreakdownWithoutBucketUsage(t *testing.T) {
+	priorityCachePrice := 8e-6
+	svc := &BillingService{
+		cfg: &config.Config{},
+		fallbackPrices: map[string]*ModelPricing{
+			"priority-cache-model": {
+				InputPricePerToken:                    1e-6,
+				OutputPricePerToken:                   2e-6,
+				CacheCreationPricePerToken:            3e-6,
+				CacheCreationPricePerTokenPriority:    priorityCachePrice,
+				CacheCreationPricePerTokenPrioritySet: true,
+				SupportsCacheBreakdown:                true,
+				CacheCreation5mPrice:                  4e-6,
+				CacheCreation1hPrice:                  5e-6,
+			},
+		},
+	}
+
+	cost, err := svc.CalculateCostWithServiceTier("priority-cache-model", UsageTokens{
+		CacheCreationTokens: 1000,
+	}, 1, "priority")
+	require.NoError(t, err)
+	// No 5m/1h breakdown was returned, so all cache-write tokens use the
+	// explicit priority price instead of being silently billed at zero.
+	require.InDelta(t, 1000*priorityCachePrice, cost.CacheCreationCost, 1e-12)
+}
+
 func TestCalculateCost_LargeTokenCount(t *testing.T) {
 	svc := newTestBillingService()
 
@@ -1266,9 +1313,39 @@ func TestCalculateCost_LargeTokenCount(t *testing.T) {
 func TestServiceTierCostMultiplier(t *testing.T) {
 	require.InDelta(t, 2.0, serviceTierCostMultiplier("priority"), 1e-12)
 	require.InDelta(t, 2.0, serviceTierCostMultiplier(" Priority "), 1e-12)
+	require.InDelta(t, 2.0, serviceTierCostMultiplier(" FAST "), 1e-12)
 	require.InDelta(t, 0.5, serviceTierCostMultiplier("flex"), 1e-12)
 	require.InDelta(t, 1.0, serviceTierCostMultiplier(""), 1e-12)
 	require.InDelta(t, 1.0, serviceTierCostMultiplier("default"), 1e-12)
+}
+
+func TestCalculateCost_RejectsNonFiniteRateMultiplier(t *testing.T) {
+	svc := newTestBillingService()
+	for _, multiplier := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		_, err := svc.CalculateCost("claude-sonnet-4", UsageTokens{InputTokens: 1}, multiplier)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "finite")
+	}
+}
+
+func TestCalculateCost_NormalizesInvalidTokenBreakdown(t *testing.T) {
+	svc := newTestBillingService()
+	cost, err := svc.CalculateCost("claude-sonnet-4", UsageTokens{
+		InputTokens:           -10,
+		ImageInputTokens:      4,
+		OutputTokens:          8,
+		ImageOutputTokens:     20,
+		CacheCreationTokens:   -1,
+		CacheReadTokens:       -2,
+		CacheCreation5mTokens: -3,
+		CacheCreation1hTokens: -4,
+	}, 1)
+	require.NoError(t, err)
+	require.InDelta(t, 8*15e-6, cost.TotalCost, 1e-12)
+	require.GreaterOrEqual(t, cost.InputCost, 0.0)
+	require.GreaterOrEqual(t, cost.OutputCost, 0.0)
+	require.GreaterOrEqual(t, cost.CacheCreationCost, 0.0)
+	require.GreaterOrEqual(t, cost.CacheReadCost, 0.0)
 }
 
 func TestCalculateCostWithServiceTier_OpenAIPriorityUsesPriorityPricing(t *testing.T) {
@@ -1518,6 +1595,23 @@ func TestGetModelPricingWithChannel_OverrideInputPriceOnly(t *testing.T) {
 
 	// OutputPrice unchanged (claude-sonnet-4 fallback = 15e-6)
 	require.InDelta(t, 15e-6, pricing.OutputPricePerToken, 1e-12)
+}
+
+func TestGetModelPricingWithChannel_ExplicitPriorityPriceIsUsed(t *testing.T) {
+	svc := newTestBillingService()
+
+	standard := 10e-6
+	priority := 40e-6
+	pricing, err := svc.GetModelPricingWithChannel("claude-sonnet-4", &ChannelModelPricing{
+		InputPrice:         &standard,
+		InputPricePriority: &priority,
+	})
+	require.NoError(t, err)
+	require.InDelta(t, standard, pricing.InputPricePerToken, 1e-12)
+	require.InDelta(t, priority, pricing.InputPricePerTokenPriority, 1e-12)
+
+	breakdown := svc.computeTokenBreakdown(pricing, UsageTokens{InputTokens: 100}, 1, "priority", false)
+	require.InDelta(t, 100*priority, breakdown.InputCost, 1e-12)
 }
 
 func TestGetModelPricingWithChannel_OverrideOutputPriceOnly(t *testing.T) {
