@@ -207,7 +207,7 @@ func TestInvocationArchiveRealPostgresHTTPFlow(t *testing.T) {
 	requestOnlyConfig, err := archive.SaveConfig(ctx, UpdateConfigRequest{
 		ExpectedConfigVersion: fullConfig.ConfigVersion,
 		DefaultMode:           ModeRequestOnly,
-		RetentionDays:         fullConfig.RetentionDays,
+		RetentionDays:         1,
 		MaxRequestBytes:       fullConfig.MaxRequestBytes,
 		MaxResponseBytes:      fullConfig.MaxResponseBytes,
 		DirectViewEnabled:     true,
@@ -226,6 +226,20 @@ func TestInvocationArchiveRealPostgresHTTPFlow(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, revealed.Request.Available)
 	require.False(t, revealed.Response.Available)
+
+	_, err = db.ExecContext(ctx, `UPDATE invocation_archive_records SET created_at=$2 WHERE id=$1`, requestOnlyRecord.ID, time.Now().UTC().Add(-48*time.Hour))
+	require.NoError(t, err)
+	cleanupResult, err := archive.Cleanup(ctx, CleanupRequest{Strategy: CleanupExpired})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, cleanupResult.DeletedRecords)
+	require.Len(t, mustListArchiveAccessLogs(t, ctx, archive, requestOnlyRecord.ID), 1)
+
+	cleanupResult, err = archive.Cleanup(ctx, CleanupRequest{Strategy: CleanupAll, Confirm: true})
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, cleanupResult.DeletedRecords, int64(1))
+	remaining, err := archive.ListRecords(ctx, RecordFilter{}, 1, 10)
+	require.NoError(t, err)
+	require.Zero(t, remaining.Total)
 }
 
 func openArchiveIntegrationDB(t *testing.T, ctx context.Context) *sql.DB {
@@ -345,6 +359,13 @@ func assertArchivedAccessEndpointSurvivesPayloadDeletion(t *testing.T, ctx conte
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, response.StatusCode)
 	require.Contains(t, string(body), "revealed")
+}
+
+func mustListArchiveAccessLogs(t *testing.T, ctx context.Context, archive *Service, recordID int64) []AccessLog {
+	t.Helper()
+	items, err := archive.ListAccessLogs(ctx, recordID, 10)
+	require.NoError(t, err)
+	return items
 }
 
 func ptr[T any](value T) *T { return &value }

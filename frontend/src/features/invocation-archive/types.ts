@@ -62,6 +62,10 @@ export interface InvocationArchiveRuntime {
   persisted: number
   persist_failures: number
   expired_purged: number
+  last_cleanup_at?: string
+  last_cleanup_strategy?: InvocationArchiveCleanupStrategy
+  last_cleanup_deleted: number
+  last_cleanup_access_logs_deleted: number
   storage?: InvocationArchiveStorageStats
   compression?: InvocationArchiveCompressionRuntime
   last_config_error?: string
@@ -70,6 +74,17 @@ export interface InvocationArchiveRuntime {
   last_persist_error_at?: string
   last_storage_error?: string
   last_storage_error_at?: string
+  last_cleanup_error?: string
+  last_cleanup_error_at?: string
+}
+
+export type InvocationArchiveCleanupStrategy = 'expired' | 'all'
+
+export interface InvocationArchiveCleanupResult {
+  strategy: InvocationArchiveCleanupStrategy
+  deleted_records: number
+  deleted_access_logs: number
+  completed_at: string
 }
 
 export interface InvocationArchiveStorageStats {

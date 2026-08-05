@@ -18,15 +18,18 @@ import (
 )
 
 const (
-	configLockKey             int64 = 579147893221901923
-	archiveQueueCapacity            = 2048
-	archiveWorkerCount              = 2
-	archiveWriteTimeout             = 5 * time.Second
-	configRefreshInterval           = 5 * time.Second
-	cleanupInterval                 = time.Hour
-	cleanupBatchSize                = 500
-	runtimeStatsInterval            = time.Minute
-	archiveMaintenanceTimeout       = 30 * time.Second
+	configLockKey         int64 = 579147893221901923
+	archiveQueueCapacity        = 2048
+	archiveWorkerCount          = 2
+	archiveWriteTimeout         = 5 * time.Second
+	configRefreshInterval       = 5 * time.Second
+	// Cleanup is deliberately frequent: retention changes must take effect
+	// without waiting for a long maintenance window, while the indexed expiry
+	// query keeps each pass cheap when there is no backlog.
+	cleanupInterval           = 5 * time.Minute
+	cleanupBatchSize          = 500
+	runtimeStatsInterval      = time.Minute
+	archiveMaintenanceTimeout = 30 * time.Second
 )
 
 type capturedPayload struct {
@@ -86,6 +89,7 @@ type Service struct {
 	snapshot atomic.Pointer[Config]
 
 	lifecycleMu sync.Mutex
+	cleanupMu   sync.Mutex
 	cancel      context.CancelFunc
 	wg          sync.WaitGroup
 	queue       chan archiveCandidate
@@ -98,15 +102,22 @@ type Service struct {
 	persistFailures atomic.Uint64
 	expiredPurged   atomic.Uint64
 
-	stateMu            sync.RWMutex
-	lastConfigError    string
-	lastConfigErrorAt  *time.Time
-	lastPersistError   string
-	lastPersistErrorAt *time.Time
-	lastStorageError   string
-	lastStorageErrorAt *time.Time
-	storage            ArchiveStorageStats
-	compression        CompressionRuntime
+	stateMu                      sync.RWMutex
+	lastConfigError              string
+	lastConfigErrorAt            *time.Time
+	lastPersistError             string
+	lastPersistErrorAt           *time.Time
+	lastStorageError             string
+	lastStorageErrorAt           *time.Time
+	lastCleanupAt                *time.Time
+	lastCleanupStrategy          CleanupStrategy
+	lastCleanupDeleted           int64
+	lastCleanupAccessLogsDeleted int64
+	lastCleanupError             string
+	lastCleanupErrorAt           *time.Time
+	storage                      ArchiveStorageStats
+	compression                  CompressionRuntime
+	retentionConfigVersion       atomic.Int64
 }
 
 func NewService(db *sql.DB, settings service.SettingRepository, encryptor service.SecretEncryptor) *Service {
@@ -140,10 +151,21 @@ func (s *Service) Start(ctx context.Context) error {
 	go s.maintenanceLoop(runCtx)
 	s.lifecycleMu.Unlock()
 
-	if err := s.Reload(runCtx); err != nil {
-		return err
+	reloadErr := s.Reload(runCtx)
+	if reloadErr == nil {
+		if err := s.reconcileRetention(runCtx, s.activeConfig().RetentionDays); err != nil {
+			s.setCleanupResult(CleanupResult{Strategy: CleanupExpired}, err)
+		} else {
+			s.retentionConfigVersion.Store(s.activeConfig().ConfigVersion)
+		}
 	}
-	return nil
+	// Run one cleanup with the freshly loaded retention policy instead of the
+	// in-memory default; otherwise a retention change would wait for the first
+	// ticker interval after every restart.
+	if reloadErr == nil {
+		_, _ = s.purgeExpired(runCtx)
+	}
+	return reloadErr
 }
 
 func (s *Service) Shutdown(ctx context.Context) error {
@@ -264,10 +286,17 @@ func (s *Service) SaveConfig(ctx context.Context, request UpdateConfigRequest, a
 		SettingKeyConfig, string(nextRaw)); err != nil {
 		return Config{}, err
 	}
+	if _, err := transaction.ExecContext(ctx, `
+		UPDATE invocation_archive_records
+		SET expires_at = created_at + ($1 * INTERVAL '1 day')
+		WHERE expires_at > created_at + ($1 * INTERVAL '1 day')`, next.RetentionDays); err != nil {
+		return Config{}, err
+	}
 	if err := transaction.Commit(); err != nil {
 		return Config{}, err
 	}
 	s.snapshot.Store(&next)
+	s.retentionConfigVersion.Store(next.ConfigVersion)
 	s.clearConfigError()
 	return cloneConfig(next), nil
 }
@@ -284,6 +313,12 @@ func (s *Service) Runtime() RuntimeSnapshot {
 	lastPersistErrorAt := cloneTime(s.lastPersistErrorAt)
 	lastStorageError := s.lastStorageError
 	lastStorageErrorAt := cloneTime(s.lastStorageErrorAt)
+	lastCleanupAt := cloneTime(s.lastCleanupAt)
+	lastCleanupStrategy := s.lastCleanupStrategy
+	lastCleanupDeleted := s.lastCleanupDeleted
+	lastCleanupAccessLogsDeleted := s.lastCleanupAccessLogsDeleted
+	lastCleanupError := s.lastCleanupError
+	lastCleanupErrorAt := cloneTime(s.lastCleanupErrorAt)
 	storage := cloneArchiveStorageStats(s.storage)
 	compression := cloneCompressionRuntime(s.compression)
 	s.stateMu.RUnlock()
@@ -297,10 +332,14 @@ func (s *Service) Runtime() RuntimeSnapshot {
 		QueueDepth: queueDepth, QueueCapacity: archiveQueueCapacity,
 		Accepted: s.accepted.Load(), Dropped: s.dropped.Load(), Persisted: s.persisted.Load(),
 		PersistFailures: s.persistFailures.Load(), ExpiredPurged: s.expiredPurged.Load(),
-		Storage: storage, Compression: compression,
+		LastCleanupAt: lastCleanupAt, LastCleanupDeleted: lastCleanupDeleted,
+		LastCleanupStrategy:          lastCleanupStrategy,
+		LastCleanupAccessLogsDeleted: lastCleanupAccessLogsDeleted,
+		Storage:                      storage, Compression: compression,
 		LastConfigError: lastConfigError, LastConfigErrorAt: lastConfigErrorAt,
 		LastPersistError: lastPersistError, LastPersistErrorAt: lastPersistErrorAt,
 		LastStorageError: lastStorageError, LastStorageErrorAt: lastStorageErrorAt,
+		LastCleanupError: lastCleanupError, LastCleanupErrorAt: lastCleanupErrorAt,
 	}
 }
 
@@ -370,7 +409,6 @@ func (s *Service) persistWorker() {
 
 func (s *Service) maintenanceLoop(ctx context.Context) {
 	defer s.wg.Done()
-	s.purgeExpired(context.Background())
 	s.shardLegacyPayloads(context.Background())
 	s.refreshStorageStats(context.Background())
 	s.maybeCompactArchive(context.Background())
@@ -385,9 +423,18 @@ func (s *Service) maintenanceLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-configTicker.C:
-			_ = s.Reload(ctx)
+			if err := s.Reload(ctx); err == nil {
+				cfg := s.activeConfig()
+				if cfg.ConfigVersion != s.retentionConfigVersion.Load() {
+					if err := s.reconcileRetention(ctx, cfg.RetentionDays); err != nil {
+						s.setCleanupResult(CleanupResult{Strategy: CleanupExpired}, err)
+					} else {
+						s.retentionConfigVersion.Store(cfg.ConfigVersion)
+					}
+				}
+			}
 		case <-cleanupTicker.C:
-			s.purgeExpired(ctx)
+			_, _ = s.purgeExpired(ctx)
 			s.refreshStorageStats(ctx)
 		case <-statsTicker.C:
 			s.shardLegacyPayloads(ctx)
@@ -397,26 +444,118 @@ func (s *Service) maintenanceLoop(ctx context.Context) {
 	}
 }
 
-func (s *Service) purgeExpired(parent context.Context) {
-	if s == nil || s.db == nil {
-		return
+func (s *Service) purgeExpired(parent context.Context) (CleanupResult, error) {
+	if s == nil {
+		return CleanupResult{Strategy: CleanupExpired}, errors.New("invocation archive service unavailable")
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), archiveWriteTimeout)
+	s.cleanupMu.Lock()
+	defer s.cleanupMu.Unlock()
+	result := CleanupResult{Strategy: CleanupExpired, CompletedAt: time.Now().UTC()}
+	if s.db == nil {
+		return result, errors.New("invocation archive database unavailable")
+	}
+	if configErr := s.currentConfigError(); configErr != "" {
+		err := fmt.Errorf("invocation archive configuration unavailable: %s", configErr)
+		s.setCleanupResult(result, err)
+		return result, err
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), archiveMaintenanceTimeout)
 	defer cancel()
+	now := time.Now().UTC()
+	result.CompletedAt = now
+	retentionDays := s.activeConfig().RetentionDays
 	for {
-		deleted, err := s.deleteExpired(ctx, time.Now().UTC(), cleanupBatchSize)
+		deleted, err := s.deleteExpired(ctx, now, retentionDays, cleanupBatchSize)
 		if err != nil {
-			s.setPersistError(err)
-			return
+			s.setCleanupResult(result, err)
+			return result, err
 		}
+		result.DeletedRecords += int64(deleted)
 		s.expiredPurged.Add(uint64(deleted))
 		if deleted < cleanupBatchSize {
 			break
 		}
 	}
-	if err := s.deleteExpiredAccessLogs(ctx, time.Now().UTC().AddDate(0, 0, -s.activeConfig().RetentionDays), cleanupBatchSize); err != nil {
-		s.setPersistError(err)
+	for {
+		deleted, err := s.deleteExpiredAccessLogs(ctx, now.AddDate(0, 0, -retentionDays), cleanupBatchSize)
+		if err != nil {
+			s.setCleanupResult(result, err)
+			return result, err
+		}
+		result.DeletedAccessLogs += int64(deleted)
+		if deleted < cleanupBatchSize {
+			break
+		}
 	}
+	s.setCleanupResult(result, nil)
+	s.refreshStorageStats(ctx)
+	return result, nil
+}
+
+func (s *Service) Cleanup(ctx context.Context, request CleanupRequest) (CleanupResult, error) {
+	if s == nil || s.db == nil {
+		return CleanupResult{}, errors.New("invocation archive database unavailable")
+	}
+	if request.Strategy == CleanupExpired {
+		return s.purgeExpired(ctx)
+	}
+	if request.Strategy != CleanupAll || !request.Confirm {
+		return CleanupResult{}, infraerrors.BadRequest("invocation_archive_cleanup_confirmation_required", "清空归档记录必须明确确认")
+	}
+	s.cleanupMu.Lock()
+	defer s.cleanupMu.Unlock()
+	if configErr := s.currentConfigError(); configErr != "" {
+		err := fmt.Errorf("invocation archive configuration unavailable: %s", configErr)
+		result := CleanupResult{Strategy: CleanupAll, CompletedAt: time.Now().UTC()}
+		s.setCleanupResult(result, err)
+		return result, err
+	}
+	result := CleanupResult{Strategy: CleanupAll, CompletedAt: time.Now().UTC()}
+	maintenanceCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), archiveMaintenanceTimeout)
+	defer cancel()
+	for {
+		deleted, err := s.deleteAll(maintenanceCtx, cleanupBatchSize)
+		if err != nil {
+			s.setCleanupResult(result, err)
+			return result, err
+		}
+		result.DeletedRecords += int64(deleted)
+		if deleted < cleanupBatchSize {
+			break
+		}
+	}
+	s.setCleanupResult(result, nil)
+	s.refreshStorageStats(maintenanceCtx)
+	return result, nil
+}
+
+func (s *Service) setCleanupResult(result CleanupResult, err error) {
+	if s == nil {
+		return
+	}
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	now := time.Now().UTC()
+	s.lastCleanupAt = &now
+	s.lastCleanupStrategy = result.Strategy
+	s.lastCleanupDeleted = result.DeletedRecords
+	s.lastCleanupAccessLogsDeleted = result.DeletedAccessLogs
+	if err != nil {
+		s.lastCleanupError = trimText(err.Error(), 512)
+		s.lastCleanupErrorAt = &now
+		return
+	}
+	s.lastCleanupError = ""
+	s.lastCleanupErrorAt = nil
+}
+
+func (s *Service) currentConfigError() string {
+	if s == nil {
+		return "invocation archive service unavailable"
+	}
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	return s.lastConfigError
 }
 
 func (s *Service) installDisabledConfig(err error) {

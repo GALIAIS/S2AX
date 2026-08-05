@@ -1271,6 +1271,7 @@ func (s *Service) DeleteRecord(ctx context.Context, id int64) (int64, error) {
 	if deleted == 0 {
 		return 0, ErrRecordNotFound
 	}
+	s.refreshStorageStats(ctx)
 	return deleted, nil
 }
 
@@ -1286,7 +1287,14 @@ func (s *Service) DeleteRecords(ctx context.Context, ids []int64) (int64, error)
 	if err != nil {
 		return 0, err
 	}
-	return result.RowsAffected()
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if deleted > 0 {
+		s.refreshStorageStats(ctx)
+	}
+	return deleted, nil
 }
 
 func (s *Service) ListSubjects(ctx context.Context, scope Scope, query string, limit int) ([]Subject, error) {
@@ -1348,16 +1356,17 @@ func (s *Service) recordAccess(ctx context.Context, recordID, adminID int64, rea
 	return err
 }
 
-func (s *Service) deleteExpired(ctx context.Context, now time.Time, limit int) (int, error) {
+func (s *Service) deleteExpired(ctx context.Context, now time.Time, retentionDays, limit int) (int, error) {
 	result, err := s.db.ExecContext(ctx, `
 		WITH expired AS (
 			SELECT id FROM invocation_archive_records
 			WHERE expires_at <= $1
+			   OR created_at <= ($1 - ($2 * INTERVAL '1 day'))
 			ORDER BY expires_at ASC,id ASC
-			LIMIT $2 FOR UPDATE SKIP LOCKED
+			LIMIT $3 FOR UPDATE SKIP LOCKED
 		)
 		DELETE FROM invocation_archive_records r
-		USING expired WHERE r.id=expired.id`, now, limit)
+		USING expired WHERE r.id=expired.id`, now, retentionDays, limit)
 	if err != nil {
 		return 0, err
 	}
@@ -1365,8 +1374,40 @@ func (s *Service) deleteExpired(ctx context.Context, now time.Time, limit int) (
 	return int(deleted), err
 }
 
-func (s *Service) deleteExpiredAccessLogs(ctx context.Context, before time.Time, limit int) error {
-	_, err := s.db.ExecContext(ctx, `
+func (s *Service) reconcileRetention(ctx context.Context, retentionDays int) error {
+	if s == nil || s.db == nil {
+		return errors.New("invocation archive database unavailable")
+	}
+	if retentionDays < 1 {
+		return infraerrors.BadRequest("invocation_archive_retention_invalid", "归档保留天数无效")
+	}
+	maintenanceCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), archiveMaintenanceTimeout)
+	defer cancel()
+	_, err := s.db.ExecContext(maintenanceCtx, `
+		UPDATE invocation_archive_records
+		SET expires_at = created_at + ($1 * INTERVAL '1 day')
+		WHERE expires_at > created_at + ($1 * INTERVAL '1 day')`, retentionDays)
+	return err
+}
+
+func (s *Service) deleteAll(ctx context.Context, limit int) (int, error) {
+	result, err := s.db.ExecContext(ctx, `
+		WITH expired AS (
+			SELECT id FROM invocation_archive_records
+			ORDER BY id ASC
+			LIMIT $1 FOR UPDATE SKIP LOCKED
+		)
+		DELETE FROM invocation_archive_records r
+		USING expired WHERE r.id=expired.id`, limit)
+	if err != nil {
+		return 0, err
+	}
+	deleted, err := result.RowsAffected()
+	return int(deleted), err
+}
+
+func (s *Service) deleteExpiredAccessLogs(ctx context.Context, before time.Time, limit int) (int, error) {
+	result, err := s.db.ExecContext(ctx, `
 		WITH expired AS (
 			SELECT id FROM invocation_archive_access_logs
 			WHERE created_at < $1
@@ -1375,7 +1416,11 @@ func (s *Service) deleteExpiredAccessLogs(ctx context.Context, before time.Time,
 		)
 		DELETE FROM invocation_archive_access_logs a
 		USING expired WHERE a.id=expired.id`, before, limit)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	deleted, err := result.RowsAffected()
+	return int(deleted), err
 }
 
 func recordWhere(filter RecordFilter) (string, []any, error) {

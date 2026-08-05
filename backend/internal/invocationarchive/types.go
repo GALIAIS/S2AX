@@ -114,6 +114,25 @@ type RecordFilter struct {
 	To       *time.Time
 }
 
+type CleanupStrategy string
+
+const (
+	CleanupExpired CleanupStrategy = "expired"
+	CleanupAll     CleanupStrategy = "all"
+)
+
+type CleanupRequest struct {
+	Strategy CleanupStrategy `json:"strategy" binding:"required"`
+	Confirm  bool            `json:"confirm"`
+}
+
+type CleanupResult struct {
+	Strategy          CleanupStrategy `json:"strategy"`
+	DeletedRecords    int64           `json:"deleted_records"`
+	DeletedAccessLogs int64           `json:"deleted_access_logs"`
+	CompletedAt       time.Time       `json:"completed_at"`
+}
+
 type Record struct {
 	ID                    int64     `json:"id"`
 	CreatedAt             time.Time `json:"created_at"`
@@ -246,23 +265,29 @@ type CompressionRuntime struct {
 }
 
 type RuntimeSnapshot struct {
-	Started            bool                `json:"started"`
-	ConfigVersion      int64               `json:"config_version"`
-	QueueDepth         int                 `json:"queue_depth"`
-	QueueCapacity      int                 `json:"queue_capacity"`
-	Accepted           uint64              `json:"accepted"`
-	Dropped            uint64              `json:"dropped"`
-	Persisted          uint64              `json:"persisted"`
-	PersistFailures    uint64              `json:"persist_failures"`
-	ExpiredPurged      uint64              `json:"expired_purged"`
-	Storage            ArchiveStorageStats `json:"storage"`
-	Compression        CompressionRuntime  `json:"compression"`
-	LastConfigError    string              `json:"last_config_error,omitempty"`
-	LastConfigErrorAt  *time.Time          `json:"last_config_error_at,omitempty"`
-	LastPersistError   string              `json:"last_persist_error,omitempty"`
-	LastPersistErrorAt *time.Time          `json:"last_persist_error_at,omitempty"`
-	LastStorageError   string              `json:"last_storage_error,omitempty"`
-	LastStorageErrorAt *time.Time          `json:"last_storage_error_at,omitempty"`
+	Started                      bool                `json:"started"`
+	ConfigVersion                int64               `json:"config_version"`
+	QueueDepth                   int                 `json:"queue_depth"`
+	QueueCapacity                int                 `json:"queue_capacity"`
+	Accepted                     uint64              `json:"accepted"`
+	Dropped                      uint64              `json:"dropped"`
+	Persisted                    uint64              `json:"persisted"`
+	PersistFailures              uint64              `json:"persist_failures"`
+	ExpiredPurged                uint64              `json:"expired_purged"`
+	LastCleanupAt                *time.Time          `json:"last_cleanup_at,omitempty"`
+	LastCleanupStrategy          CleanupStrategy     `json:"last_cleanup_strategy,omitempty"`
+	LastCleanupDeleted           int64               `json:"last_cleanup_deleted"`
+	LastCleanupAccessLogsDeleted int64               `json:"last_cleanup_access_logs_deleted"`
+	Storage                      ArchiveStorageStats `json:"storage"`
+	Compression                  CompressionRuntime  `json:"compression"`
+	LastConfigError              string              `json:"last_config_error,omitempty"`
+	LastConfigErrorAt            *time.Time          `json:"last_config_error_at,omitempty"`
+	LastPersistError             string              `json:"last_persist_error,omitempty"`
+	LastPersistErrorAt           *time.Time          `json:"last_persist_error_at,omitempty"`
+	LastStorageError             string              `json:"last_storage_error,omitempty"`
+	LastStorageErrorAt           *time.Time          `json:"last_storage_error_at,omitempty"`
+	LastCleanupError             string              `json:"last_cleanup_error,omitempty"`
+	LastCleanupErrorAt           *time.Time          `json:"last_cleanup_error_at,omitempty"`
 }
 
 var (

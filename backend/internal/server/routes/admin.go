@@ -142,6 +142,7 @@ func registerInvocationArchiveRoutes(admin *gin.RouterGroup, h *handler.Handlers
 		archive.GET("/config", h.Admin.InvocationArchive.GetConfig)
 		archive.PUT("/config", gin.HandlerFunc(stepUpAuth), h.Admin.InvocationArchive.UpdateConfig)
 		archive.GET("/runtime", h.Admin.InvocationArchive.GetRuntime)
+		archive.POST("/cleanup", gin.HandlerFunc(stepUpAuth), h.Admin.InvocationArchive.Cleanup)
 		archive.GET("/subjects", h.Admin.InvocationArchive.ListSubjects)
 		archive.GET("/records", h.Admin.InvocationArchive.ListRecords)
 		archive.GET("/records/:id", h.Admin.InvocationArchive.GetRecord)

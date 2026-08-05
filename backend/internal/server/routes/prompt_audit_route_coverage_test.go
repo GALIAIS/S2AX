@@ -243,6 +243,7 @@ func TestInvocationArchiveHighImpactRoutesRequireStepUp(t *testing.T) {
 		path   string
 	}{
 		{http.MethodPut, "/api/v1/admin/invocation-archive/config"},
+		{http.MethodPost, "/api/v1/admin/invocation-archive/cleanup"},
 		{http.MethodPost, "/api/v1/admin/invocation-archive/records/1/reveal"},
 		{http.MethodPost, "/api/v1/admin/invocation-archive/records/1/payloads/request"},
 		{http.MethodDelete, "/api/v1/admin/invocation-archive/records/1"},

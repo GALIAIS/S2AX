@@ -42,6 +42,27 @@ func (h *AdminHandler) UpdateConfig(c *gin.Context) {
 
 func (h *AdminHandler) GetRuntime(c *gin.Context) { response.Success(c, h.service.Runtime()) }
 
+func (h *AdminHandler) Cleanup(c *gin.Context) {
+	var request CleanupRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		setArchiveAudit(c, "failed", "invocation_archive_invalid_cleanup_request", nil)
+		response.ErrorFrom(c, infraerrors.BadRequest("invocation_archive_invalid_cleanup_request", "归档清理请求无效"))
+		return
+	}
+	result, err := h.service.Cleanup(c.Request.Context(), request)
+	if err != nil {
+		setArchiveAudit(c, "failed", archiveErrorCode(err), map[string]any{"cleanup_strategy": request.Strategy})
+		response.ErrorFrom(c, err)
+		return
+	}
+	setArchiveAudit(c, "success", "", map[string]any{
+		"cleanup_strategy":    request.Strategy,
+		"archive_deleted":     result.DeletedRecords,
+		"access_logs_deleted": result.DeletedAccessLogs,
+	})
+	response.Success(c, result)
+}
+
 func (h *AdminHandler) ListSubjects(c *gin.Context) {
 	scope := Scope(strings.TrimSpace(c.Query("scope")))
 	items, err := h.service.ListSubjects(c.Request.Context(), scope, c.Query("q"), positiveQuery(c, "limit", 20, 50))

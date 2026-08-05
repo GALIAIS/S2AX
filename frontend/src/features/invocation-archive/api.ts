@@ -3,6 +3,8 @@ import { defaultInvocationArchiveCompression } from './types'
 import type {
   InvocationArchiveAccessLog,
   InvocationArchiveConfig,
+  InvocationArchiveCleanupResult,
+  InvocationArchiveCleanupStrategy,
   InvocationArchivePayloadChunk,
   InvocationArchiveFilters,
   InvocationArchiveRecord,
@@ -36,6 +38,14 @@ export async function updateConfig(payload: InvocationArchiveUpdateRequest): Pro
 
 export async function getRuntime(): Promise<InvocationArchiveRuntime> {
   const { data } = await apiClient.get<InvocationArchiveRuntime>(`${basePath}/runtime`)
+  return data
+}
+
+export async function cleanup(strategy: InvocationArchiveCleanupStrategy): Promise<InvocationArchiveCleanupResult> {
+  const { data } = await apiClient.post<InvocationArchiveCleanupResult>(`${basePath}/cleanup`, {
+    strategy,
+    confirm: strategy === 'all',
+  })
   return data
 }
 
@@ -117,6 +127,7 @@ export const invocationArchiveAPI = {
   getConfig,
   updateConfig,
   getRuntime,
+  cleanup,
   listSubjects,
   listRecords,
   getRecord,

@@ -38,9 +38,17 @@
               <h2 class="text-base font-semibold text-gray-950 dark:text-white">{{ t('admin.invocationArchive.records.title') }}</h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-dark-300">{{ t('admin.invocationArchive.records.description') }}</p>
             </div>
-            <button type="button" class="btn btn-danger btn-sm" :disabled="selectedIDs.length === 0" @click="requestDelete(selectedIDs)">
-              {{ t('admin.invocationArchive.records.deleteSelected', { count: selectedIDs.length }) }}
-            </button>
+            <div class="flex flex-wrap items-center justify-end gap-2">
+              <button type="button" class="btn btn-secondary btn-sm" :disabled="loading.cleanup" @click="requestCleanup('expired')">
+                {{ t('admin.invocationArchive.records.cleanupExpired') }}
+              </button>
+              <button type="button" class="btn btn-danger btn-sm" :disabled="loading.cleanup" @click="requestCleanup('all')">
+                {{ t('admin.invocationArchive.records.cleanupAll') }}
+              </button>
+              <button type="button" class="btn btn-danger btn-sm" :disabled="selectedIDs.length === 0 || loading.cleanup" @click="requestDelete(selectedIDs)">
+                {{ t('admin.invocationArchive.records.deleteSelected', { count: selectedIDs.length }) }}
+              </button>
+            </div>
           </div>
 
           <form class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5" @submit.prevent="applyFilters">
@@ -319,10 +327,11 @@
             </article>
           </div>
           <div v-else class="mt-6 py-12 text-center text-sm text-gray-500">{{ t('common.loading') }}</div>
-          <div v-if="runtime?.last_config_error || runtime?.last_persist_error || runtime?.last_storage_error || runtime?.compression?.last_error" class="mt-6 grid gap-4 lg:grid-cols-2">
+          <div v-if="runtime?.last_config_error || runtime?.last_persist_error || runtime?.last_storage_error || runtime?.last_cleanup_error || runtime?.compression?.last_error" class="mt-6 grid gap-4 lg:grid-cols-2">
             <div v-if="runtime.last_config_error" class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200"><p class="font-medium">{{ t('admin.invocationArchive.runtime.configError') }}</p><p class="mt-1 break-words">{{ runtime.last_config_error }}</p></div>
             <div v-if="runtime.last_persist_error" class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-200"><p class="font-medium">{{ t('admin.invocationArchive.runtime.persistError') }}</p><p class="mt-1 break-words">{{ runtime.last_persist_error }}</p></div>
             <div v-if="runtime.last_storage_error" class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200"><p class="font-medium">{{ t('admin.invocationArchive.runtime.storageError') }}</p><p class="mt-1 break-words">{{ runtime.last_storage_error }}</p></div>
+            <div v-if="runtime.last_cleanup_error" class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-200"><p class="font-medium">{{ t('admin.invocationArchive.runtime.cleanupError') }}</p><p class="mt-1 break-words">{{ runtime.last_cleanup_error }}</p></div>
             <div v-if="runtime.compression?.last_error" class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-200"><p class="font-medium">{{ t('admin.invocationArchive.runtime.compressionError') }}</p><p class="mt-1 break-words">{{ runtime.compression.last_error }}</p></div>
           </div>
         </section>
@@ -433,6 +442,15 @@
       @confirm="confirmDelete"
       @cancel="deleteIDs = []"
     />
+    <ConfirmDialog
+      :show="cleanupStrategy !== null"
+      :title="cleanupStrategy === 'all' ? t('admin.invocationArchive.records.cleanupAllTitle') : t('admin.invocationArchive.records.cleanupExpiredTitle')"
+      :message="cleanupStrategy === 'all' ? t('admin.invocationArchive.records.cleanupAllMessage') : t('admin.invocationArchive.records.cleanupExpiredMessage')"
+      :confirm-text="cleanupStrategy === 'all' ? t('admin.invocationArchive.records.cleanupAllConfirm') : t('admin.invocationArchive.records.cleanupExpiredConfirm')"
+      danger
+      @confirm="confirmCleanup"
+      @cancel="cleanupStrategy = null"
+    />
     <TotpStepUpDialog :controller="stepUp" />
   </AppLayout>
 </template>
@@ -510,7 +528,8 @@ const payloadHistory = reactive<Record<ArchivePayloadSlot, number[]>>({ request:
 const payloadViewModes = reactive<Record<ArchivePayloadSlot, InvocationArchivePayloadViewMode>>({ request: 'formatted', response: 'formatted' })
 const payloadCharsets = reactive<Record<ArchivePayloadSlot, string>>({ request: 'auto', response: 'auto' })
 const payloadLoading = reactive<Record<ArchivePayloadSlot, boolean>>({ request: false, response: false })
-const loading = reactive({ config: false, runtime: false, records: false, saving: false, subjects: false, detail: false, revealing: false, deleting: false })
+const cleanupStrategy = ref<'expired' | 'all' | null>(null)
+const loading = reactive({ config: false, runtime: false, records: false, saving: false, subjects: false, detail: false, revealing: false, deleting: false, cleanup: false })
 const errors = reactive({ config: '', runtime: '', records: '', subjects: '' })
 const recordsLoaded = ref(false)
 const refreshing = ref(false)
@@ -536,7 +555,7 @@ const runtimeMetrics = computed(() => {
     { label: t('admin.invocationArchive.runtime.status'), value: runtime.value.started ? t('admin.invocationArchive.runtime.running') : t('admin.invocationArchive.runtime.stopped'), hint: t('admin.invocationArchive.runtime.version', { version: runtime.value.config_version }) },
     { label: t('admin.invocationArchive.runtime.queue'), value: `${runtime.value.queue_depth} / ${runtime.value.queue_capacity}`, hint: t('admin.invocationArchive.runtime.queueHint') },
     { label: t('admin.invocationArchive.runtime.persisted'), value: number(runtime.value.persisted), hint: t('admin.invocationArchive.runtime.acceptedDropped', { accepted: number(runtime.value.accepted), dropped: number(runtime.value.dropped) }) },
-    { label: t('admin.invocationArchive.runtime.purge'), value: number(runtime.value.expired_purged), hint: t('admin.invocationArchive.runtime.failures', { count: number(runtime.value.persist_failures) }) },
+    { label: t('admin.invocationArchive.runtime.purge'), value: number(runtime.value.expired_purged || 0), hint: runtime.value.last_cleanup_at ? t('admin.invocationArchive.runtime.lastCleanup', { time: formatDate(runtime.value.last_cleanup_at), count: number(runtime.value.last_cleanup_deleted || 0), logs: number(runtime.value.last_cleanup_access_logs_deleted || 0) }) : t('admin.invocationArchive.runtime.failures', { count: number(runtime.value.persist_failures || 0) }) },
     { label: t('admin.invocationArchive.runtime.records'), value: number(storage.record_count), hint: t('admin.invocationArchive.runtime.capturedBytes', { value: formatBytes(storage.captured_bytes) }) },
     { label: t('admin.invocationArchive.runtime.payloadBlocks'), value: number(storage.block_count), hint: t('admin.invocationArchive.runtime.payloadBlocksHint') },
     { label: t('admin.invocationArchive.runtime.payloadBytes'), value: formatBytes(storage.payload_bytes), hint: t('admin.invocationArchive.runtime.payloadBytesHint') },
@@ -893,6 +912,29 @@ async function confirmDelete() {
   }
 }
 
+function requestCleanup(strategy: 'expired' | 'all') {
+  if (!loading.cleanup) cleanupStrategy.value = strategy
+}
+
+async function confirmCleanup() {
+  const strategy = cleanupStrategy.value
+  cleanupStrategy.value = null
+  if (!strategy || loading.cleanup) return
+  loading.cleanup = true
+  try {
+    const result = await runSensitive(() => invocationArchiveAPI.cleanup(strategy))
+    if (!result) return
+    selectedIDs.value = []
+    closeDetail()
+    appStore.showSuccess(t('admin.invocationArchive.messages.cleaned', { count: result.deleted_records, logs: result.deleted_access_logs }))
+    await Promise.allSettled([loadRecords({ resetSelection: true }), loadRuntime()])
+  } catch (error) {
+    appStore.showError(errorMessage(error, 'admin.invocationArchive.errors.cleanup'))
+  } finally {
+    loading.cleanup = false
+  }
+}
+
 function formatDate(value: string): string {
   if (!value || value.startsWith('0001-')) return t('common.notAvailable')
   const date = new Date(value)
@@ -1007,6 +1049,7 @@ function canAutoRefresh(): boolean {
     && !payloadLoading.request
     && !payloadLoading.response
     && !loading.deleting
+    && !loading.cleanup
     && !dirty.value
 }
 function handleVisibilityChange() {

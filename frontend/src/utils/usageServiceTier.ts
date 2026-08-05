@@ -23,3 +23,12 @@ export function getUsageServiceTierLabel(
   if (tier === 'standard') return translate('usage.serviceTierStandard')
   return tier
 }
+
+export function getUsageSpeedLabel(
+  serviceTier: string | null | undefined,
+  translate: (key: string) => string,
+): string {
+  return normalizeUsageServiceTier(serviceTier) === 'priority'
+    ? translate('usage.speedFast')
+    : translate('usage.speedStandard')
+}
