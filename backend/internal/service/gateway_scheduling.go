@@ -964,6 +964,10 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 			accounts, err = filterAccountAllocationCandidates(ctx, s.accountAllocationService, groupID, accounts)
 		}
 		if err == nil {
+			accounts = s.filterAccountsBySchedulingThreshold(ctx, accounts)
+			if platform == PlatformGrok || strings.EqualFold(platform, PlatformGrok) {
+				accounts = s.filterGrokFreeQuotaAccountsForGateway(ctx, accounts)
+			}
 			slog.Debug("account_scheduling_list_snapshot",
 				"group_id", derefGroupID(groupID),
 				"platform", platform,
@@ -1029,6 +1033,10 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 					"tls_fingerprint", acc.IsTLSFingerprintEnabled())
 			}
 		}
+		filtered = s.filterAccountsBySchedulingThreshold(ctx, filtered)
+		if platform == PlatformGrok || strings.EqualFold(platform, PlatformGrok) {
+			filtered = s.filterGrokFreeQuotaAccountsForGateway(ctx, filtered)
+		}
 		return filtered, useMixed, nil
 	}
 
@@ -1067,6 +1075,10 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 				"status", acc.Status,
 				"tls_fingerprint", acc.IsTLSFingerprintEnabled())
 		}
+	}
+	accounts = s.filterAccountsBySchedulingThreshold(ctx, accounts)
+	if platform == PlatformGrok || strings.EqualFold(platform, PlatformGrok) {
+		accounts = s.filterGrokFreeQuotaAccountsForGateway(ctx, accounts)
 	}
 	return accounts, useMixed, nil
 }
@@ -1458,7 +1470,38 @@ func (s *GatewayService) getSchedulableAccount(ctx context.Context, accountID in
 	if !allowed {
 		return nil, ErrNoAvailableAccounts
 	}
+	if s.isAccountBlockedBySchedulingThreshold(ctx, account) {
+		return nil, nil
+	}
+	// Sticky / non-list selection must honor free soft-gate (same as listSchedulableAccounts).
+	if account.IsGrok() {
+		if gated := s.filterGrokFreeQuotaAccountsForGateway(ctx, []Account{*account}); len(gated) == 0 {
+			return nil, nil
+		}
+	}
 	return account, nil
+}
+
+func (s *GatewayService) filterAccountsBySchedulingThreshold(ctx context.Context, accounts []Account) []Account {
+	if len(accounts) == 0 {
+		return accounts
+	}
+
+	filtered := make([]Account, 0, len(accounts))
+	for i := range accounts {
+		if s.isAccountBlockedBySchedulingThreshold(ctx, &accounts[i]) {
+			continue
+		}
+		filtered = append(filtered, accounts[i])
+	}
+	return filtered
+}
+
+func (s *GatewayService) isAccountBlockedBySchedulingThreshold(ctx context.Context, account *Account) bool {
+	if s == nil || s.rateLimitService == nil || account == nil {
+		return false
+	}
+	return s.rateLimitService.ApplyAccountSchedulingThreshold(ctx, account)
 }
 
 func (s *GatewayService) hydrateSelectedAccount(ctx context.Context, account *Account) (*Account, error) {

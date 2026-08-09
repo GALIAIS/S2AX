@@ -157,3 +157,6 @@ output/
 .playability-runtime/
 .playwright-mcp/
 .references/
+
+# Vitest / Vite cache at repo root
+.vite/

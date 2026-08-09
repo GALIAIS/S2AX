@@ -190,6 +190,7 @@ func ProvideHandlers(
 	subscriptionHandler *SubscriptionHandler,
 	announcementHandler *AnnouncementHandler,
 	channelMonitorUserHandler *ChannelMonitorUserHandler,
+	channelMonitorV2Handler *ChannelMonitorV2Handler,
 	adminHandlers *AdminHandlers,
 	gatewayHandler *GatewayHandler,
 	openaiGatewayHandler *OpenAIGatewayHandler,
@@ -234,6 +235,7 @@ func ProvideHandlers(
 		BatchImage:                 batchImageHandler,
 		IPGeolocation:              ipGeolocationHandler,
 		AccountAllocation:          accountAllocationHandler,
+		ChannelMonitorV2:           channelMonitorV2Handler,
 	}
 }
 
@@ -248,6 +250,7 @@ var ProviderSet = wire.NewSet(
 	NewSubscriptionHandler,
 	NewAnnouncementHandler,
 	NewChannelMonitorUserHandler,
+	NewChannelMonitorV2Handler,
 	ProvideGatewayHandler,
 	ProvideOpenAIGatewayHandler,
 	NewTotpHandler,

@@ -74,6 +74,7 @@ type Handlers struct {
 	BatchImage                 *BatchImageHandler
 	IPGeolocation              *IPGeolocationHandler
 	AccountAllocation          *AccountAllocationHandler
+	ChannelMonitorV2           *ChannelMonitorV2Handler
 }
 
 // BuildInfo contains build-time information
