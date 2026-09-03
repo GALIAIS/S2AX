@@ -585,6 +585,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/plugins',
+    name: 'AdminPlugins',
+    component: () => import('@/views/admin/PluginsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Plugin Management',
+      titleKey: 'admin.plugins.title',
+      descriptionKey: 'admin.plugins.description'
+    }
+  },
+  {
     path: '/admin/announcements',
     name: 'AdminAnnouncements',
     component: () => import('@/views/admin/AnnouncementsView.vue'),
@@ -668,18 +680,6 @@ const routes: RouteRecordRaw[] = [
       titleKey: 'admin.promptAudit.title',
       descriptionKey: 'admin.promptAudit.description',
       requiresRiskControl: true
-    }
-  },
-  {
-    path: '/admin/invocation-archive',
-    name: 'AdminInvocationArchive',
-    component: () => import('@/features/invocation-archive/InvocationArchiveView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      title: 'Invocation Archive',
-      titleKey: 'admin.invocationArchive.title',
-      descriptionKey: 'admin.invocationArchive.description'
     }
   },
   {

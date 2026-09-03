@@ -195,6 +195,7 @@ export default {
     virtualCurrencies: 'Virtual Currencies',
     virtualCurrencyIntegrations: 'Currency Integrations',
     accounts: 'Accounts',
+    plugins: 'Plugins',
     proxies: 'Proxies',
     redeemCodes: 'Redeem Codes',
     ops: 'Ops',
@@ -223,7 +224,6 @@ export default {
     securityAudit: 'Security Audit',
     contentModeration: 'Content Moderation',
     promptAudit: 'Prompt Audit',
-    invocationArchive: 'Invocation Archive',
     auditLogs: 'Audit Logs',
   },
 

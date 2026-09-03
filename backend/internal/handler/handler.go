@@ -2,7 +2,6 @@ package handler
 
 import (
 	"github.com/Wei-Shaw/sub2api/internal/handler/admin"
-	"github.com/Wei-Shaw/sub2api/internal/invocationarchive"
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 )
 
@@ -21,6 +20,7 @@ type AdminHandlers struct {
 	GeminiOAuth                *admin.GeminiOAuthHandler
 	AntigravityOAuth           *admin.AntigravityOAuthHandler
 	GrokOAuth                  *admin.GrokOAuthHandler
+	CNProvider                 *admin.CNProviderHandler
 	Proxy                      *admin.ProxyHandler
 	Redeem                     *admin.RedeemHandler
 	Promo                      *admin.PromoHandler
@@ -32,6 +32,7 @@ type AdminHandlers struct {
 	UserAttribute              *admin.UserAttributeHandler
 	ErrorPassthrough           *admin.ErrorPassthroughHandler
 	TLSFingerprintProfile      *admin.TLSFingerprintProfileHandler
+	Plugin                     *admin.PluginHandler
 	APIKey                     *admin.AdminAPIKeyHandler
 	ScheduledTest              *admin.ScheduledTestHandler
 	Channel                    *admin.ChannelHandler
@@ -39,7 +40,6 @@ type AdminHandlers struct {
 	ChannelMonitorTemplate     *admin.ChannelMonitorRequestTemplateHandler
 	ContentModeration          *admin.ContentModerationHandler
 	PromptAudit                *securityaudit.PromptAdminHandler
-	InvocationArchive          *invocationarchive.AdminHandler
 	Payment                    *admin.PaymentHandler
 	VirtualCurrency            *admin.VirtualCurrencyHandler
 	VirtualCurrencyIntegration *admin.VirtualCurrencyIntegrationHandler

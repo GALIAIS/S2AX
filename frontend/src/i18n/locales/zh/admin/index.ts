@@ -6,8 +6,8 @@ import ops from './ops'
 import settings from './settings'
 import audit from './audit'
 import promptAudit from './promptAudit'
-import invocationArchive from './invocationArchive'
 import sharedQuota from './sharedQuota'
+import plugins from './plugins'
 
 export default {
   ...overview,
@@ -18,6 +18,6 @@ export default {
   ...settings,
   ...audit,
   ...promptAudit,
-  ...invocationArchive,
   ...sharedQuota,
+  ...plugins,
 }

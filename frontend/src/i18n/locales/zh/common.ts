@@ -195,6 +195,7 @@ export default {
     virtualCurrencies: '虚拟货币',
     virtualCurrencyIntegrations: '货币接入',
     accounts: '账号管理',
+    plugins: '插件管理',
     proxies: 'IP管理',
     redeemCodes: '兑换码',
     ops: '运维监控',
@@ -223,7 +224,6 @@ export default {
     securityAudit: '安全审计',
     contentModeration: '内容审核',
     promptAudit: '提示词审计',
-    invocationArchive: '调用归档',
     auditLogs: '操作日志',
   },
 

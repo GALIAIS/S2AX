@@ -21,6 +21,7 @@ import { useI18n } from 'vue-i18n'
 import Select from '@/components/common/Select.vue'
 import SearchInput from '@/components/common/SearchInput.vue'
 import type { AdminGroup, SelectOption } from '@/types'
+import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 
 type FilterValue = string | number | boolean | null
 type AccountFilters = Record<string, FilterValue | undefined>
@@ -57,11 +58,7 @@ const updateGroup = (value: FilterValue) => {
 
 const platformOptions = computed(() => [
   { value: '', label: t('admin.accounts.allPlatforms') },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'gemini', label: 'Gemini' },
-  { value: 'antigravity', label: 'Antigravity' },
-  { value: 'grok', label: 'Grok' }
+  ...CONCRETE_PLATFORM_OPTIONS
 ])
 
 const typeOptions = computed(() => [

@@ -3,7 +3,6 @@ package handler
 import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler/admin"
-	"github.com/Wei-Shaw/sub2api/internal/invocationarchive"
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -25,6 +24,7 @@ func ProvideAdminHandlers(
 	geminiOAuthHandler *admin.GeminiOAuthHandler,
 	antigravityOAuthHandler *admin.AntigravityOAuthHandler,
 	grokOAuthHandler *admin.GrokOAuthHandler,
+	cnProviderHandler *admin.CNProviderHandler,
 	proxyHandler *admin.ProxyHandler,
 	redeemHandler *admin.RedeemHandler,
 	promoHandler *admin.PromoHandler,
@@ -36,6 +36,7 @@ func ProvideAdminHandlers(
 	userAttributeHandler *admin.UserAttributeHandler,
 	errorPassthroughHandler *admin.ErrorPassthroughHandler,
 	tlsFingerprintProfileHandler *admin.TLSFingerprintProfileHandler,
+	pluginHandler *admin.PluginHandler,
 	apiKeyHandler *admin.AdminAPIKeyHandler,
 	scheduledTestHandler *admin.ScheduledTestHandler,
 	channelHandler *admin.ChannelHandler,
@@ -43,7 +44,6 @@ func ProvideAdminHandlers(
 	channelMonitorTemplateHandler *admin.ChannelMonitorRequestTemplateHandler,
 	contentModerationHandler *admin.ContentModerationHandler,
 	promptAuditHandler *securityaudit.PromptAdminHandler,
-	invocationArchiveHandler *invocationarchive.AdminHandler,
 	paymentHandler *admin.PaymentHandler,
 	virtualCurrencyHandler *admin.VirtualCurrencyHandler,
 	virtualCurrencyIntegrationHandler *admin.VirtualCurrencyIntegrationHandler,
@@ -69,6 +69,7 @@ func ProvideAdminHandlers(
 		GeminiOAuth:                geminiOAuthHandler,
 		AntigravityOAuth:           antigravityOAuthHandler,
 		GrokOAuth:                  grokOAuthHandler,
+		CNProvider:                 cnProviderHandler,
 		Proxy:                      proxyHandler,
 		Redeem:                     redeemHandler,
 		Promo:                      promoHandler,
@@ -80,6 +81,7 @@ func ProvideAdminHandlers(
 		UserAttribute:              userAttributeHandler,
 		ErrorPassthrough:           errorPassthroughHandler,
 		TLSFingerprintProfile:      tlsFingerprintProfileHandler,
+		Plugin:                     pluginHandler,
 		APIKey:                     apiKeyHandler,
 		ScheduledTest:              scheduledTestHandler,
 		Channel:                    channelHandler,
@@ -87,7 +89,6 @@ func ProvideAdminHandlers(
 		ChannelMonitorTemplate:     channelMonitorTemplateHandler,
 		ContentModeration:          contentModerationHandler,
 		PromptAudit:                promptAuditHandler,
-		InvocationArchive:          invocationArchiveHandler,
 		Payment:                    paymentHandler,
 		VirtualCurrency:            virtualCurrencyHandler,
 		VirtualCurrencyIntegration: virtualCurrencyIntegrationHandler,
@@ -128,6 +129,7 @@ func ProvideGatewayHandler(
 
 func ProvideOpenAIGatewayHandler(
 	gatewayService *service.OpenAIGatewayService,
+	pluginManager *service.PluginManager,
 	concurrencyService *service.ConcurrencyService,
 	billingCacheService *service.BillingCacheService,
 	apiKeyService *service.APIKeyService,
@@ -136,15 +138,14 @@ func ProvideOpenAIGatewayHandler(
 	contentModerationService *service.ContentModerationService,
 	opsService *service.OpsService,
 	grokQuotaService *service.GrokQuotaService,
-	invocationArchive *invocationarchive.Service,
 	cfg *config.Config,
 	coordinator *securityaudit.Coordinator,
 ) *OpenAIGatewayHandler {
+	gatewayService.SetPluginManager(pluginManager)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, apiKeyService,
 		usageRecordWorkerPool, errorPassthroughService, contentModerationService, opsService, cfg)
 	h.securityAuditCoordinator = coordinator
 	h.grokMediaEligibilityProber = grokQuotaService
-	h.SetInvocationArchive(invocationArchive)
 	return h
 }
 
@@ -209,6 +210,7 @@ func ProvideHandlers(
 	accountAllocationHandler *AccountAllocationHandler,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
+	_ *service.OpenAIQuotaAutoResetService,
 ) *Handlers {
 	return &Handlers{
 		Auth:                       authHandler,
@@ -281,6 +283,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewGeminiOAuthHandler,
 	admin.NewAntigravityOAuthHandler,
 	admin.NewGrokOAuthHandler,
+	admin.NewCNProviderHandler,
 	admin.NewProxyHandler,
 	admin.NewRedeemHandler,
 	admin.NewPromoHandler,
@@ -292,6 +295,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewUserAttributeHandler,
 	admin.NewErrorPassthroughHandler,
 	admin.NewTLSFingerprintProfileHandler,
+	admin.NewPluginHandler,
 	admin.NewAdminAPIKeyHandler,
 	admin.NewScheduledTestHandler,
 	admin.NewChannelHandler,

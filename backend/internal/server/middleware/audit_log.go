@@ -61,8 +61,7 @@ var auditExtraAllowedKeys = map[string]struct{}{
 	"reason_length": {}, "operation": {}, "policy_key": {}, "version": {},
 	"status": {}, "config_digest": {}, "decision_id": {}, "case_id": {},
 	"conclusion": {}, "action_id": {}, "action_type": {}, "exception_id": {},
-	"scope_type": {}, "archive_record_id": {}, "archive_mode": {},
-	"direct_view_enabled": {}, "rule_count": {}, "archive_deleted": {},
+	"scope_type": {}, "direct_view_enabled": {}, "rule_count": {},
 }
 
 // SetAuditExtra adds allowlisted, scalar details to the current audit entry.
@@ -114,17 +113,15 @@ func truncateAuditExtraString(value string, limit int) string {
 
 // auditSensitiveReads 需要审计的敏感 GET 读取（method+FullPath → 动作名）。
 var auditSensitiveReads = map[string]string{
-	"GET /api/v1/admin/accounts/data":                           "admin.accounts.export",
-	"GET /api/v1/admin/proxies/data":                            "admin.proxies.export",
-	"GET /api/v1/admin/redeem-codes/export":                     "admin.redeem_codes.export",
-	"GET /api/v1/admin/backups/:id/download-url":                "admin.backups.download",
-	"GET /api/v1/admin/settings/admin-api-key":                  "admin.admin_api_key.read",
-	"GET /api/v1/admin/users/:id/api-keys":                      "admin.users.api_keys.read",
-	"GET /api/v1/admin/groups/:id/api-keys":                     "admin.groups.api_keys.read",
-	"GET /api/v1/admin/backups/s3-config":                       "admin.backups.s3_config.read",
-	"GET /api/v1/admin/data-management/s3/config":               "admin.data_management.s3_config.read",
-	"GET /api/v1/admin/invocation-archive/records/:id":          "admin.invocation_archive.record.read",
-	"GET /api/v1/admin/invocation-archive/records/:id/accesses": "admin.invocation_archive.record.accesses.read",
+	"GET /api/v1/admin/accounts/data":             "admin.accounts.export",
+	"GET /api/v1/admin/proxies/data":              "admin.proxies.export",
+	"GET /api/v1/admin/redeem-codes/export":       "admin.redeem_codes.export",
+	"GET /api/v1/admin/backups/:id/download-url":  "admin.backups.download",
+	"GET /api/v1/admin/settings/admin-api-key":    "admin.admin_api_key.read",
+	"GET /api/v1/admin/users/:id/api-keys":        "admin.users.api_keys.read",
+	"GET /api/v1/admin/groups/:id/api-keys":       "admin.groups.api_keys.read",
+	"GET /api/v1/admin/backups/s3-config":         "admin.backups.s3_config.read",
+	"GET /api/v1/admin/data-management/s3/config": "admin.data_management.s3_config.read",
 }
 
 // auditActionOverrides 变更类请求的动作名精确映射（未命中时自动推导）。
@@ -166,11 +163,6 @@ var auditActionOverrides = map[string]string{
 	"POST /api/v1/admin/security-audit/exceptions":                               "admin.security_audit.exception.create",
 	"POST /api/v1/admin/security-audit/exceptions/:id/expire":                    "admin.security_audit.exception.expire",
 	"POST /api/v1/admin/security-audit/endpoints/:id/reset-breaker":              "admin.security_audit.endpoint.reset_breaker",
-	"PUT /api/v1/admin/invocation-archive/config":                                "admin.invocation_archive.config.update",
-	"POST /api/v1/admin/invocation-archive/records/:id/reveal":                   "admin.invocation_archive.record.reveal",
-	"POST /api/v1/admin/invocation-archive/records/:id/payloads/:slot":           "admin.invocation_archive.record.payload.reveal",
-	"DELETE /api/v1/admin/invocation-archive/records/:id":                        "admin.invocation_archive.record.delete",
-	"POST /api/v1/admin/invocation-archive/records/batch-delete":                 "admin.invocation_archive.records.batch_delete",
 }
 
 // auditBodyOmittedRoutes 请求体几乎整体由凭证构成的路由（如整块粘贴 auth JSON 的导入接口）。
@@ -203,11 +195,6 @@ var auditBodyOmittedRoutes = map[string]struct{}{
 	"POST /api/v1/admin/security-audit/exceptions":                               {},
 	"POST /api/v1/admin/security-audit/exceptions/:id/expire":                    {},
 	"POST /api/v1/admin/security-audit/endpoints/:id/reset-breaker":              {},
-	"PUT /api/v1/admin/invocation-archive/config":                                {},
-	"POST /api/v1/admin/invocation-archive/records/:id/reveal":                   {},
-	"POST /api/v1/admin/invocation-archive/records/:id/payloads/:slot":           {},
-	"DELETE /api/v1/admin/invocation-archive/records/:id":                        {},
-	"POST /api/v1/admin/invocation-archive/records/batch-delete":                 {},
 }
 
 // NewAuditLogMiddleware 创建审计中间件。

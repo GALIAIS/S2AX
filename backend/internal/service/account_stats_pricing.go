@@ -16,6 +16,7 @@ import (
 //
 // upstreamModel 是最终发往上游的模型 ID。
 // totalCost 是本次请求的客户计费（倍率前），用于优先级 2。
+// serviceTier 是最终参与用户计费的 OpenAI 服务层级，用于优先级 3。
 func resolveAccountStatsCost(
 	ctx context.Context,
 	channelService *ChannelService,
@@ -68,13 +69,6 @@ func tryModelFilePricing(billingService *BillingService, model string, tokens Us
 		return nil
 	}
 	tier := optionalServiceTier(serviceTier)
-	if billingService.shouldApplySessionLongContextPricing(tokens, pricing) {
-		breakdown, err := billingService.CalculateCostWithServiceTier(model, tokens, 1, tier)
-		if err != nil || breakdown == nil || breakdown.TotalCost <= 0 {
-			return nil
-		}
-		return &breakdown.TotalCost
-	}
 	breakdown, err := billingService.CalculateCostWithServiceTier(model, tokens, 1, tier)
 	if err != nil || breakdown == nil || breakdown.TotalCost <= 0 {
 		return nil
@@ -241,6 +235,21 @@ func calculateTokenStatsCost(pricing *ChannelModelPricing, tokens UsageTokens, s
 			if iv.PerRequestPrice != nil {
 				merged.PerRequestPrice = iv.PerRequestPrice
 			}
+			if iv.CacheWrite1hPrice != nil {
+				merged.CacheWrite1hPrice = iv.CacheWrite1hPrice
+			}
+			if iv.InputMultiplier != nil {
+				merged.InputPrice = multiplyStatsPrice(merged.InputPrice, iv.InputMultiplier)
+			}
+			if iv.OutputMultiplier != nil {
+				merged.OutputPrice = multiplyStatsPrice(merged.OutputPrice, iv.OutputMultiplier)
+			}
+			if iv.CacheWriteMultiplier != nil {
+				merged.CacheWritePrice = multiplyStatsPrice(merged.CacheWritePrice, iv.CacheWriteMultiplier)
+			}
+			if iv.CacheReadMultiplier != nil {
+				merged.CacheReadPrice = multiplyStatsPrice(merged.CacheReadPrice, iv.CacheReadMultiplier)
+			}
 			p = &merged
 		}
 	}
@@ -269,15 +278,23 @@ func calculateTokenStatsCost(pricing *ChannelModelPricing, tokens UsageTokens, s
 	if textOutputTokens < 0 {
 		textOutputTokens = 0
 	}
+	cacheCreationCost := float64(tokens.CacheCreationTokens) * cacheWritePrice
+	if p.CacheWrite1hPrice != nil {
+		cache5m, cache1h := normalizeCacheCreationBreakdown(tokens)
+		if cache5m > 0 || cache1h > 0 {
+			cacheCreationCost = float64(cache5m)*cacheWritePrice +
+				float64(cache1h)*deref(p.CacheWrite1hPrice)
+		}
+	}
 	cost := float64(textInputTokens)*inputPrice +
 		float64(imageInputTokens)*imageInputPrice +
 		float64(textOutputTokens)*outputPrice +
-		float64(tokens.CacheCreationTokens)*cacheWritePrice +
+		cacheCreationCost +
 		float64(tokens.CacheReadTokens)*cacheReadPrice +
 		float64(tokens.ImageOutputTokens)*deref(p.ImageOutputPrice)
 	hasExplicitPrice := p.InputPrice != nil || p.InputPricePriority != nil ||
 		p.OutputPrice != nil || p.OutputPricePriority != nil ||
-		p.CacheWritePrice != nil || p.CacheWritePricePriority != nil ||
+		p.CacheWritePrice != nil || p.CacheWritePricePriority != nil || p.CacheWrite1hPrice != nil ||
 		p.CacheReadPrice != nil || p.CacheReadPricePriority != nil ||
 		p.ImageInputPrice != nil || p.ImageOutputPrice != nil
 	if cost <= 0 && !hasExplicitPrice {
@@ -294,6 +311,15 @@ func selectServiceTierPrice(standard, priority *float64, serviceTier string) flo
 		return 0
 	}
 	return *standard
+}
+
+// multiplyStatsPrice 将区间倍率应用于基础价格，缺失基础价格时保持未配置状态。
+func multiplyStatsPrice(price, multiplier *float64) *float64 {
+	if price == nil || multiplier == nil {
+		return price
+	}
+	value := *price * *multiplier
+	return &value
 }
 
 func optionalServiceTier(values []string) string {
@@ -347,8 +373,12 @@ func applyAccountStatsCost(
 			sizeTier = strings.TrimSpace(*usageLog.VideoResolution)
 		}
 	}
+	effectiveServiceTier := serviceTier
+	if usageLog != nil && usageLog.ServiceTier != nil {
+		effectiveServiceTier = *usageLog.ServiceTier
+	}
 	usageLog.AccountStatsCost = resolveAccountStatsCost(
-		ctx, cs, bs, accountID, groupID, model, tokens, requestCount, totalCost, serviceTier,
+		ctx, cs, bs, accountID, groupID, model, tokens, requestCount, totalCost, effectiveServiceTier,
 		sizeTier,
 	)
 }

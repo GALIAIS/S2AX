@@ -66,8 +66,10 @@ func (r *channelRepository) batchLoadAccountStatsModelPricing(ctx context.Contex
 	}
 
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, rule_id, platform, models, billing_mode, input_price, input_price_priority, output_price, output_price_priority,
-		        cache_write_price, cache_write_price_priority, cache_read_price, cache_read_price_priority, image_input_price, image_output_price, per_request_price, created_at, updated_at
+		`SELECT id, rule_id, platform, models, billing_mode,
+		        input_price, input_price_priority, output_price, output_price_priority,
+		        cache_write_price, cache_write_1h_price, cache_write_price_priority,
+		        cache_read_price, cache_read_price_priority, image_input_price, image_output_price, per_request_price, created_at, updated_at
 		 FROM channel_account_stats_model_pricing WHERE rule_id = ANY($1) ORDER BY rule_id, id`,
 		pq.Array(ruleIDs),
 	)
@@ -84,8 +86,8 @@ func (r *channelRepository) batchLoadAccountStatsModelPricing(ctx context.Contex
 		if err := rows.Scan(
 			&p.ID, &ruleID, &p.Platform, &modelsJSON, &p.BillingMode,
 			&p.InputPrice, &p.InputPricePriority, &p.OutputPrice, &p.OutputPricePriority,
-			&p.CacheWritePrice, &p.CacheWritePricePriority, &p.CacheReadPrice, &p.CacheReadPricePriority,
-			&p.ImageInputPrice, &p.ImageOutputPrice, &p.PerRequestPrice, &p.CreatedAt, &p.UpdatedAt,
+			&p.CacheWritePrice, &p.CacheWrite1hPrice, &p.CacheWritePricePriority,
+			&p.CacheReadPrice, &p.CacheReadPricePriority, &p.ImageInputPrice, &p.ImageOutputPrice, &p.PerRequestPrice, &p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan account stats model pricing: %w", err)
 		}
@@ -179,11 +181,12 @@ func createAccountStatsModelPricingTx(ctx context.Context, tx *sql.Tx, ruleID in
 	}
 	platform := pricing.Platform
 	err = tx.QueryRowContext(ctx,
-		`INSERT INTO channel_account_stats_model_pricing (rule_id, platform, models, billing_mode, input_price, input_price_priority, output_price, output_price_priority, cache_write_price, cache_write_price_priority, cache_read_price, cache_read_price_priority, image_input_price, image_output_price, per_request_price)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id, created_at, updated_at`,
+		`INSERT INTO channel_account_stats_model_pricing (rule_id, platform, models, billing_mode, input_price, input_price_priority, output_price, output_price_priority, cache_write_price, cache_write_1h_price, cache_write_price_priority, cache_read_price, cache_read_price_priority, image_input_price, image_output_price, per_request_price)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id, created_at, updated_at`,
 		ruleID, platform, modelsJSON, billingMode,
 		pricing.InputPrice, pricing.InputPricePriority, pricing.OutputPrice, pricing.OutputPricePriority,
-		pricing.CacheWritePrice, pricing.CacheWritePricePriority, pricing.CacheReadPrice, pricing.CacheReadPricePriority,
+		pricing.CacheWritePrice, pricing.CacheWrite1hPrice, pricing.CacheWritePricePriority,
+		pricing.CacheReadPrice, pricing.CacheReadPricePriority,
 		pricing.ImageInputPrice, pricing.ImageOutputPrice, pricing.PerRequestPrice,
 	).Scan(&pricing.ID, &pricing.CreatedAt, &pricing.UpdatedAt)
 	if err != nil {
@@ -204,11 +207,12 @@ func createAccountStatsModelPricingTx(ctx context.Context, tx *sql.Tx, ruleID in
 func createAccountStatsIntervalTx(ctx context.Context, tx *sql.Tx, iv *service.PricingInterval) error {
 	return tx.QueryRowContext(ctx,
 		`INSERT INTO channel_account_stats_pricing_intervals
-		 (pricing_id, min_tokens, max_tokens, tier_label, input_price, input_price_priority, output_price, output_price_priority, cache_write_price, cache_write_price_priority, cache_read_price, cache_read_price_priority, per_request_price, sort_order)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id, created_at, updated_at`,
+		 (pricing_id, min_tokens, max_tokens, tier_label, input_price, input_price_priority, output_price, output_price_priority, cache_write_price, cache_write_1h_price, cache_write_price_priority, cache_read_price, cache_read_price_priority, per_request_price, sort_order)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id, created_at, updated_at`,
 		iv.PricingID, iv.MinTokens, iv.MaxTokens, iv.TierLabel,
 		iv.InputPrice, iv.InputPricePriority, iv.OutputPrice, iv.OutputPricePriority,
-		iv.CacheWritePrice, iv.CacheWritePricePriority, iv.CacheReadPrice, iv.CacheReadPricePriority,
+		iv.CacheWritePrice, iv.CacheWrite1hPrice, iv.CacheWritePricePriority,
+		iv.CacheReadPrice, iv.CacheReadPricePriority,
 		iv.PerRequestPrice, iv.SortOrder,
 	).Scan(&iv.ID, &iv.CreatedAt, &iv.UpdatedAt)
 }
@@ -221,7 +225,8 @@ func (r *channelRepository) batchLoadAccountStatsIntervals(ctx context.Context, 
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, pricing_id, min_tokens, max_tokens, tier_label,
 		        input_price, input_price_priority, output_price, output_price_priority,
-		        cache_write_price, cache_write_price_priority, cache_read_price, cache_read_price_priority,
+		        cache_write_price, cache_write_1h_price, cache_write_price_priority,
+		        cache_read_price, cache_read_price_priority,
 		        per_request_price, sort_order, created_at, updated_at
 		 FROM channel_account_stats_pricing_intervals
 		 WHERE pricing_id = ANY($1) ORDER BY pricing_id, sort_order, id`,
@@ -238,7 +243,8 @@ func (r *channelRepository) batchLoadAccountStatsIntervals(ctx context.Context, 
 		if err := rows.Scan(
 			&iv.ID, &iv.PricingID, &iv.MinTokens, &iv.MaxTokens, &iv.TierLabel,
 			&iv.InputPrice, &iv.InputPricePriority, &iv.OutputPrice, &iv.OutputPricePriority,
-			&iv.CacheWritePrice, &iv.CacheWritePricePriority, &iv.CacheReadPrice, &iv.CacheReadPricePriority,
+			&iv.CacheWritePrice, &iv.CacheWrite1hPrice, &iv.CacheWritePricePriority,
+			&iv.CacheReadPrice, &iv.CacheReadPricePriority,
 			&iv.PerRequestPrice, &iv.SortOrder, &iv.CreatedAt, &iv.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan account stats pricing interval: %w", err)

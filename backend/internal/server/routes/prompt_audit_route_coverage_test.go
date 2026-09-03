@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler"
-	"github.com/Wei-Shaw/sub2api/internal/invocationarchive"
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	servermiddleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/gin-gonic/gin"
@@ -49,6 +48,7 @@ func TestEveryGatewayPOSTRouteIsClassifiedForPromptAuditCoverage(t *testing.T) {
 		"/models/*modelAction":      {"gemini_v1beta_handler.go"},
 		"/tts":                      {"grok_audio.go"},
 		"/web_search":               {"gateway_web_search.go"},
+		"/x_search":                 {"gateway_web_search.go"},
 	}
 	excluded := map[string]string{
 		"/messages/count_tokens":     "tokenization only; it does not execute a model request",
@@ -84,43 +84,6 @@ func TestEveryGatewayPOSTRouteIsClassifiedForPromptAuditCoverage(t *testing.T) {
 		require.NotEmpty(t, strings.TrimSpace(reason))
 		_, exists := actual[route]
 		require.Truef(t, exists, "stale excluded route %s", route)
-	}
-}
-
-func TestInvocationArchiveAdminRoutesRejectUnauthenticatedAndNonAdminRequests(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	handlers := &handler.Handlers{Admin: &handler.AdminHandlers{
-		InvocationArchive: invocationarchive.NewAdminHandler(nil),
-	}}
-	adminAuth := servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
-		if c.GetHeader("Authorization") == "" {
-			servermiddleware.AbortWithError(c, http.StatusUnauthorized, "UNAUTHORIZED", "Authorization required")
-			return
-		}
-		servermiddleware.AbortWithError(c, http.StatusForbidden, "FORBIDDEN", "Admin access required")
-	})
-	auditLog := servermiddleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() })
-	stepUp := servermiddleware.StepUpAuthMiddleware(func(c *gin.Context) { c.Next() })
-	RegisterAdminRoutes(router.Group("/api/v1"), handlers, adminAuth, auditLog, stepUp, nil, nil)
-
-	for _, tc := range []struct {
-		name       string
-		auth       string
-		wantStatus int
-	}{
-		{name: "unauthenticated", wantStatus: http.StatusUnauthorized},
-		{name: "non-admin", auth: "Bearer user-token", wantStatus: http.StatusForbidden},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			recorder := httptest.NewRecorder()
-			request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/invocation-archive/config", nil)
-			if tc.auth != "" {
-				request.Header.Set("Authorization", tc.auth)
-			}
-			router.ServeHTTP(recorder, request)
-			require.Equal(t, tc.wantStatus, recorder.Code)
-		})
 	}
 }
 
@@ -220,40 +183,6 @@ func TestSecurityAuditHighImpactRoutesRequireStepUp(t *testing.T) {
 		{http.MethodPost, "/api/v1/admin/security-audit/endpoints/1/reset-breaker"},
 	}
 
-	for _, route := range routes {
-		t.Run(route.method+" "+route.path, func(t *testing.T) {
-			recorder := httptest.NewRecorder()
-			router.ServeHTTP(recorder, httptest.NewRequest(route.method, route.path, nil))
-			require.Equal(t, http.StatusPreconditionRequired, recorder.Code)
-		})
-	}
-	require.Equal(t, len(routes), stepUpCalls)
-}
-
-func TestInvocationArchiveHighImpactRoutesRequireStepUp(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	handlers := &handler.Handlers{Admin: &handler.AdminHandlers{
-		InvocationArchive: invocationarchive.NewAdminHandler(nil),
-	}}
-	stepUpCalls := 0
-	stepUp := servermiddleware.StepUpAuthMiddleware(func(c *gin.Context) {
-		stepUpCalls++
-		c.AbortWithStatus(http.StatusPreconditionRequired)
-	})
-	registerInvocationArchiveRoutes(router.Group("/api/v1/admin"), handlers, stepUp)
-
-	routes := []struct {
-		method string
-		path   string
-	}{
-		{http.MethodPut, "/api/v1/admin/invocation-archive/config"},
-		{http.MethodPost, "/api/v1/admin/invocation-archive/cleanup"},
-		{http.MethodPost, "/api/v1/admin/invocation-archive/records/1/reveal"},
-		{http.MethodPost, "/api/v1/admin/invocation-archive/records/1/payloads/request"},
-		{http.MethodDelete, "/api/v1/admin/invocation-archive/records/1"},
-		{http.MethodPost, "/api/v1/admin/invocation-archive/records/batch-delete"},
-	}
 	for _, route := range routes {
 		t.Run(route.method+" "+route.path, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
