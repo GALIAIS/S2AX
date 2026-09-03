@@ -268,7 +268,7 @@ func (r *sharedQuotaPoolRepository) ListActiveMembers(ctx context.Context, group
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	members := make([]service.SharedQuotaPoolMember, 0)
 	for rows.Next() {
@@ -297,7 +297,7 @@ func (r *sharedQuotaPoolRepository) GetUsage(ctx context.Context, groupID int64,
 	if err != nil {
 		return 0, nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	usageByUser := make(map[int64]float64)
 	var total float64
 	for rows.Next() {
@@ -460,7 +460,7 @@ func (r *sharedQuotaPoolRepository) getWindows(ctx context.Context, groupID int6
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	windows := make([]service.SharedQuotaPoolWindowConfig, 0)
 	for rows.Next() {
 		var window service.SharedQuotaPoolWindowConfig

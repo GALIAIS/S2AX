@@ -84,7 +84,7 @@ func (s *AccountAllocationService) ListAccountUsageVisibilityGrants(ctx context.
 	if err != nil {
 		return nil, fmt.Errorf("list account usage visibility grants: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	grants := make([]AccountUsageVisibilityGrant, 0)
 	for rows.Next() {
