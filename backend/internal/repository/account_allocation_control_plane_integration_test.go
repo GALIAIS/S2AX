@@ -81,7 +81,8 @@ func TestAccountAllocationControlPlaneLifecycle(t *testing.T) {
 		require.NotContains(t, item.AccountName, "alpha.account")
 		require.NotContains(t, item.AccountName, "bravo.account")
 	}
-	require.Equal(t, 2, targetDedicatedCount)
+	// 显式专属分组权限还允许查看该分组内尚未租约的账号，因此目录包含全部 3 个账号。
+	require.Equal(t, 3, targetDedicatedCount)
 	observerDirectory, err := svc.ListUserVisibleAccounts(ctx, observerID)
 	require.NoError(t, err)
 	for _, item := range observerDirectory.Items {

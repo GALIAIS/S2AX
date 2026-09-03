@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/ent"
@@ -56,8 +57,10 @@ func (r *settingRepository) Set(ctx context.Context, key, value string) error {
 func (r *settingRepository) CompareAndSet(ctx context.Context, key string, expectedValue *string, value string) (bool, error) {
 	now := time.Now()
 	if expectedValue == nil {
-		_, err := r.client.Setting.Create().SetKey(key).SetValue(value).SetUpdatedAt(now).Save(ctx)
-		if ent.IsConstraintError(err) {
+		// 使用原子化的冲突忽略，避免唯一键冲突让调用方已有事务进入 aborted 状态。
+		_, err := r.client.Setting.Create().SetKey(key).SetValue(value).SetUpdatedAt(now).
+			OnConflictColumns(setting.FieldKey).DoNothing().ID(ctx)
+		if err == sql.ErrNoRows {
 			return false, nil
 		}
 		return err == nil, err

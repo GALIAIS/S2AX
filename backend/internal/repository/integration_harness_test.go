@@ -251,10 +251,13 @@ func resetIntegrationData(t testing.TB) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// users is the root of every per-user integration fixture. PostgreSQL's
-	// transitive CASCADE clears virtual-currency ledgers, usage, subscriptions,
-	// and other dependent tenant rows while leaving reference tables intact.
-	_, err := integrationDB.ExecContext(ctx, "TRUNCATE TABLE public.users RESTART IDENTITY CASCADE")
+	// 清理跨事务测试写入的租户数据，避免使用全局 Ent client 的测试污染后续断言。
+	// groups 仅保留迁移 008 创建的默认分组，其他业务表通过外键级联清理。
+	_, err := integrationDB.ExecContext(ctx, `
+		TRUNCATE TABLE public.users, public.accounts, public.groups, public.virtual_currencies
+		RESTART IDENTITY CASCADE;
+		INSERT INTO public.groups (name, description)
+		VALUES ('default', 'Default group')`)
 	require.NoError(t, err, "reset integration tenant data")
 }
 
