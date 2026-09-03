@@ -185,7 +185,9 @@ func TestProvisionCodexAgentIdentityBootstrapsFromPATWithoutPersistingBearerToke
 	require.Equal(t, OpenAIAuthModeAgentIdentity, provision.Credentials["auth_mode"])
 	require.Equal(t, "runtime-bootstrap", provision.Credentials["agent_runtime_id"])
 	require.Equal(t, "task-bootstrap", provision.Credentials["task_id"])
-	require.NoError(t, ValidateOpenAIAgentIdentityPrivateKey(provision.Credentials["agent_private_key"].(string)))
+	privateKey, ok := provision.Credentials["agent_private_key"].(string)
+	require.True(t, ok)
+	require.NoError(t, ValidateOpenAIAgentIdentityPrivateKey(privateKey))
 }
 
 func TestProvisionChatGPTSessionAgentIdentityBootstrapsWithoutPAT(t *testing.T) {

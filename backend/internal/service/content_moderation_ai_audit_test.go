@@ -46,8 +46,12 @@ func TestCallModerationOnceWithInputUsesChatCompletionsPayload(t *testing.T) {
 	messages, ok := payload["messages"].([]any)
 	require.True(t, ok)
 	require.Len(t, messages, 2)
-	require.Equal(t, "system", messages[0].(map[string]any)["role"])
-	require.Contains(t, messages[1].(map[string]any)["content"], "<user_input")
+	systemMessage, ok := messages[0].(map[string]any)
+	require.True(t, ok)
+	userMessage, ok := messages[1].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "system", systemMessage["role"])
+	require.Contains(t, userMessage["content"], "<user_input")
 	assert.False(t, result.Flagged)
 }
 

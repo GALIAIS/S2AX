@@ -22,8 +22,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
-	"golang.org/x/sync/semaphore"
 	"go.uber.org/zap"
+	"golang.org/x/sync/semaphore"
 )
 
 const openAIStreamScanQueueByteLimit int64 = openAIStreamPreOutputBufferLimit

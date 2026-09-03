@@ -1083,7 +1083,7 @@ func (s *AccountAllocationService) ListUserAssignments(ctx context.Context, user
 	if err != nil {
 		return nil, fmt.Errorf("list user account allocations: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]AccountAllocationUserAssignment, 0)
 	for rows.Next() {
 		var item AccountAllocationUserAssignment
@@ -1380,7 +1380,7 @@ func (s *AccountAllocationService) ListUserVisibleAccounts(ctx context.Context, 
 	if err != nil {
 		return nil, fmt.Errorf("list user visible account directory: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	publicGroups := make(map[int64]struct{})
 	dedicatedGroups := make(map[int64]struct{})
@@ -1584,7 +1584,7 @@ func (s *AccountAllocationService) attachAccountAllocationVisibleWindowStats(
 	if err != nil {
 		return fmt.Errorf("load account directory window statistics: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var ordinal int
@@ -1825,7 +1825,7 @@ func (s *AccountAllocationService) ListManualCandidates(ctx context.Context, pol
 	if err != nil {
 		return nil, fmt.Errorf("list account allocation manual candidates: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	items := make([]AccountAllocationCandidate, 0)
 	for rows.Next() {
@@ -1958,7 +1958,7 @@ func (s *AccountAllocationService) activeAssignmentOwners(ctx context.Context, a
 	if err != nil {
 		return nil, fmt.Errorf("load account allocation owners: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var accountID int64
 		var owner accountAllocationOwner
@@ -2121,7 +2121,7 @@ func releaseActiveAssignmentsForPolicy(ctx context.Context, tx *sql.Tx, policyID
 	if err != nil {
 		return nil, fmt.Errorf("release active account allocation assignments: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	ids := make([]int64, 0)
 	for rows.Next() {
 		var id int64

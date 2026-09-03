@@ -451,7 +451,7 @@ type OpenAIGatewayService struct {
 	accountAllocationService *AccountAllocationService
 	liveAttestation          liveattestation.Provider
 	liveAttestationCipher    SecretEncryptor
-	pluginManager         *PluginManager
+	pluginManager            *PluginManager
 
 	openaiWSPoolOnce               sync.Once
 	openaiWSStateStoreOnce         sync.Once

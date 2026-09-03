@@ -42,8 +42,8 @@ const (
 	// Native image requests and the Codex hosted bridge must use the same
 	// default tool model; otherwise a bridge request silently falls back to the
 	// text model's image capability instead of the configured Image 2 path.
-	openAIImagesDefaultToolModel   = "gpt-image-2"
-	openAIImagesResponsesMainModel = "gpt-5.4-mini"
+	openAIImagesDefaultToolModel           = "gpt-image-2"
+	openAIImagesResponsesMainModel         = "gpt-5.4-mini"
 	openAIImagesVerbatimPromptInstructions = "When invoking the image_generation tool, use the user's image prompt verbatim. Do not rewrite, expand, summarize, embellish, translate, normalize punctuation, or add or remove visual details or constraints. Preserve the original language, wording, capitalization, quotes, and punctuation exactly."
 )
 
