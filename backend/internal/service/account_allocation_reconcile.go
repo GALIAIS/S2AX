@@ -108,7 +108,7 @@ func (s *AccountAllocationService) reconcilePolicies(ctx context.Context, limit 
 	if err != nil {
 		return nil, fmt.Errorf("list account allocation policies for reconciliation: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	capacity := limit
 	if capacity <= 0 {
@@ -329,7 +329,7 @@ func (s *AccountAllocationService) releaseUnhealthyAccountAllocationAssignments(
 	if err != nil {
 		return 0, fmt.Errorf("list account allocation assignment health: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	healthRows := make([]accountAllocationAssignmentHealth, 0)
 	for rows.Next() {
@@ -483,7 +483,7 @@ func (s *AccountAllocationService) fillAccountAllocationAssignments(ctx context.
 	if err != nil {
 		return 0, fmt.Errorf("lock account allocation fill candidates: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	accountIDs := make([]int64, 0, needed)
 	for rows.Next() {
