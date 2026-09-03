@@ -684,7 +684,7 @@ func (s *AccountAllocationService) ListPolicies(ctx context.Context, filter Acco
 	if err != nil {
 		return nil, 0, fmt.Errorf("list account allocation policies: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]AccountAllocationPolicy, 0)
 	for rows.Next() {
 		policy, err := scanAccountAllocationPolicy(rows)
@@ -934,7 +934,7 @@ func (s *AccountAllocationService) ListAssignments(ctx context.Context, policyID
 	if err != nil {
 		return nil, fmt.Errorf("list account allocation assignments: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]AccountAllocationAssignment, 0)
 	for rows.Next() {
 		assignment, err := scanAccountAllocationAssignment(rows)
@@ -1023,7 +1023,7 @@ func (s *AccountAllocationService) ListEvents(ctx context.Context, policyID int6
 	if err != nil {
 		return nil, 0, fmt.Errorf("list account allocation events: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]AccountAllocationEvent, 0)
 	for rows.Next() {
 		var item AccountAllocationEvent

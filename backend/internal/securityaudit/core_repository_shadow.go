@@ -10,7 +10,7 @@ import (
 
 const (
 	securityAuditShadowEvaluationLock int64 = 579147893221901925
-	securityAuditShadowDecisionBatch        = 500
+	securityAuditShadowDecisionBatch  int64 = 500
 )
 
 type shadowDecision struct {
@@ -55,7 +55,7 @@ FOR UPDATE`).Scan(&cursor); err != nil {
 	if err != nil {
 		return 0, err
 	}
-	decisions, err := listShadowDecisions(ctx, tx, cursor, securityAuditShadowDecisionBatch)
+	decisions, err := listShadowDecisions(ctx, tx, cursor, int(securityAuditShadowDecisionBatch))
 	if err != nil {
 		return 0, err
 	}

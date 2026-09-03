@@ -885,7 +885,7 @@ func (s *SharedQuotaPoolService) calculateOfficialWindowSnapshot(ctx context.Con
 
 	analyticsAvailable := official != nil && official.AnalyticsStatus == "available" && !official.AnalyticsFetchedAt.IsZero() && now.Sub(official.AnalyticsFetchedAt) <= officialQuotaMaxStale
 	analyticsStale := official != nil && official.AnalyticsStatus != "" && (official.AnalyticsFetchedAt.IsZero() || now.Sub(official.AnalyticsFetchedAt) > officialAnalyticsSnapshotTTL)
-	allocationMode := "pending"
+	var allocationMode string
 	estimatedCapacityCredits := 0.0
 	availablePoolCredits := 0.0
 	poolUsedCredits := 0.0

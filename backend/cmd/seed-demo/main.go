@@ -55,6 +55,8 @@ func main() {
 		fatal("begin seed transaction", err)
 	}
 
+	// 演示脚本固定嵌入，唯一动态值是 bcrypt 生成且不含单引号的密码哈希。
+	// #nosec G701 -- 该受限哈希不会改变脚本的 SQL 结构。
 	if _, err := tx.ExecContext(ctx, sqlText); err != nil {
 		_ = tx.Rollback()
 		fatal("execute demo seed", err)

@@ -88,30 +88,30 @@ type AccountStatsPricingRule struct {
 
 // ChannelModelPricing 渠道模型定价条目
 type ChannelModelPricing struct {
-	ID                int64               `json:"id,omitempty"`
-	ChannelID         int64               `json:"channel_id,omitempty"`
-	Platform          string              `json:"platform"` // 所属平台（anthropic/openai/gemini/...）
-	Models            []string            `json:"models"`
-	BillingMode       BillingMode         `json:"billing_mode"`
-	InputPrice        *float64            `json:"input_price"`
+	ID          int64       `json:"id,omitempty"`
+	ChannelID   int64       `json:"channel_id,omitempty"`
+	Platform    string      `json:"platform"` // 所属平台（anthropic/openai/gemini/...）
+	Models      []string    `json:"models"`
+	BillingMode BillingMode `json:"billing_mode"`
+	InputPrice  *float64    `json:"input_price"`
 	// Fast/priority 档价格为空时沿用标准价格，保留现有渠道配置兼容性。
-	InputPricePriority *float64           `json:"input_price_priority,omitempty"`
-	OutputPrice       *float64            `json:"output_price"`
-	OutputPricePriority *float64          `json:"output_price_priority,omitempty"`
-	CacheWritePrice   *float64            `json:"cache_write_price"`
-	CacheWritePricePriority *float64      `json:"cache_write_price_priority,omitempty"`
-	CacheWrite1hPrice *float64            `json:"cache_write_1h_price"`
-	CacheReadPrice    *float64            `json:"cache_read_price"`
-	CacheReadPricePriority *float64       `json:"cache_read_price_priority,omitempty"`
-	FastMultiplier    *float64            `json:"fast_multiplier"`
-	FlexMultiplier    *float64            `json:"flex_multiplier"`
-	ImageInputPrice   *float64            `json:"image_input_price"`
-	ImageOutputPrice  *float64            `json:"image_output_price"`
-	PerRequestPrice   *float64            `json:"per_request_price"`
-	Intervals         []PricingInterval   `json:"intervals"`
-	TimePricing       *ChannelTimePricing `json:"time_pricing,omitempty"`
-	CreatedAt         time.Time           `json:"created_at,omitempty"`
-	UpdatedAt         time.Time           `json:"updated_at,omitempty"`
+	InputPricePriority      *float64            `json:"input_price_priority,omitempty"`
+	OutputPrice             *float64            `json:"output_price"`
+	OutputPricePriority     *float64            `json:"output_price_priority,omitempty"`
+	CacheWritePrice         *float64            `json:"cache_write_price"`
+	CacheWritePricePriority *float64            `json:"cache_write_price_priority,omitempty"`
+	CacheWrite1hPrice       *float64            `json:"cache_write_1h_price"`
+	CacheReadPrice          *float64            `json:"cache_read_price"`
+	CacheReadPricePriority  *float64            `json:"cache_read_price_priority,omitempty"`
+	FastMultiplier          *float64            `json:"fast_multiplier"`
+	FlexMultiplier          *float64            `json:"flex_multiplier"`
+	ImageInputPrice         *float64            `json:"image_input_price"`
+	ImageOutputPrice        *float64            `json:"image_output_price"`
+	PerRequestPrice         *float64            `json:"per_request_price"`
+	Intervals               []PricingInterval   `json:"intervals"`
+	TimePricing             *ChannelTimePricing `json:"time_pricing,omitempty"`
+	CreatedAt               time.Time           `json:"created_at,omitempty"`
+	UpdatedAt               time.Time           `json:"updated_at,omitempty"`
 }
 
 // ChannelTimePricing 渠道模型定价的分时倍率配置。
@@ -130,28 +130,28 @@ type ChannelTimePricingPeriod struct {
 
 // PricingInterval 定价区间（token 区间 / 按次分层 / 图片分辨率分层）
 type PricingInterval struct {
-	ID                   int64     `json:"id,omitempty"`
-	PricingID            int64     `json:"pricing_id,omitempty"`
-	MinTokens            int       `json:"min_tokens"`
-	MaxTokens            *int      `json:"max_tokens"`
-	TierLabel            string    `json:"tier_label"`
-	InputPrice           *float64  `json:"input_price"`
-	InputPricePriority   *float64  `json:"input_price_priority,omitempty"`
-	OutputPrice          *float64  `json:"output_price"`
-	OutputPricePriority  *float64  `json:"output_price_priority,omitempty"`
-	CacheWritePrice      *float64  `json:"cache_write_price"`
-	CacheWritePricePriority *float64 `json:"cache_write_price_priority,omitempty"`
-	CacheWrite1hPrice    *float64  `json:"cache_write_1h_price"`
-	CacheReadPrice       *float64  `json:"cache_read_price"`
-	CacheReadPricePriority *float64 `json:"cache_read_price_priority,omitempty"`
-	InputMultiplier      *float64  `json:"input_multiplier"`
-	OutputMultiplier     *float64  `json:"output_multiplier"`
-	CacheWriteMultiplier *float64  `json:"cache_write_multiplier"`
-	CacheReadMultiplier  *float64  `json:"cache_read_multiplier"`
-	PerRequestPrice      *float64  `json:"per_request_price"`
-	SortOrder            int       `json:"sort_order"`
-	CreatedAt            time.Time `json:"created_at,omitempty"`
-	UpdatedAt            time.Time `json:"updated_at,omitempty"`
+	ID                      int64     `json:"id,omitempty"`
+	PricingID               int64     `json:"pricing_id,omitempty"`
+	MinTokens               int       `json:"min_tokens"`
+	MaxTokens               *int      `json:"max_tokens"`
+	TierLabel               string    `json:"tier_label"`
+	InputPrice              *float64  `json:"input_price"`
+	InputPricePriority      *float64  `json:"input_price_priority,omitempty"`
+	OutputPrice             *float64  `json:"output_price"`
+	OutputPricePriority     *float64  `json:"output_price_priority,omitempty"`
+	CacheWritePrice         *float64  `json:"cache_write_price"`
+	CacheWritePricePriority *float64  `json:"cache_write_price_priority,omitempty"`
+	CacheWrite1hPrice       *float64  `json:"cache_write_1h_price"`
+	CacheReadPrice          *float64  `json:"cache_read_price"`
+	CacheReadPricePriority  *float64  `json:"cache_read_price_priority,omitempty"`
+	InputMultiplier         *float64  `json:"input_multiplier"`
+	OutputMultiplier        *float64  `json:"output_multiplier"`
+	CacheWriteMultiplier    *float64  `json:"cache_write_multiplier"`
+	CacheReadMultiplier     *float64  `json:"cache_read_multiplier"`
+	PerRequestPrice         *float64  `json:"per_request_price"`
+	SortOrder               int       `json:"sort_order"`
+	CreatedAt               time.Time `json:"created_at,omitempty"`
+	UpdatedAt               time.Time `json:"updated_at,omitempty"`
 }
 
 // IsActive 判断渠道是否启用

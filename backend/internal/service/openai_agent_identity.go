@@ -294,9 +294,11 @@ func generateAgentIdentityKeyMaterial() (ed25519.PrivateKey, string, string, err
 	if err != nil {
 		return nil, "", "", errors.New("failed to encode agent identity private key")
 	}
+	// Ed25519 私钥末尾保存对应的公钥，直接切片可避免额外的类型断言。
+	publicKey := ed25519.PublicKey(privateKey[ed25519.SeedSize:])
 	return privateKey,
 		base64.StdEncoding.EncodeToString(der),
-		encodeAgentIdentityPublicKeySSH(privateKey.Public().(ed25519.PublicKey)),
+		encodeAgentIdentityPublicKeySSH(publicKey),
 		nil
 }
 

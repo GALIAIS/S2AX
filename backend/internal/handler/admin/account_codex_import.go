@@ -412,7 +412,7 @@ func (h *AccountHandler) prepareCodexAgentIdentityImport(ctx context.Context, it
 		return nil
 	}
 	if !item.IsChatGPTSession {
-		return errors.New("Agent Identity 模式需要 ChatGPT session JSON，不接受单独的 at- token")
+		return errors.New("agent identity 模式需要 ChatGPT session JSON，不接受单独的 at- token")
 	}
 	if strings.TrimSpace(item.AccessToken) == "" {
 		return errors.New("ChatGPT session JSON 中缺少 accessToken")

@@ -982,7 +982,7 @@ func TestApplyAccountStatsCost_UsesUsageLogServiceTier(t *testing.T) {
 	applyAccountStatsCost(
 		context.Background(), usageLog, cs, bs,
 		1, 10, "gpt-5.6-sol", "gpt-5.6-sol",
-		UsageTokens{InputTokens: 100, OutputTokens: 50}, 999,
+		UsageTokens{InputTokens: 100, OutputTokens: 50}, 999, serviceTier,
 	)
 
 	require.NotNil(t, usageLog.AccountStatsCost)

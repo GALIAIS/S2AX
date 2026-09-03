@@ -570,7 +570,7 @@ func TestGrokFreeClientToolCacheClaudeDesktopResponsesAutoOptIn(t *testing.T) {
 	}
 }
 
-func TestGrokFreeClientToolCacheClaudeDesktopFingerprintRequiresAllSignals(t *testing.T) {
+func TestGrokFreeClientToolCacheKnownFreeAccountDoesNotRequireFingerprint(t *testing.T) {
 	account := healthyGrokOAuthGatewayTestAccount(90142, "access-token")
 	account.Credentials["subscription_tier"] = "free"
 	body := []byte(`{"model":"grok","tools":[{"type":"function","name":"Read","parameters":{"type":"object"}}],"tool_choice":"auto"}`)
@@ -666,7 +666,11 @@ func TestGrokFreeClientToolCacheClaudeDesktopFingerprintRequiresAllSignals(t *te
 			patched, err := applyGrokFreeRequestToolCacheRoute(c, body, body, account, "isolated-id")
 
 			require.NoError(t, err)
-			require.JSONEq(t, string(body), string(patched))
+			tools := gjson.GetBytes(patched, "tools").Array()
+			require.Len(t, tools, 3)
+			require.Equal(t, "Read", tools[0].Get("name").String())
+			require.Equal(t, "web_search", tools[1].Get("type").String())
+			require.Equal(t, "x_search", tools[2].Get("type").String())
 		})
 	}
 }
@@ -710,7 +714,7 @@ func TestGrokFreeClientToolCacheClaudeDesktopAutoOptInDoesNotOverridePaidTier(t 
 	require.JSONEq(t, string(body), string(patched))
 }
 
-func TestGrokFreeRequestClientSearchFunctionRequiresOptIn(t *testing.T) {
+func TestGrokFreeRequestClientSearchFunctionUsesNativeSearch(t *testing.T) {
 	account := healthyGrokOAuthGatewayTestAccount(9015, "access-token")
 	account.Credentials["subscription_tier"] = "free"
 	c := newGrokCacheTestContext(9015)
@@ -719,7 +723,11 @@ func TestGrokFreeRequestClientSearchFunctionRequiresOptIn(t *testing.T) {
 	patched, err := applyGrokFreeRequestToolCacheRoute(c, body, body, account, "isolated-id")
 
 	require.NoError(t, err)
-	require.JSONEq(t, string(body), string(patched))
+	tools := gjson.GetBytes(patched, "tools").Array()
+	require.Len(t, tools, 3)
+	require.Equal(t, "view_image", tools[0].Get("name").String())
+	require.Equal(t, "web_search", tools[1].Get("type").String())
+	require.Equal(t, "x_search", tools[2].Get("type").String())
 }
 
 func TestGrokFreeRequestToolChoiceNoneUsesSafeCacheRoute(t *testing.T) {

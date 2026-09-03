@@ -395,9 +395,10 @@ func insertUnifiedAction(
 ) error {
 	subjectType := "request"
 	subjectID := int64(0)
-	if actionType == "pause_api_key" {
+	switch actionType {
+	case "pause_api_key":
 		subjectType, subjectID = "api_key", snapshot.APIKeyID
-	} else if actionType == "pause_user" || actionType == "notify_user" {
+	case "pause_user", "notify_user":
 		subjectType, subjectID = "user", snapshot.UserID
 	}
 	idempotencyKey := fmt.Sprintf("%s:%s:%s:%d:1", decisionID, actionType, subjectType, subjectID)

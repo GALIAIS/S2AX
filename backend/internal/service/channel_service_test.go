@@ -2461,13 +2461,11 @@ func TestValidatePricingBillingMode(t *testing.T) {
 			errMsg:  "has no price fields set",
 		},
 		{
-			name: "token interval with only per request price - invalid",
+			name: "token interval with only per request price - valid",
 			pricing: []ChannelModelPricing{{
 				BillingMode: BillingModeToken,
 				Intervals:   []PricingInterval{{MinTokens: 0, MaxTokens: testPtrInt(1000), PerRequestPrice: testPtrFloat64(0.1)}},
 			}},
-			wantErr: true,
-			errMsg:  "has no price fields set",
 		},
 		{
 			name: "image interval with only token price - invalid",

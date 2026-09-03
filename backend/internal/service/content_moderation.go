@@ -3339,7 +3339,6 @@ func decodeChatCompletionAuditResponse(reader io.Reader, confidenceThreshold flo
 		if flagged {
 			confidence = 1
 		}
-		hasConfidence = true
 	}
 	if confidenceThreshold <= 0 || confidenceThreshold > 1 {
 		confidenceThreshold = defaultContentModerationConfidenceThreshold
@@ -3365,7 +3364,7 @@ func chatCompletionMessageText(raw json.RawMessage) (string, error) {
 	if err := json.Unmarshal(raw, &parts); err == nil {
 		var builder strings.Builder
 		for _, part := range parts {
-			builder.WriteString(part.Text)
+			_, _ = builder.WriteString(part.Text)
 		}
 		if strings.TrimSpace(builder.String()) != "" {
 			return strings.TrimSpace(builder.String()), nil

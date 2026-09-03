@@ -3,7 +3,6 @@ package securityaudit
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -373,11 +372,4 @@ WHERE status IN ('read','dismissed') AND created_at<NOW()-INTERVAL '90 days'`); 
 		return err
 	}
 	return tx.Commit()
-}
-
-func detectorSnapshotFromRaw(raw []byte) json.RawMessage {
-	if len(raw) == 0 || !json.Valid(raw) {
-		return json.RawMessage("[]")
-	}
-	return append(json.RawMessage(nil), raw...)
 }

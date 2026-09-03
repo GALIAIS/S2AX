@@ -206,7 +206,7 @@ func TestSharedQuotaPoolStopsBorrowingAtSoftAndAllAtHard(t *testing.T) {
 	}
 
 	repo.total = 100
-	service.RefreshSnapshot(context.Background(), 1)
+	_, _ = service.RefreshSnapshot(context.Background(), 1)
 	decision, err := service.Check(context.Background(), 1, 2)
 	if err != nil {
 		t.Fatal(err)
@@ -234,7 +234,7 @@ func TestSharedQuotaPoolRequiresEveryEnabledWindow(t *testing.T) {
 
 	repo.totalByWindow["short"] = 0
 	repo.totalByWindow["long"] = 100
-	quota.RefreshSnapshot(context.Background(), 1)
+	_, _ = quota.RefreshSnapshot(context.Background(), 1)
 	decision, err = quota.Check(context.Background(), 1, 1)
 	if err != nil {
 		t.Fatal(err)

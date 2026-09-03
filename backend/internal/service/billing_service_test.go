@@ -1463,7 +1463,7 @@ func TestComputeCacheCreationCost_CapsContradictoryBreakdownAtAggregate(t *testi
 		CacheCreation1hTokens: 463184,
 	}
 
-	cost := svc.computeCacheCreationCost(pricing, tokens, 0, 1)
+	cost := svc.computeCacheCreationCost(pricing, tokens, 0, 1, "")
 	require.Equal(t, float64(tokens.CacheCreationTokens), cost,
 		"billed cache-creation token equivalent must not exceed the positive aggregate")
 }
@@ -1559,7 +1559,7 @@ func TestComputeCacheCreationCost_PreservesZeroDetailFallback(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cost := svc.computeCacheCreationCost(pricing, tt.tokens, 0, 1)
+			cost := svc.computeCacheCreationCost(pricing, tt.tokens, 0, 1, "")
 			require.InDelta(t, 100*4e-6, cost, 1e-12)
 		})
 	}
