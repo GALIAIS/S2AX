@@ -17,9 +17,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	utls "github.com/refraction-networking/utls"
 )
 
 // TestDialerBasicConnection tests that the dialer can establish TLS connections.
@@ -277,6 +280,17 @@ func TestToUTLSCurves(t *testing.T) {
 		if uint16(curve) != input[i] {
 			t.Errorf("curve %d: expected 0x%04x, got 0x%04x", i, input[i], uint16(curve))
 		}
+	}
+}
+
+// TestFilterUTLSCurvePreferences 防止不可处理的混合曲线再次进入实际握手配置。
+func TestFilterUTLSCurvePreferences(t *testing.T) {
+	input := []utls.CurveID{utls.X25519, utls.X25519MLKEM768, utls.CurveP256}
+	got := filterUTLSCurvePreferences(input)
+	want := []utls.CurveID{utls.X25519, utls.CurveP256}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("filtered curves = %v, want %v", got, want)
 	}
 }
 

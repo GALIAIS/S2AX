@@ -309,6 +309,23 @@ func toUTLSCurves(curves []uint16) []utls.CurveID {
 	return result
 }
 
+// filterUTLSCurvePreferences 移除当前 uTLS 自定义握手不能安全处理的混合曲线。
+//
+// uTLS 1.8.2 可以生成 X25519MLKEM768 的初始 key_share，但其自定义握手在
+// 服务器通过 HelloRetryRequest 选择该曲线时仍会报 unsupported curve。Codex
+// rustls 会把该曲线放在 supported_groups 中；这里仅过滤实际发送给 uTLS 的
+// 偏好列表，保留 Profile 中的原始观测值，避免 OpenAI 出站请求在握手阶段失败。
+func filterUTLSCurvePreferences(curves []utls.CurveID) []utls.CurveID {
+	filtered := make([]utls.CurveID, 0, len(curves))
+	for _, curve := range curves {
+		if curve == utls.X25519MLKEM768 {
+			continue
+		}
+		filtered = append(filtered, curve)
+	}
+	return filtered
+}
+
 // defaultExtensionOrder is the Node.js 24.x extension order.
 // Used when Profile.Extensions is empty.
 var defaultExtensionOrder = []uint16{
@@ -344,7 +361,10 @@ func buildClientHelloSpecFromProfile(profile *Profile) *utls.ClientHelloSpec {
 
 	curves := defaultCurves
 	if profile != nil && len(profile.Curves) > 0 {
-		curves = toUTLSCurves(profile.Curves)
+		curves = filterUTLSCurvePreferences(toUTLSCurves(profile.Curves))
+		if len(curves) == 0 {
+			curves = defaultCurves
+		}
 	}
 
 	pointFormats := defaultPointFormats
@@ -372,7 +392,10 @@ func buildClientHelloSpecFromProfile(profile *Profile) *utls.ClientHelloSpec {
 
 	keyShareGroups := []utls.CurveID{utls.X25519}
 	if profile != nil && len(profile.KeyShareGroups) > 0 {
-		keyShareGroups = toUTLSCurves(profile.KeyShareGroups)
+		keyShareGroups = filterUTLSCurvePreferences(toUTLSCurves(profile.KeyShareGroups))
+		if len(keyShareGroups) == 0 {
+			keyShareGroups = []utls.CurveID{utls.X25519}
+		}
 	}
 
 	pskModes := []uint16{uint16(utls.PskModeDHE)}

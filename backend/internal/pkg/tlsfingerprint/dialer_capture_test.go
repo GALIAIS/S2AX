@@ -115,6 +115,13 @@ func TestDialerAgainstCaptureServer(t *testing.T) {
 				for i, c := range defaultCurves {
 					effectiveCurves[i] = uint16(c)
 				}
+			} else {
+				// 采集结果反映实际 uTLS 握手值，而不是配置层保留的原始观测值。
+				filteredCurves := filterUTLSCurvePreferences(toUTLSCurves(effectiveCurves))
+				effectiveCurves = make([]uint16, len(filteredCurves))
+				for i, c := range filteredCurves {
+					effectiveCurves[i] = uint16(c)
+				}
 			}
 			effectivePointFormats := tc.profile.PointFormats
 			if len(effectivePointFormats) == 0 {
