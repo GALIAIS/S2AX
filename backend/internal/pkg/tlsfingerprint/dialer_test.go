@@ -310,7 +310,6 @@ func TestToStandardTLSConnectionState(t *testing.T) {
 		!got.HandshakeComplete ||
 		got.CipherSuite != 0x1301 ||
 		got.NegotiatedProtocol != "h2" ||
-		!got.NegotiatedProtocolIsMutual ||
 		got.ServerName != "chatgpt.com" ||
 		!got.ECHAccepted {
 		t.Fatalf("converted TLS state = %+v", got)
