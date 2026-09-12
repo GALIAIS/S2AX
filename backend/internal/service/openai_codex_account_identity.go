@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,9 @@ const codexAccountIdentitySourceContextKey = "openai_codex_account_identity_sour
 // attempt. The handler reuses gin.Context across failover attempts, so every entry
 // point overwrites the staged source before projecting outbound identity.
 func (s *OpenAIGatewayService) prepareCodexAccountIdentitySource(ctx context.Context, c *gin.Context, account *Account) (*Account, error) {
+	// 每次 scheduler attempt 都复用同一个 gin.Context；先清掉上一次账号的
+	// fingerprint snapshot，避免兼容入口或 failover 读取到旧账号身份。
+	stageCodexFingerprintIDs(c, nil)
 	source := account
 	if account != nil && account.IsShadow() {
 		resolved, err := resolveCredentialAccount(ctx, s.accountRepo, account)
@@ -96,7 +100,28 @@ func scopeCodexAccountIdentityValue(account *Account, apiKeyID int64, kind, raw 
 	if raw == "" || namespace == "" {
 		return raw
 	}
-	return deriveStableUUIDv4(fmt.Sprintf(
+	// 原生 Codex 将 x-client-request-id 作为当前 thread_id 的请求关联头，
+	// 因此两者必须共享同一种派生规则，否则上游会看到互相矛盾的线程身份。
+	if kind == "request" {
+		kind = "thread"
+	}
+	// 原生 window_id 是 <thread_id>:<window_number>，只收敛线程部分并保留
+	// 窗口序号，避免账号隔离后退化成 UUIDv4 而偏离官方字段形态。
+	if kind == "window" {
+		if separator := strings.LastIndexByte(raw, ':'); separator > 0 && separator < len(raw)-1 {
+			if windowNumber, err := strconv.ParseUint(raw[separator+1:], 10, 64); err == nil {
+				scopedThread := scopeCodexAccountIdentityValue(account, apiKeyID, "thread", raw[:separator])
+				return scopedThread + ":" + strconv.FormatUint(windowNumber, 10)
+			}
+		}
+	}
+	derive := deriveStableUUIDv4
+	if kind == "session" || kind == "thread" || kind == "turn" {
+		// session/thread/turn 在 codex-rs 均为 UUIDv7；账号隔离只能改变值，
+		// 不能改变其可观测的版本布局。
+		derive = deriveStableUUIDv7
+	}
+	return derive(fmt.Sprintf(
 		"sub2api:codex-account-identity:%s:user:%d:account:%s:kind:%s:value:%s",
 		codexAccountIdentityNamespaceVersion,
 		apiKeyID,
@@ -120,7 +145,12 @@ var codexAccountIdentityFields = []struct {
 	{name: "turn-id", kind: "turn"},
 	{name: "window_id", kind: "window"},
 	{name: "x-codex-window-id", kind: "window"},
-	{name: "x-client-request-id", kind: "request"},
+	{name: "x-client-request-id", kind: "thread"},
+	{name: "x-codex-parent-thread-id", kind: "thread"},
+	{name: "forked_from_thread_id", kind: "thread"},
+	{name: "parent_thread_id", kind: "thread"},
+	{name: "parent_turn_id", kind: "turn"},
+	{name: "root_turn_id", kind: "turn"},
 }
 
 func applyCodexAccountIdentityFields(values map[string]any, account *Account, apiKeyID int64) bool {

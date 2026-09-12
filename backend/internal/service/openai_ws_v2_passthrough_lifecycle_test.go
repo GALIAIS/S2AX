@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -103,10 +104,12 @@ func (c *stagedPassthroughConn) Close() error {
 }
 
 type stagedPassthroughDialer struct {
-	conn openAIWSClientConn
+	conn        openAIWSClientConn
+	lastHeaders http.Header
 }
 
-func (d *stagedPassthroughDialer) Dial(context.Context, string, http.Header, string) (openAIWSClientConn, int, http.Header, error) {
+func (d *stagedPassthroughDialer) Dial(_ context.Context, _ string, headers http.Header, _ string) (openAIWSClientConn, int, http.Header, error) {
+	d.lastHeaders = cloneHeader(headers)
 	return d.conn, http.StatusSwitchingProtocols, http.Header{}, nil
 }
 
@@ -208,6 +211,61 @@ func startPassthroughLifecycleServerWithHooks(
 		serverErr <- svc.ProxyResponsesWebSocketFromClient(controlCtx, ginCtx, conn, account, "sk-test", firstMessage, hooks)
 	}))
 	return server, serverErr
+}
+
+func TestPassthroughLifecycle_LaterTurnPreOutputRateLimitRequestsReconnect(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	controlCtx, cancelControl := context.WithCancelCause(context.Background())
+	defer cancelControl(context.Canceled)
+	upstream := newStagedPassthroughConn()
+	account := passthroughLifecycleAccount()
+	repo := &openAIWSRateLimitSignalRepo{stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{*account}}}
+	svc := newPassthroughLifecycleService(passthroughLifecycleConfig(), upstream)
+	svc.accountRepo = repo
+	svc.rateLimitService = &RateLimitService{accountRepo: repo}
+
+	server, serverErr := startPassthroughLifecycleServer(t, controlCtx, svc, account)
+	defer server.Close()
+	clientConn := dialPassthroughLifecycleClient(t, server)
+	defer func() { _ = clientConn.CloseNow() }()
+	firstRequest := requirePassthroughUpstreamWrite(t, upstream, time.Second)
+	require.Equal(t, "response.create", gjson.GetBytes(firstRequest, "type").String())
+
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_first","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	completed, err := readPassthroughLifecycleFrame(t, clientConn, time.Second)
+	require.NoError(t, err)
+	require.Equal(t, "response.completed", gjson.GetBytes(completed, "type").String())
+
+	writeCtx, cancelWrite := context.WithTimeout(context.Background(), time.Second)
+	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false}`))
+	cancelWrite()
+	require.NoError(t, err)
+	secondRequest := requirePassthroughUpstreamWrite(t, upstream, time.Second)
+	require.Equal(t, "response.create", gjson.GetBytes(secondRequest, "type").String())
+
+	resetAt := time.Now().Add(90 * time.Minute).Unix()
+	upstream.Send(fmt.Sprintf(`{"type":"error","error":{"code":"rate_limit_exceeded","type":"usage_limit_reached","message":"The usage limit has been reached","resets_at":%d}}`, resetAt))
+	_, err = readPassthroughLifecycleFrame(t, clientConn, time.Second)
+	var websocketCloseErr coderws.CloseError
+	require.ErrorAs(t, err, &websocketCloseErr)
+	require.Equal(t, coderws.StatusTryAgainLater, websocketCloseErr.Code)
+	require.Equal(t, "upstream rate limit exceeded; please reconnect", websocketCloseErr.Reason)
+	require.Len(t, repo.rateLimitCalls, 1)
+	require.WithinDuration(t, time.Unix(resetAt, 0), repo.rateLimitCalls[0], 2*time.Second)
+
+	select {
+	case err := <-serverErr:
+		var closeErr *OpenAIWSClientCloseError
+		require.ErrorAs(t, err, &closeErr)
+		require.Equal(t, coderws.StatusTryAgainLater, closeErr.StatusCode())
+	case <-time.After(time.Second):
+		t.Fatal("later-turn rate limit did not terminate passthrough")
+	}
+	select {
+	case replay := <-upstream.writes:
+		t.Fatalf("later-turn reconnect must not replay the retained first request: %s", replay)
+	default:
+	}
 }
 
 func TestPassthroughLifecycle_CyberTerminalEventsMarkBeforeAfterTurn(t *testing.T) {
@@ -446,6 +504,90 @@ func requirePassthroughUpstreamWrite(t *testing.T, upstream *stagedPassthroughCo
 	case <-time.After(timeout):
 		t.Fatal("passthrough request was not forwarded upstream")
 		return nil
+	}
+}
+
+// passthrough relay 的首帧也必须同时收敛 body 与握手头，不能只覆盖 HTTP/ctx-pool。
+func TestPassthroughLifecycle_FingerprintBodyHeaderParity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	controlCtx, cancelControl := context.WithCancelCause(context.Background())
+	defer cancelControl(context.Canceled)
+
+	cfg := passthroughLifecycleConfig()
+	cfg.Gateway.OpenAIWS.OAuthEnabled = true
+	upstream := newStagedPassthroughConn()
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_passthrough_fingerprint","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	account := &Account{
+		ID:          902,
+		Name:        "passthrough-fingerprint",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Extra: map[string]any{
+			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
+			codexFingerprintModeExtraKey:                "session",
+			codexFingerprintSeedExtraKey:                testCodexFingerprintSeed,
+		},
+	}
+	svc := newPassthroughLifecycleService(cfg, upstream)
+	dialer := svc.openaiWSPassthroughDialer.(*stagedPassthroughDialer)
+	server, serverErr := startPassthroughLifecycleServerWithHooks(
+		t,
+		controlCtx,
+		svc,
+		account,
+		func(c *gin.Context) *OpenAIWSIngressHooks {
+			c.Request.Header.Set("session-id", "passthrough-header-session")
+			c.Request.Header.Set("x-codex-parent-thread-id", "passthrough-parent-thread")
+			c.Request.Header.Set("x-codex-turn-metadata", `{"session_id":"passthrough-header-session","parent_thread_id":"passthrough-parent-thread"}`)
+			return nil
+		},
+	)
+	defer server.Close()
+
+	clientConn := dialPassthroughLifecycleClientWithPayload(t, server, `{"type":"response.create","model":"gpt-5.1","stream":false,"prompt_cache_key":"passthrough-body-session","client_metadata":{"session_id":"passthrough-body-session","x-codex-parent-thread-id":"passthrough-parent-thread","parent_thread_id":"passthrough-parent-thread","parent_turn_id":"passthrough-parent-turn","root_turn_id":"passthrough-root-turn","x-codex-turn-metadata":"{\"session_id\":\"passthrough-body-session\",\"parent_thread_id\":\"passthrough-parent-thread\",\"parent_turn_id\":\"passthrough-parent-turn\",\"root_turn_id\":\"passthrough-root-turn\"}"},"input":[]}`)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	forwarded := requirePassthroughUpstreamWrite(t, upstream, time.Second)
+	completed, err := readPassthroughLifecycleFrame(t, clientConn, time.Second)
+	require.NoError(t, err)
+	require.Equal(t, "resp_passthrough_fingerprint", gjson.GetBytes(completed, "response.id").String())
+
+	seed := testCodexFingerprintSeed
+	wantInstall := resolveConvergedInstallationID(account, seed)
+	wantSession := resolveConvergedSessionID(seed)
+	wantThread := wantSession
+	wantParent := deriveStableUUIDv7("sub2api:codex-lineage:v3:" + seed + ":thread:passthrough-parent-thread")
+	wantParentTurn := deriveStableUUIDv7("sub2api:codex-lineage:v3:" + seed + ":turn:passthrough-parent-turn")
+	wantRootTurn := deriveStableUUIDv7("sub2api:codex-lineage:v3:" + seed + ":turn:passthrough-root-turn")
+	bodyTurnMetadata := gjson.GetBytes(forwarded, "client_metadata.x-codex-turn-metadata").String()
+	require.Empty(t, dialer.lastHeaders.Get("x-codex-installation-id"))
+	require.Equal(t, wantSession, dialer.lastHeaders.Get("session-id"))
+	require.Equal(t, wantThread, dialer.lastHeaders.Get("thread-id"))
+	require.Equal(t, wantParent, dialer.lastHeaders.Get("x-codex-parent-thread-id"))
+	require.Equal(t, wantInstall, gjson.GetBytes(forwarded, "client_metadata.x-codex-installation-id").String())
+	require.Equal(t, wantSession, gjson.GetBytes(forwarded, "client_metadata.session_id").String())
+	require.Equal(t, wantThread, gjson.GetBytes(forwarded, "client_metadata.thread_id").String())
+	require.Equal(t, wantParent, gjson.GetBytes(forwarded, "client_metadata.x-codex-parent-thread-id").String())
+	require.Equal(t, wantParentTurn, gjson.Get(bodyTurnMetadata, "parent_turn_id").String())
+	require.Equal(t, wantRootTurn, gjson.Get(bodyTurnMetadata, "root_turn_id").String())
+	require.Equal(t, wantInstall, gjson.Get(bodyTurnMetadata, "installation_id").String())
+	require.Equal(t, wantSession, gjson.Get(bodyTurnMetadata, "session_id").String())
+	require.Equal(t, wantSession, gjson.GetBytes(forwarded, "prompt_cache_key").String())
+	require.Equal(t, gjson.Get(bodyTurnMetadata, "turn_id").String(), gjson.Get(dialer.lastHeaders.Get("x-codex-turn-metadata"), "turn_id").String())
+
+	_ = clientConn.Close(coderws.StatusNormalClosure, "done")
+	select {
+	case err := <-serverErr:
+		if err != nil {
+			var closeErr *OpenAIWSClientCloseError
+			require.ErrorAs(t, err, &closeErr)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("passthrough fingerprint test did not exit")
 	}
 }
 

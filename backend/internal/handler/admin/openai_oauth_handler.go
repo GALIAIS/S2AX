@@ -192,6 +192,10 @@ func validateOpenAICodexCreateRequest(c *gin.Context, req OpenAICodexPATCreateRe
 		response.ErrorFrom(c, err)
 		return false
 	}
+	if err := service.ValidateOpenAIImageGenerationExtra(service.PlatformOpenAI, req.Extra); err != nil {
+		response.ErrorFrom(c, err)
+		return false
+	}
 	if req.Concurrency != nil && *req.Concurrency < 0 {
 		response.BadRequest(c, "concurrency must be >= 0")
 		return false

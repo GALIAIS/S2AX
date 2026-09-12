@@ -2,10 +2,12 @@ package service
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,7 +17,16 @@ func requireOpenAICodexProbeHeaders(t *testing.T, h http.Header) {
 	require.Equal(t, openai.CodexDefaultOriginator, h.Get("Originator"))
 	require.Equal(t, codexCLIVersion, h.Get("Version"))
 	require.Equal(t, "responses=experimental", h.Get("OpenAI-Beta"))
-	require.NotEmpty(t, h.Get("X-Codex-Window-ID"))
+	windowID := h.Get("X-Codex-Window-ID")
+	threadID, windowNumber, ok := strings.Cut(windowID, ":")
+	require.True(t, ok)
+	parsedThreadID, err := uuid.Parse(threadID)
+	require.NoError(t, err)
+	require.Equal(t, uuid.Version(7), parsedThreadID.Version())
+	require.Equal(t, "0", windowNumber)
+	require.Equal(t, threadID, h.Get("session-id"))
+	require.Equal(t, threadID, h.Get("thread-id"))
+	require.Equal(t, threadID, h.Get("x-client-request-id"))
 }
 
 // 强制统一出口：无论客户端自报什么身份，OAuth 出站的 User-Agent / originator / version

@@ -70,6 +70,9 @@ type TestEvent struct {
 type AccountTestOptions struct {
 	ImageDataURL string
 	AudioDataURL string
+	// OpenAIImageTextModelID 是 OAuth 生图测试使用的 Responses 外层文本模型，
+	// 与 model_id 中的 image_generation 工具模型分离。
+	OpenAIImageTextModelID string
 }
 
 func firstAccountTestOptions(opts []AccountTestOptions) AccountTestOptions {
@@ -151,6 +154,7 @@ type AccountTestService struct {
 	modelMetadataRegistry     map[string]modelsDevProvider
 	modelMetadataRegistryAt   time.Time
 	pluginManager             *PluginManager
+	openaiGatewayService      *OpenAIGatewayService
 	agentIdentityTaskMu       sync.Mutex
 	agentIdentityWS           agentIdentityWSConnectionInvalidator
 	// grokWSDialer is optional; realtime account tests use the default OpenAI-style
@@ -168,6 +172,85 @@ func (s *AccountTestService) SetPluginManager(pluginManager *PluginManager) {
 	if s != nil {
 		s.pluginManager = pluginManager
 	}
+}
+
+func (s *AccountTestService) SetOpenAIGatewayService(gateway *OpenAIGatewayService) {
+	if s != nil {
+		s.openaiGatewayService = gateway
+	}
+}
+
+// FetchOpenAIAccountModels uses the shared cached discovery path for the test picker.
+func (s *AccountTestService) FetchOpenAIAccountModels(ctx context.Context, account *Account) ([]openai.Model, error) {
+	if s == nil || s.openaiGatewayService == nil {
+		return nil, errors.New("OpenAI model discovery service is unavailable")
+	}
+	response, err := s.openaiGatewayService.FetchOpenAIModelsList(ctx, account)
+	if err != nil {
+		return nil, err
+	}
+	var payload struct {
+		Data []openai.Model `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body, &payload); err != nil {
+		return nil, fmt.Errorf("decode OpenAI account models: %w", err)
+	}
+	// Standard model catalogs do not require the fields used by the admin picker.
+	// Populate them here without changing the shared discovery response or cache.
+	for i := range payload.Data {
+		model := &payload.Data[i]
+		if strings.TrimSpace(model.DisplayName) == "" {
+			model.DisplayName = model.ID
+		}
+		if strings.TrimSpace(model.Type) == "" {
+			model.Type = "model"
+		}
+	}
+	return AppendOpenAIImagePickerModels(account, payload.Data), nil
+}
+
+// AppendOpenAIImagePickerModels 将账号显式声明的图片工具模型和图片映射别名
+// 合并到管理测试选择器。Codex 公共 manifest 可能隐藏媒体模型，因此选择器必须
+// 以账号配置为补充来源，而不能依赖编译期图片模型列表。
+func AppendOpenAIImagePickerModels(account *Account, models []openai.Model) []openai.Model {
+	if account == nil || account.Platform != PlatformOpenAI {
+		return models
+	}
+
+	result := append([]openai.Model(nil), models...)
+	seen := make(map[string]struct{}, len(result))
+	for _, model := range result {
+		seen[strings.ToLower(strings.TrimSpace(model.ID))] = struct{}{}
+	}
+	appendModel := func(modelID string) {
+		modelID = strings.TrimSpace(modelID)
+		if modelID == "" {
+			return
+		}
+		key := strings.ToLower(modelID)
+		if _, exists := seen[key]; exists {
+			return
+		}
+		result = append(result, openai.Model{
+			ID:          modelID,
+			Object:      "model",
+			OwnedBy:     "account",
+			Type:        "image_generation",
+			DisplayName: modelID,
+		})
+		seen[key] = struct{}{}
+	}
+	appendModel(account.GetOpenAIImageModel())
+	for _, modelID := range account.GetOpenAIImageModels() {
+		appendModel(modelID)
+	}
+	for requestedModel, upstreamModel := range account.GetModelMapping() {
+		if account.IsOpenAIImageToolModel(requestedModel) || account.IsOpenAIImageToolModel(upstreamModel) {
+			appendModel(requestedModel)
+			appendModel(upstreamModel)
+		}
+	}
+	return result
 }
 
 // NewAccountTestService creates a new AccountTestService
@@ -269,7 +352,7 @@ func createTestPayload(modelID string) (map[string]any, error) {
 // TestAccountConnection tests an account's connection by sending a test request
 // All account types use full Claude Code client characteristics, only auth header differs
 // modelID is optional - if empty, defaults to claude.DefaultTestModel
-// mode is optional - "compact" routes OpenAI accounts to the /responses/compact probe path
+// mode is optional - "compact" routes OpenAI accounts to the native /responses compaction probe
 // opts is optional media (image/audio data URLs for real generation / STT).
 func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int64, modelID string, prompt string, mode string, opts ...AccountTestOptions) error {
 	ctx := c.Request.Context()
@@ -301,7 +384,7 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		case APIProtocolAdaptive:
 			return s.testCNProviderAdaptiveConnection(c, account, modelID, prompt)
 		case APIProtocolResponses:
-			return s.testOpenAIAccountConnection(c, account, modelID, prompt, normalizeAccountTestMode(mode))
+			return s.testOpenAIAccountConnection(c, account, modelID, prompt, normalizeAccountTestMode(mode), testOpts)
 		case APIProtocolChatCompletions:
 			return s.testCNProviderChatCompletionsConnection(c, account, modelID, prompt)
 		case APIProtocolAnthropic:
@@ -310,7 +393,7 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 	}
 
 	if account.IsOpenAI() {
-		return s.testOpenAIAccountConnection(c, account, modelID, prompt, normalizeAccountTestMode(mode))
+		return s.testOpenAIAccountConnection(c, account, modelID, prompt, normalizeAccountTestMode(mode), testOpts)
 	}
 
 	if account.IsGemini() {
@@ -438,7 +521,9 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		req.Header.Set("Authorization", "Bearer "+authToken)
 	} else {
 		req.Header.Set("anthropic-beta", claude.APIKeyBetaHeader)
-		setAnthropicAPIKeyAuthHeader(req.Header, account, authToken)
+		// Ollama Cloud Anthropic 兼容端点按实际 base_url 强制 Bearer，
+		// 其余保持 extra/default 行为。
+		setAnthropicAPIKeyAuthHeader(req.Header, account, authToken, account.GetBaseURL())
 	}
 
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
@@ -644,14 +729,21 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 }
 
 // testOpenAIAccountConnection tests an OpenAI account's connection
-func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account *Account, modelID string, prompt string, mode string) error {
+func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account *Account, modelID string, prompt string, mode string, opts ...AccountTestOptions) error {
 	ctx := c.Request.Context()
 	mode = normalizeAccountTestMode(mode)
+	testOpts := firstAccountTestOptions(opts)
 
 	// Default to openai.DefaultTestModel for OpenAI testing
 	testModelID := modelID
 	if testModelID == "" {
-		testModelID = openai.DefaultTestModel
+		// ChatGPT OAuth/Setup Token 只能调用 Codex manifest 中声明的模型；普通
+		// OpenAI API Key 仍沿用通用测试模型，避免改变兼容 API 账号的默认行为。
+		if account != nil && account.IsOAuth() {
+			testModelID = openai.CodexUsageProbeModel
+		} else {
+			testModelID = openai.DefaultTestModel
+		}
 	}
 
 	// Align test routing with gateway behavior: OpenAI accounts apply normal
@@ -664,7 +756,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	}
 
 	// Route to image generation test if an image model is selected
-	if isOpenAIImageModel(testModelID) {
+	if mode == AccountTestModeImage || isOpenAIImageModel(testModelID) {
 		imagePrompt := strings.TrimSpace(prompt)
 		if imagePrompt == "" {
 			imagePrompt = defaultOpenAIImageTestPrompt
@@ -672,7 +764,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		if account.Type == "apikey" {
 			return s.testOpenAIImageAPIKey(c, ctx, account, testModelID, imagePrompt)
 		}
-		return s.testOpenAIImageOAuth(c, ctx, account, testModelID, imagePrompt)
+		return s.testOpenAIImageOAuth(c, ctx, account, testModelID, imagePrompt, testOpts.OpenAIImageTextModelID)
 	}
 
 	credentialAccount := account
@@ -738,6 +830,14 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		upstreamTestModelID = normalizeOpenAIModelForUpstream(credentialAccount, testModelID)
 	}
 	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth)
+	probeSessionID := ""
+	probeTurnMetadata := ""
+	if isOAuth {
+		var clientMetadata map[string]any
+		probeSessionID, probeTurnMetadata, clientMetadata = buildOpenAICodexAccountTestIdentity(account.ID, "turn")
+		payload["prompt_cache_key"] = probeSessionID
+		payload["client_metadata"] = clientMetadata
+	}
 	payloadBytes, _ := json.Marshal(payload)
 
 	// Send test_start event once. A task-invalid Agent Identity response may
@@ -754,8 +854,15 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 
 	// Set common headers
 	req.Header.Set("Content-Type", "application/json")
-	if !isOAuth {
-		applyOpenAICodexProbeHeaders(req.Header)
+	applyOpenAICodexProbeHeaders(req.Header)
+	if isOAuth {
+		// 管理员连通性测试也必须使用官方 Responses 的连字符身份头；
+		// probe identity 与请求体共用同一 session/thread/window 快照。
+		req.Header.Set("session-id", probeSessionID)
+		req.Header.Set("thread-id", probeSessionID)
+		req.Header.Set("x-client-request-id", probeSessionID)
+		req.Header.Set("x-codex-window-id", probeSessionID+":0")
+		req.Header.Set("x-codex-turn-metadata", probeTurnMetadata)
 	}
 	if credentialAccount.IsOpenAIAgentIdentity() {
 		authHeaders, authErr := buildAgentIdentityAuthenticationHeaders(ctx, s.accountRepo, s.agentIdentityWS, &s.agentIdentityTaskMu, credentialAccount)
@@ -787,6 +894,15 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		// 与真实转发一致：账号级自定义 UA 同样作为管理员显式配置传入，否则测试用的身份
 		// 与该账号真实出站的身份不是同一个（issue #3901 的配对不变式由收口保证）。
 		enforceCodexIdentityHeadersWithUA(req.Header, credentialAccount.GetOpenAIUserAgent())
+		// 收敛测试请求与真实 Responses 请求共用同一套 session/thread/window 投影，
+		// 这样管理员测试才能实际验证当前账号的 fingerprint 配置是否生效。
+		if fpIDs := resolveCodexFingerprintIDsFromRequestWithSource(account, credentialAccount, req.Header); fpIDs != nil {
+			applyCodexFingerprintClientMetadata(payload, fpIDs)
+			payloadBytes, _ = json.Marshal(payload)
+			req.Body = io.NopCloser(bytes.NewReader(payloadBytes))
+			req.ContentLength = int64(len(payloadBytes))
+			applyCodexFingerprintHeaders(req.Header, fpIDs)
+		}
 	}
 
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
@@ -2080,7 +2196,18 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	if isOAuth {
 		testModelID = normalizeOpenAIModelForUpstream(credentialAccount, testModelID)
 	}
-	payloadBytes, _ := json.Marshal(createOpenAICompactProbePayload(testModelID, isOAuth))
+	payload := createOpenAICompactProbePayload(testModelID, isOAuth)
+	probeSessionID := compactProbeSessionID(account.ID)
+	probeTurnMetadata := ""
+	if isOAuth {
+		// 远程 compaction v2 复用普通 Responses 请求的会话元数据；探测体必须
+		// 与真实 Codex 请求共享 session/thread/window 的字段布局。
+		var clientMetadata map[string]any
+		probeSessionID, probeTurnMetadata, clientMetadata = buildOpenAICodexAccountTestIdentity(account.ID, "compaction")
+		payload["prompt_cache_key"] = probeSessionID
+		payload["client_metadata"] = clientMetadata
+	}
+	payloadBytes, _ := json.Marshal(payload)
 	if !agentIdentityTaskRecoveryWasTried(ctx) {
 		s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 	}
@@ -2112,9 +2239,15 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	if isOAuth {
 		enforceCodexIdentityHeadersWithUA(req.Header, credentialAccount.GetOpenAIUserAgent())
 	}
-	probeSessionID := compactProbeSessionID(account.ID)
-	req.Header.Set("Session_ID", probeSessionID)
-	req.Header.Set("Conversation_ID", probeSessionID)
+	if isOAuth {
+		// 官方 codex-rs 使用连字符形式的 session-id/thread-id；下划线头属于
+		// 兼容桥内部路由，不应出现在原生探测请求上。
+		req.Header.Set("session-id", probeSessionID)
+		req.Header.Set("thread-id", probeSessionID)
+		req.Header.Set("x-client-request-id", probeSessionID)
+		req.Header.Set("x-codex-window-id", probeSessionID+":0")
+		req.Header.Set("x-codex-turn-metadata", probeTurnMetadata)
+	}
 
 	if isOAuth {
 		req.Host = "chatgpt.com"
@@ -2122,7 +2255,11 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		// 指纹收敛：探测与真实转发走同一个 /responses 端点，身份也必须同构，
 		// 否则探测流量会以「缺 x-codex-installation-id + 非收敛 session」的
 		// 形态暴露在上游眼里。账号关闭收敛（off）时返回 nil，探测保持原样。
-		if fpIDs := resolveCodexFingerprintIDsFromRequest(account, req.Header); fpIDs != nil {
+		if fpIDs := resolveCodexFingerprintIDsFromRequestWithSource(account, credentialAccount, req.Header); fpIDs != nil {
+			applyCodexFingerprintClientMetadata(payload, fpIDs)
+			payloadBytes, _ = json.Marshal(payload)
+			req.Body = io.NopCloser(bytes.NewReader(payloadBytes))
+			req.ContentLength = int64(len(payloadBytes))
 			applyCodexFingerprintHeaders(req.Header, fpIDs)
 		}
 	}
@@ -2958,8 +3095,9 @@ func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.C
 	return nil
 }
 
-// testOpenAIImageOAuth tests OpenAI image generation using an OAuth account via Codex /responses API.
-func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Context, account *Account, modelID, prompt string) error {
+// testOpenAIImageOAuth 使用 OAuth 账号通过 Codex /responses API 测试生图。图片工具模型
+// 取 modelID，外层文本模型优先取测试请求覆盖值，再取账号配置或动态模型目录。
+func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Context, account *Account, modelID, prompt string, imageTextModelIDs ...string) error {
 	credentialAccount := account
 	if account.IsShadow() {
 		resolved, err := resolveCredentialAccount(ctx, s.accountRepo, account)
@@ -2993,7 +3131,15 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	}
 	applyOpenAIImagesDefaults(parsed)
 
-	responsesBody, err := buildOpenAIImagesResponsesRequest(parsed, parsed.Model)
+	imageTextModelID := ""
+	if len(imageTextModelIDs) > 0 {
+		imageTextModelID = imageTextModelIDs[0]
+	}
+	textModelID, err := s.resolveOpenAIImageTextModel(ctx, credentialAccount, imageTextModelID)
+	if err != nil {
+		return s.sendErrorAndEnd(c, err.Error())
+	}
+	responsesBody, err := buildOpenAIImagesResponsesRequest(parsed, textModelID, parsed.Model)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to build image request: %s", err.Error()))
 	}

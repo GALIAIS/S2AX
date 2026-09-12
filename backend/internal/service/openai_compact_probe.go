@@ -1,15 +1,21 @@
 package service
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const (
 	// AccountTestModeDefault drives the standard /responses connection test.
 	AccountTestModeDefault = "default"
+	// AccountTestModeImage 显式执行 OpenAI 生图测试，使自定义图片工具 ID 不依赖模型
+	// 名称前缀判断。
+	AccountTestModeImage = "image"
 	// AccountTestModeCompact drives the remote-compaction probe test
 	// (native v2: streaming /responses with a compaction_trigger input item).
 	AccountTestModeCompact = "compact"
@@ -19,6 +25,8 @@ func normalizeAccountTestMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case AccountTestModeCompact:
 		return AccountTestModeCompact
+	case AccountTestModeImage:
+		return AccountTestModeImage
 	default:
 		return AccountTestModeDefault
 	}
@@ -157,10 +165,59 @@ func mergeExtraUpdates(base map[string]any, more map[string]any) map[string]any 
 // session-id / thread-id 恒为 UUID（codex-protocol ThreadId 是 UUIDv7），
 // 探测既然与真实流量走同一个 /responses 端点，标识形态就必须同构——
 // 否则上游能凭 "probe_compact_5" 这类字面量一眼区分出探测流量。
-// 账号级稳定派生：重复探测复用同一会话，而不是每次新开一个。
+// 账号级稳定派生：重复探测复用同一会话，而不是每次新开一个；UUIDv7
+// 与官方 ThreadId/SessionId 的线格式保持一致。
 func compactProbeSessionID(accountID int64) string {
 	if accountID <= 0 {
-		return deriveStableUUIDv4("sub2api:codex-compact-probe:v1:anonymous")
+		return deriveStableUUIDv7("sub2api:codex-compact-probe:v2:anonymous")
 	}
-	return deriveStableUUIDv4("sub2api:codex-compact-probe:v1:" + strconv.FormatInt(accountID, 10))
+	return deriveStableUUIDv7("sub2api:codex-compact-probe:v2:" + strconv.FormatInt(accountID, 10))
+}
+
+// buildOpenAICodexAccountTestIdentity 构造账号连通性测试使用的原生 Codex 身份。
+// 管理员测试没有真实 CLI 会话状态，但上游仍应看到与 Codex CLI 相同的字段形态：
+// installation_id 为 UUIDv4，session/thread/turn/context_window 为 UUIDv7，
+// window_id 为 <thread_id>:<window_number>，并且 flat metadata 与 canonical JSON
+// 使用完全相同的一组值。
+func buildOpenAICodexAccountTestIdentity(accountID int64, requestKind string) (string, string, map[string]any) {
+	if strings.TrimSpace(requestKind) == "" {
+		requestKind = "turn"
+	}
+	sessionID := compactProbeSessionID(accountID)
+	installationID := deriveStableUUIDv4(
+		"sub2api:codex-account-test-installation:" + strconv.FormatInt(accountID, 10),
+	)
+	turnID := uuid.Must(uuid.NewV7()).String()
+	contextWindowID := uuid.Must(uuid.NewV7()).String()
+	windowID := sessionID + ":0"
+	turnMetadata := map[string]any{
+		"installation_id":         installationID,
+		"session_id":              sessionID,
+		"thread_id":               sessionID,
+		"turn_id":                 turnID,
+		"window_id":               windowID,
+		"window_number":           uint64(0),
+		"context_window_id":       contextWindowID,
+		"request_kind":            requestKind,
+		"turn_started_at_unix_ms": time.Now().UnixMilli(),
+	}
+	if requestKind == "compaction" {
+		// 远程压缩请求在官方 metadata 中还会声明压缩触发原因和实现。
+		turnMetadata["compaction"] = map[string]any{
+			"trigger":        "manual",
+			"reason":         "user_requested",
+			"implementation": "responses_compaction_v2",
+			"phase":          "standalone_turn",
+			"strategy":       "memento",
+		}
+	}
+	turnMetadataJSON, _ := json.Marshal(turnMetadata)
+	return sessionID, string(turnMetadataJSON), map[string]any{
+		"x-codex-installation-id": installationID,
+		"session_id":              sessionID,
+		"thread_id":               sessionID,
+		"turn_id":                 turnID,
+		"x-codex-window-id":       windowID,
+		"x-codex-turn-metadata":   string(turnMetadataJSON),
+	}
 }

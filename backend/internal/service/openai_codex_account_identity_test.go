@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -58,6 +59,60 @@ func TestCodexRequestBodyIdentityNamespaceIsStablePerOAuthAccount(t *testing.T) 
 	for _, field := range []string{"installation_id", "session_id", "thread_id", "turn_id", "window_id"} {
 		require.NotEqual(t, embeddedFirst[field], embeddedSecond[field], field)
 	}
+}
+
+// 账号隔离只能改变 Codex 标识的值，不能破坏官方 UUID 版本和 window_id 结构。
+func TestCodexAccountIdentityPreservesNativeShapesAndThreadAliases(t *testing.T) {
+	account := &Account{
+		ID:          11,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-account-11"},
+	}
+	installID := "11111111-1111-4111-8111-111111111111"
+	sessionID := "018f9e15-7a6a-7000-8000-000000000001"
+	threadID := "018f9e15-7a6a-7000-8000-000000000002"
+	turnID := "018f9e15-7a6a-7000-8000-000000000003"
+	body := map[string]any{
+		"prompt_cache_key": sessionID,
+		"client_metadata": map[string]any{
+			"x-codex-installation-id": installID,
+			"session_id":              sessionID,
+			"thread_id":               threadID,
+			"turn_id":                 turnID,
+			"x-codex-window-id":       threadID + ":3",
+			"x-codex-turn-metadata":   `{"installation_id":"` + installID + `","session_id":"` + sessionID + `","thread_id":"` + threadID + `","turn_id":"` + turnID + `","window_id":"` + threadID + `:3"}`,
+		},
+	}
+
+	require.True(t, applyCodexAccountIdentityClientMetadataMap(body, account, 77))
+	metadata := body["client_metadata"].(map[string]any)
+	for _, field := range []struct {
+		name    string
+		version uuid.Version
+	}{
+		{name: "x-codex-installation-id", version: uuid.Version(4)},
+		{name: "session_id", version: uuid.Version(7)},
+		{name: "thread_id", version: uuid.Version(7)},
+		{name: "turn_id", version: uuid.Version(7)},
+	} {
+		parsed, err := uuid.Parse(metadata[field.name].(string))
+		require.NoError(t, err, field.name)
+		require.Equal(t, field.version, parsed.Version(), field.name)
+	}
+	scopedThread := metadata["thread_id"].(string)
+	scopedWindow := metadata["x-codex-window-id"].(string)
+	require.Equal(t, scopedThread+":3", scopedWindow)
+	require.Equal(t, metadata["session_id"], body["prompt_cache_key"])
+
+	headers := make(http.Header)
+	headers.Set("session-id", sessionID)
+	headers.Set("thread-id", threadID)
+	headers.Set("x-client-request-id", threadID)
+	headers.Set("x-codex-window-id", threadID+":3")
+	applyCodexAccountIdentityHeaders(headers, account, 77)
+	require.Equal(t, headers.Get("thread-id"), headers.Get("x-client-request-id"))
+	require.Equal(t, headers.Get("thread-id")+":3", headers.Get("x-codex-window-id"))
 }
 
 func TestCodexAccountIdentityNamespaceUsesStableCredentialSource(t *testing.T) {

@@ -1,5 +1,9 @@
 export default {
 
+  misc: {
+    retry: '重试'
+  },
+
   // Subscription Progress (Header component)
   subscriptionProgress: {
     title: '我的订阅',

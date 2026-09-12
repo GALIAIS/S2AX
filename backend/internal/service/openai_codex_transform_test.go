@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -477,6 +478,74 @@ func TestApplyCodexOAuthTransform_StringifiesNonStringMessageContentText(t *test
 	require.Equal(t, `["a","b"]`, part["text"])
 }
 
+func TestApplyCodexOAuthTransform_PreservesAllowedTools(t *testing.T) {
+	for _, placement := range []string{"top_level", "additional_tools"} {
+		for _, mode := range []string{"auto", "required"} {
+			t.Run(placement+"/"+mode, func(t *testing.T) {
+				decision := map[string]any{"type": "function", "name": "ProbeAccept"}
+				choice := map[string]any{
+					"type": "allowed_tools", "mode": mode,
+					"tools": []any{map[string]any{"type": "function", "name": "ProbeAccept"}},
+				}
+				tools := []any{
+					map[string]any{"type": "function", "name": "ProbeBase"},
+					map[string]any{"type": "web_search"},
+					map[string]any{"type": "image_generation"},
+				}
+				input := []any{map[string]any{"type": "message", "role": "user", "content": "probe"}}
+				if placement == "top_level" {
+					tools = append(tools, decision)
+				} else {
+					input = append(input, map[string]any{
+						"type": "additional_tools", "role": "developer", "tools": []any{decision},
+					})
+				}
+				reqBody := map[string]any{"tools": tools, "input": input, "tool_choice": choice}
+				before, err := json.Marshal(reqBody)
+				require.NoError(t, err)
+				reqBody["model"] = "gpt-6-astra"
+				result := applyCodexOAuthTransform(reqBody, true, false)
+				require.NoError(t, result.Error)
+				after, err := json.Marshal(map[string]any{
+					"tools": reqBody["tools"], "input": reqBody["input"], "tool_choice": reqBody["tool_choice"],
+				})
+				require.NoError(t, err)
+				require.JSONEq(t, string(before), string(after))
+			})
+		}
+	}
+}
+
+func TestNormalizeCodexToolChoice_InvalidAllowedToolsNeverBecomesAuto(t *testing.T) {
+	for _, choice := range []map[string]any{
+		{"type": "allowed_tools"},
+		{"type": "allowed_tools", "mode": "invalid", "tools": []any{}},
+		{"type": "allowed_tools", "mode": "required", "tools": "invalid"},
+		{"type": "allowed_tools", "mode": "required", "tools": []any{map[string]any{"type": "function", "name": "missing"}}},
+	} {
+		reqBody := map[string]any{"tool_choice": choice}
+		require.False(t, normalizeCodexToolChoice(reqBody))
+		// The upstream owns schema validation. A malformed restriction must never
+		// silently become permission to call every supplied tool.
+		require.Equal(t, choice, reqBody["tool_choice"])
+	}
+}
+
+func TestApplyCodexOAuthTransform_AllowedToolsKeepsReservedNameReferences(t *testing.T) {
+	declaration := map[string]any{"type": "function", "name": "python"}
+	reference := map[string]any{"type": "function", "name": "python"}
+	choice := map[string]any{"type": "allowed_tools", "mode": "required", "tools": []any{reference}}
+	reqBody := map[string]any{
+		"model": "gpt-6-astra", "tools": []any{declaration}, "tool_choice": choice,
+	}
+	result := applyCodexOAuthTransform(reqBody, true, false)
+	require.NoError(t, result.Error)
+	require.Equal(t, choice, reqBody["tool_choice"])
+	require.Equal(t, codexPythonToolAlias, declaration["name"])
+	require.Equal(t, codexPythonToolAlias, reference["name"])
+	require.Equal(t, "python", result.ToolNameReverse[codexPythonToolAlias])
+}
+
 func TestApplyCodexOAuthTransform_DowngradesUnknownToolChoice(t *testing.T) {
 	reqBody := map[string]any{
 		"model": "gpt-5.4",
@@ -774,7 +843,7 @@ func TestEnsureOpenAIResponsesImageGenerationTool_NoTools(t *testing.T) {
 		"input": "draw a cat",
 	}
 
-	modified := ensureOpenAIResponsesImageGenerationTool(reqBody)
+	modified := ensureOpenAIResponsesImageGenerationToolWithModel(reqBody, openAIImagesDefaultToolModel)
 	require.True(t, modified)
 
 	tools, ok := reqBody["tools"].([]any)
@@ -793,7 +862,7 @@ func TestEnsureOpenAIResponsesImageGenerationTool_SkipsSpark(t *testing.T) {
 		"input": "draw a cat",
 	}
 
-	modified := ensureOpenAIResponsesImageGenerationTool(reqBody)
+	modified := ensureOpenAIResponsesImageGenerationToolWithModel(reqBody, openAIImagesDefaultToolModel)
 	require.False(t, modified)
 	require.NotContains(t, reqBody, "tools")
 }
@@ -806,7 +875,7 @@ func TestEnsureOpenAIResponsesImageGenerationTool_AppendsToExistingTools(t *test
 		},
 	}
 
-	modified := ensureOpenAIResponsesImageGenerationTool(reqBody)
+	modified := ensureOpenAIResponsesImageGenerationToolWithModel(reqBody, openAIImagesDefaultToolModel)
 	require.True(t, modified)
 
 	tools, ok := reqBody["tools"].([]any)
@@ -831,7 +900,7 @@ func TestEnsureOpenAIResponsesImageGenerationTool_PreservesExistingImageTool(t *
 		},
 	}
 
-	modified := ensureOpenAIResponsesImageGenerationTool(reqBody)
+	modified := ensureOpenAIResponsesImageGenerationToolWithModel(reqBody, openAIImagesDefaultToolModel)
 	require.False(t, modified)
 
 	tools, ok := reqBody["tools"].([]any)
@@ -888,7 +957,7 @@ func TestEnsureOpenAIResponsesImageGenerationTool_PreservesImageGenNamespace(t *
 		t.Run(tt.name, func(t *testing.T) {
 			require.True(t, hasOpenAIImageGenerationTool(tt.reqBody))
 
-			modified := ensureOpenAIResponsesImageGenerationTool(tt.reqBody)
+			modified := ensureOpenAIResponsesImageGenerationToolWithModel(tt.reqBody, openAIImagesDefaultToolModel)
 
 			require.False(t, modified)
 			tools, _ := tt.reqBody["tools"].([]any)
@@ -952,7 +1021,7 @@ func TestCodexImageGenerationBridge_PreservesClientImageFunctionTools(t *testing
 			tt.reqBody["instructions"] = "existing instructions"
 			require.Equal(t, tt.wantClient, hasCodexImageGenerationFunctionTool(tt.reqBody))
 
-			toolModified := ensureOpenAIResponsesImageGenerationTool(tt.reqBody)
+			toolModified := ensureOpenAIResponsesImageGenerationToolWithModel(tt.reqBody, openAIImagesDefaultToolModel)
 			choiceModified := ensureOpenAIResponsesImageGenerationToolChoiceAuto(tt.reqBody)
 			instructionsModified := applyCodexImageGenerationBridgeInstructions(tt.reqBody)
 
@@ -1371,6 +1440,10 @@ func TestApplyCodexOAuthTransform_EmptyInput(t *testing.T) {
 
 func TestNormalizeCodexModel_Gpt53(t *testing.T) {
 	cases := map[string]string{
+		"gpt-6-astra":               "gpt-6-astra",
+		"openai/gpt-6-astra":        "gpt-6-astra",
+		"gpt-6":                     "gpt-6-astra",
+		"openai/gpt-6":              "gpt-6-astra",
 		"gpt-5.4":                   "gpt-5.4",
 		"gpt5.5":                    "gpt-5.5",
 		"openai/gpt5.5":             "gpt-5.5",
@@ -1500,6 +1573,20 @@ func TestApplyCodexOAuthTransform_GPT55SuppliesModelSpecificInstructions(t *test
 	require.True(t, ok)
 	require.Contains(t, instructions, "You are Codex, a coding agent based on GPT-5")
 	require.NotContains(t, instructions, "You are GPT-5.1 running in the Codex CLI")
+	require.True(t, result.Modified)
+}
+
+func TestApplyCodexOAuthTransform_GPT6AstraSuppliesModelSpecificInstructions(t *testing.T) {
+	reqBody := map[string]any{
+		"model": "gpt-6-astra",
+	}
+
+	result := applyCodexOAuthTransform(reqBody, true, false)
+
+	instructions, ok := reqBody["instructions"].(string)
+	require.True(t, ok)
+	require.True(t, strings.HasPrefix(strings.TrimSpace(instructions), "You are Codex, an agent based on GPT-6."))
+	require.NotContains(t, instructions, "You are Codex, a coding agent based on GPT-5.")
 	require.True(t, result.Modified)
 }
 

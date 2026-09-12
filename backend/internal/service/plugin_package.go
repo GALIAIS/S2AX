@@ -108,11 +108,16 @@ func (i *PluginPackageInstaller) Install(ctx context.Context, reader io.Reader, 
 		return nil, fmt.Errorf("插件包不是有效的 ZIP: %w", err)
 	}
 	archiveClosed := false
-	defer func() {
+	closeArchive := func() error {
 		if !archiveClosed {
-			_ = archive.Close()
+			if err := archive.Close(); err != nil {
+				return err
+			}
+			archiveClosed = true
 		}
-	}()
+		return nil
+	}
+	defer func() { _ = closeArchive() }()
 	manifest, _, signatureStatus, err := i.inspectArchive(&archive.Reader)
 	if err != nil {
 		return nil, err
@@ -143,10 +148,9 @@ func (i *PluginPackageInstaller) Install(ctx context.Context, reader io.Reader, 
 		return nil, err
 	}
 	// Windows 会锁定 zip.OpenReader 持有的文件句柄，提交临时包前必须先释放它。
-	if err := archive.Close(); err != nil {
+	if err := closeArchive(); err != nil {
 		return nil, fmt.Errorf("关闭插件包: %w", err)
 	}
-	archiveClosed = true
 	if err := os.Rename(extractPath, installPath); err != nil {
 		return nil, fmt.Errorf("提交插件安装目录: %w", err)
 	}

@@ -267,6 +267,7 @@ func ProvideAccountTestService(
 		tlsFPProfileService,
 	)
 	service.agentIdentityWS = openAIGatewayService
+	service.SetOpenAIGatewayService(openAIGatewayService)
 	service.SetSettingService(settingService)
 	service.SetPluginManager(pluginManager)
 	return service
@@ -859,6 +860,7 @@ func ProvideRedeemService(
 
 // ProvideAdminService resolves the optional constructor argument explicitly for Wire.
 func ProvideAdminService(
+	cfg *config.Config,
 	userRepo UserRepository,
 	groupRepo AdminGroupRepository,
 	accountRepo AdminAccountRepository,
@@ -884,6 +886,7 @@ func ProvideAdminService(
 	channelCacheInvalidator ChannelCacheInvalidator,
 ) AdminService {
 	return NewAdminService(
+		cfg,
 		userRepo,
 		groupRepo,
 		accountRepo,

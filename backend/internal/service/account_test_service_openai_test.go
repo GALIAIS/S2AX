@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
@@ -131,6 +132,22 @@ func TestAccountTestService_OpenAISuccessPersistsSnapshotFromHeaders(t *testing.
 	require.NoError(t, err)
 	require.Len(t, upstream.requests, 1)
 	require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(upstream.requests[0].Context()))
+	// 普通 OAuth 测试请求也必须保持 Codex CLI 的头体身份一致，便于真实验证结果。
+	probeSessionID := compactProbeSessionID(account.ID)
+	require.Equal(t, probeSessionID, upstream.requests[0].Header.Get("session-id"))
+	require.Equal(t, probeSessionID, upstream.requests[0].Header.Get("thread-id"))
+	require.Equal(t, probeSessionID, upstream.requests[0].Header.Get("x-client-request-id"))
+	require.Equal(t, probeSessionID+":0", upstream.requests[0].Header.Get("x-codex-window-id"))
+	body, err := io.ReadAll(upstream.requests[0].Body)
+	require.NoError(t, err)
+	require.Equal(t, probeSessionID, gjson.GetBytes(body, "prompt_cache_key").String())
+	require.NotEmpty(t, gjson.GetBytes(body, "client_metadata.x-codex-installation-id").String())
+	require.Equal(t, probeSessionID, gjson.GetBytes(body, "client_metadata.session_id").String())
+	require.Equal(t, probeSessionID, gjson.GetBytes(body, "client_metadata.thread_id").String())
+	require.JSONEq(t,
+		gjson.GetBytes(body, "client_metadata.x-codex-turn-metadata").String(),
+		upstream.requests[0].Header.Get("x-codex-turn-metadata"),
+	)
 	require.NotEmpty(t, repo.updatedExtra)
 	require.Equal(t, 42.0, repo.updatedExtra["codex_5h_used_percent"])
 	require.Equal(t, 88.0, repo.updatedExtra["codex_7d_used_percent"])
@@ -163,6 +180,36 @@ func TestAccountTestService_OpenAIOAuthTestNormalizesGPT56Alias(t *testing.T) {
 	body, err := io.ReadAll(upstream.requests[0].Body)
 	require.NoError(t, err)
 	require.Equal(t, "gpt-5.6-sol", gjson.GetBytes(body, "model").String())
+}
+
+func TestAccountTestService_OpenAIOAuthEmptyModelUsesCodexManifestModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := newTestContext()
+
+	resp := newJSONResponse(http.StatusOK, "")
+	resp.Body = io.NopCloser(strings.NewReader(`data: {"type":"response.completed"}
+
+`))
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
+	svc := &AccountTestService{httpUpstream: upstream}
+	account := &Account{
+		ID:       901,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token": "test-token",
+		},
+	}
+
+	// 空模型的 OAuth 测试必须命中 Codex manifest 的探测模型，避免上游以
+	// ChatGPT/Codex 不支持的通用模型拒绝请求。
+	err := svc.testOpenAIAccountConnection(ctx, account, "", "", "")
+	require.NoError(t, err)
+	require.Len(t, upstream.requests, 1)
+
+	body, err := io.ReadAll(upstream.requests[0].Body)
+	require.NoError(t, err)
+	require.Equal(t, openai.CodexUsageProbeModel, gjson.GetBytes(body, "model").String())
 }
 
 func TestAccountTestService_OpenAIShadowUsesParentCredentialsAndShadowModel(t *testing.T) {

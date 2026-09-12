@@ -18,7 +18,7 @@ const codexUpstreamMinVersion = "0.144.0"
 // codexClientVersionMaxLen 官方版本号均为短 ASCII 串，远低于此上限。
 const codexClientVersionMaxLen = 64
 
-// codexClientVersionPattern 允许 0.146.0 与 0.147.0-alpha.4 两类官方形态。
+// codexClientVersionPattern 允许稳定版与 alpha/beta 预发布版的官方形态。
 var codexClientVersionPattern = regexp.MustCompile(`^[0-9]+(\.[0-9]+){1,3}(-[0-9A-Za-z.]+)?$`)
 
 // NormalizeCodexClientVersion 校验并归一化 Codex 客户端版本号，非法值返回空串。
@@ -32,7 +32,7 @@ func NormalizeCodexClientVersion(version string) string {
 	return version
 }
 
-// buildCodexCLIUserAgent 按版本号拼出规范 Codex TUI User-Agent。
+// buildCodexCLIUserAgent 按版本号拼出官方 Codex CLI User-Agent。
 // UA 形态只在 codexCLIUserAgentSuffix 一处定义，避免多处拼装漂移。
 func buildCodexCLIUserAgent(version string) string {
 	if version = NormalizeCodexClientVersion(version); version == "" {
@@ -188,12 +188,22 @@ func ensureCodexIdentityHeaders(h http.Header) {
 }
 
 // applyOpenAICodexProbeHeaders 为合成探测请求补齐 Codex 身份和引擎指纹。
+// 探测没有真实 thread 状态，因此生成一个 UUIDv7 根线程，并按官方格式构造
+// session/thread/request/window 四个关联头，避免使用裸 UUID 作为 window_id。
 func applyOpenAICodexProbeHeaders(h http.Header) {
 	if h == nil {
 		return
 	}
 	ensureCodexIdentityHeaders(h)
-	h.Set("X-Codex-Window-ID", uuid.NewString())
+	// Codex CLI 的 window_id 是 `<thread_id>:<window_number>`；UUIDv7 只用于
+	// thread_id/context_window_id 等独立标识。
+	if threadID, err := uuid.NewV7(); err == nil {
+		thread := threadID.String()
+		h.Set("session-id", thread)
+		h.Set("thread-id", thread)
+		h.Set("x-client-request-id", thread)
+		h.Set("X-Codex-Window-ID", thread+":0")
+	}
 }
 
 // enforceCodexIdentityHeaders 收口 OAuth（ChatGPT 内部接口）出站请求的客户端身份头。

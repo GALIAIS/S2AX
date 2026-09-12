@@ -95,6 +95,26 @@ type codexImportAccount struct {
 	WarningTexts     []string
 }
 
+// codexImportPreservedExtraKeys 列出 Codex 账号导入需要保留的持久化控制项。
+// 只复制明确的布尔/模式字段，避免把导入 JSON 中的 bearer、探测结果或其他
+// 未知数据写入 accounts.extra；指纹 seed 由创建/更新流程按本地账号重新处理。
+var codexImportPreservedExtraKeys = [...]string{
+	"openai_passthrough",
+	"openai_oauth_passthrough",
+	"openai_oauth_responses_websockets_v2_enabled",
+	"openai_oauth_responses_websockets_v2_mode",
+	"responses_websockets_v2_enabled",
+	"openai_ws_enabled",
+	"openai_ws_force_http",
+	"openai_ws_allow_store_recovery",
+	"openai_responses_flatten_namespaces",
+	"openai_compact_mode",
+	"openai_long_context_billing_enabled",
+	"codex_cli_only",
+	"codex_cli_only_allow_app_server",
+	"codex_fingerprint_mode",
+}
+
 type codexJWTClaims struct {
 	Sub        string                `json:"sub"`
 	Email      string                `json:"email"`
@@ -125,6 +145,10 @@ func (h *AccountHandler) ImportCodexSession(c *gin.Context) {
 		return
 	}
 	if err := service.ValidateOpenAILongContextBillingExtra(service.PlatformOpenAI, req.Extra); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if err := service.ValidateOpenAIImageGenerationExtra(service.PlatformOpenAI, req.Extra); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -602,6 +626,7 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 		item.AccessToken = strings.TrimSpace(raw)
 	case map[string]any:
 		item.Extra["import_source"] = codexImportSource(raw)
+		copyCodexImportPreservedExtra(raw, item.Extra)
 		agentIdentity, ok := firstCodexMap(raw, []string{"agent_identity"}, []string{"agentIdentity"})
 		credentials, hasCredentials := firstCodexMap(raw, []string{"credentials"})
 		if !ok && hasCredentials && strings.EqualFold(firstCodexString(credentials, []string{"auth_mode"}, []string{"authMode"}), service.OpenAIAuthModeAgentIdentity) {
@@ -1358,6 +1383,36 @@ func copyCodexExtraString(obj map[string]any, extra map[string]any, key string, 
 	value := firstCodexString(obj, path)
 	if value != "" {
 		extra[key] = value
+	}
+}
+
+// copyCodexImportPreservedExtra 从 session/export 的 extra 中恢复账号控制项。
+// 动态探测字段和 seed 刻意不复制：前者可能已经过期，后者必须由当前部署生成。
+func copyCodexImportPreservedExtra(raw, extra map[string]any) {
+	if len(raw) == 0 || extra == nil {
+		return
+	}
+	source, ok := firstCodexMap(raw, []string{"extra"})
+	if !ok {
+		return
+	}
+	for _, key := range codexImportPreservedExtraKeys {
+		value, exists := source[key]
+		if !exists || value == nil {
+			continue
+		}
+		switch key {
+		case "openai_oauth_responses_websockets_v2_mode", "openai_compact_mode", "codex_fingerprint_mode":
+			mode, ok := value.(string)
+			if !ok || strings.TrimSpace(mode) == "" {
+				continue
+			}
+			extra[key] = strings.TrimSpace(mode)
+		default:
+			if _, ok := value.(bool); ok {
+				extra[key] = value
+			}
+		}
 	}
 }
 

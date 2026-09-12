@@ -284,7 +284,20 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		} else if promptCacheKey != "" {
 			reqBody["prompt_cache_key"] = promptCacheKey
 		}
-		applyCodexAccountIdentityClientMetadataMap(reqBody, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
+		identitySource := codexAccountIdentitySource(c, account)
+		fingerprintIDs := resolveAndStageCodexFingerprintIDsForMap(c, account, reqBody)
+		if fingerprintIDs != nil {
+			if fingerprintIDs.mode == codexFingerprintDevice {
+				applyCodexAccountIdentityClientMetadataMap(reqBody, identitySource, getAPIKeyIDFromContext(c))
+			}
+			if isResponsesShape {
+				applyCodexFingerprintClientMetadata(reqBody, fingerprintIDs)
+			} else {
+				applyCodexFingerprintClientMetadataWithoutPromptCache(reqBody, fingerprintIDs)
+			}
+		} else {
+			applyCodexAccountIdentityClientMetadataMap(reqBody, identitySource, getAPIKeyIDFromContext(c))
+		}
 		responsesBody, err = json.Marshal(reqBody)
 		if err != nil {
 			return nil, fmt.Errorf("remarshal after codex transform: %w", err)
@@ -331,13 +344,25 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 
 	// 6. Build upstream request
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+	cancelUpstream := func() {}
+	if clientStream {
+		upstreamCtx, cancelUpstream = context.WithCancel(upstreamCtx)
+	}
+	defer cancelUpstream()
 	upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, true, promptCacheKey, false)
 	releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
-	if promptCacheKey != "" {
+	if ids := stagedCodexFingerprintIDs(c, account); ids != nil && ids.mode != codexFingerprintDevice {
+		// session/full 收敛拥有上游 session 头；否则兼容路径会在
+		// buildUpstreamRequest 之后把它覆盖掉。
+		upstreamReq.Header.Set("session_id", ids.sessionID)
+		if upstreamReq.Header.Get("conversation_id") != "" {
+			upstreamReq.Header.Set("conversation_id", ids.sessionID)
+		}
+	} else if promptCacheKey != "" {
 		apiKeyID := getAPIKeyIDFromContext(c)
 		sessionKey := promptCacheKey
 		if !compatPromptCacheTenantIsolated {
@@ -355,7 +380,10 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		cancelUpstream()
+		_ = resp.Body.Close()
+	}()
 
 	// 8. Handle error response with failover
 	if resp.StatusCode >= 400 {
@@ -577,6 +605,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 
 	result := &OpenAIForwardResult{
 		RequestID:                     requestID,
+		UpstreamHeaders:               resp.Header,
 		Usage:                         usage,
 		Model:                         originalModel,
 		BillingModel:                  billingModel,
@@ -698,6 +727,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	resultWithUsage := func() *OpenAIForwardResult {
 		out := &OpenAIForwardResult{
 			RequestID:                     requestID,
+			UpstreamHeaders:               resp.Header,
 			Usage:                         usage,
 			Model:                         originalModel,
 			BillingModel:                  billingModel,

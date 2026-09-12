@@ -1,5 +1,9 @@
 export default {
 
+  misc: {
+    retry: 'Retry'
+  },
+
   // Subscription Progress (Header component)
   subscriptionProgress: {
     title: 'My Subscriptions',

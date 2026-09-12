@@ -355,7 +355,39 @@ func isOpenAIImagesSelfBuiltRequest(ctx context.Context) bool {
 	return selfBuilt
 }
 
-func buildOpenAIImagesResponsesRequest(parsed *OpenAIImagesRequest, toolModel string) ([]byte, error) {
+// resolveOpenAIImagesResponsesTextModel 解析 Responses 外层使用的文本模型。
+// 优先使用调用方或账号配置；未配置时从当前账号已鉴权的模型目录中选择首个非图片模型。
+func (s *OpenAIGatewayService) resolveOpenAIImagesResponsesTextModel(ctx context.Context, account *Account, override string) (string, error) {
+	if candidate := strings.TrimSpace(override); candidate != "" {
+		return candidate, validateOpenAIImageTextModel(account, candidate)
+	}
+	if candidate := account.GetOpenAIImageTextModel(); candidate != "" {
+		return candidate, validateOpenAIImageTextModel(account, candidate)
+	}
+	if s == nil || s.accountRepo == nil {
+		// 没有模型发现依赖时仅供隔离测试保留旧协议兜底；生产服务始终注入
+		// accountRepo，从账号实际目录选择可用的 Responses 文本模型。
+		return openAIImagesResponsesMainModel, nil
+	}
+
+	catalog, err := s.FetchOpenAIModelsList(ctx, account)
+	if err != nil {
+		return "", fmt.Errorf("resolve OpenAI image bridge text model from account catalog: %w", err)
+	}
+	for _, entry := range gjson.GetBytes(catalog.Body, "data").Array() {
+		modelID := strings.TrimSpace(entry.Get("id").String())
+		if modelID == "" || account.IsOpenAIImageToolModel(modelID) {
+			continue
+		}
+		if strings.Contains(strings.ToLower(strings.TrimSpace(entry.Get("type").String())), "image") {
+			continue
+		}
+		return modelID, nil
+	}
+	return "", fmt.Errorf("no Responses-capable text model is available for OpenAI image generation; configure %s", OpenAIImageTextModelExtraKey)
+}
+
+func buildOpenAIImagesResponsesRequest(parsed *OpenAIImagesRequest, textModel, toolModel string) ([]byte, error) {
 	if parsed == nil {
 		return nil, fmt.Errorf("parsed images request is required")
 	}
@@ -380,9 +412,17 @@ func buildOpenAIImagesResponsesRequest(parsed *OpenAIImagesRequest, toolModel st
 	if parsed.IsEdits() && len(inputImages) == 0 {
 		return nil, fmt.Errorf("image input is required")
 	}
+	textModel = strings.TrimSpace(textModel)
+	if err := validateOpenAIImageTextModel(nil, textModel); err != nil {
+		return nil, err
+	}
+	toolModel = strings.TrimSpace(toolModel)
+	if toolModel == "" {
+		return nil, fmt.Errorf("image tool model is required")
+	}
 
 	req := []byte(`{"instructions":"","stream":true,"reasoning":{"effort":"medium","summary":"auto"},"parallel_tool_calls":true,"include":["reasoning.encrypted_content"],"model":"","store":false,"tool_choice":{"type":"image_generation"}}`)
-	req, _ = sjson.SetBytes(req, "model", openAIImagesResponsesMainModel)
+	req, _ = sjson.SetBytes(req, "model", textModel)
 	req, _ = sjson.SetBytes(req, "instructions", openAIImagesVerbatimPromptInstructions)
 
 	input := []byte(`[{"type":"message","role":"user","content":[{"type":"input_text","text":""}]}]`)
@@ -400,7 +440,7 @@ func buildOpenAIImagesResponsesRequest(parsed *OpenAIImagesRequest, toolModel st
 	}
 	tool := []byte(`{"type":"image_generation","action":"","model":""}`)
 	tool, _ = sjson.SetBytes(tool, "action", action)
-	tool, _ = sjson.SetBytes(tool, "model", strings.TrimSpace(toolModel))
+	tool, _ = sjson.SetBytes(tool, "model", toolModel)
 	if shouldPassOpenAIImagesN(toolModel, parsed.N) {
 		tool, _ = sjson.SetBytes(tool, "n", parsed.N)
 	}
@@ -1371,8 +1411,10 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthNonStreamingResponse(
 			RetryableOnSameAccount: true,
 		}
 	}
-	if strings.TrimSpace(firstMeta.Model) == "" {
-		firstMeta.Model = strings.TrimSpace(fallbackModel)
+	if requestedModel := strings.TrimSpace(fallbackModel); requestedModel != "" {
+		// Images API 的 model 应回显客户端请求的模型；上游 Codex 返回的内部
+		// 规范化名称仅用于诊断，不能覆盖用户指定的自定义模型 ID。
+		firstMeta.Model = requestedModel
 	}
 
 	responseBody, err := buildOpenAIImagesAPIResponse(results, createdAt, usageRaw, firstMeta, responseFormat)
@@ -1449,6 +1491,9 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthStreamingResponse(
 		}
 		if meta, eventCreatedAt, ok := extractOpenAIResponsesImageMetaFromLifecycleEvent(dataBytes); ok {
 			mergeOpenAIResponsesImageMeta(&streamMeta, meta)
+			if requestedModel := strings.TrimSpace(fallbackModel); requestedModel != "" {
+				streamMeta.Model = requestedModel
+			}
 			if eventCreatedAt > 0 {
 				createdAt = eventCreatedAt
 			}
@@ -1489,6 +1534,9 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthStreamingResponse(
 				return
 			}
 			mergeOpenAIResponsesImageMeta(&streamMeta, img)
+			if requestedModel := strings.TrimSpace(fallbackModel); requestedModel != "" {
+				streamMeta.Model = requestedModel
+			}
 			mergeOpenAIResponsesImageMeta(&img, streamMeta)
 			key := openAIResponsesImageResultKey(itemID, img)
 			if _, exists := emitted[key]; exists {
@@ -1508,6 +1556,9 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthStreamingResponse(
 				return
 			}
 			mergeOpenAIResponsesImageMeta(&streamMeta, firstMeta)
+			if requestedModel := strings.TrimSpace(fallbackModel); requestedModel != "" {
+				streamMeta.Model = requestedModel
+			}
 			finalResults := make([]openAIResponsesImageResult, 0, len(results)+len(pendingResults))
 			finalSeen := make(map[string]struct{})
 			for _, img := range results {
@@ -1806,7 +1857,11 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		return nil, err
 	}
 
-	responsesBody, err := buildOpenAIImagesResponsesRequest(parsed, requestModel)
+	textModel, err := s.resolveOpenAIImagesResponsesTextModel(upstreamCtx, account, "")
+	if err != nil {
+		return nil, err
+	}
+	responsesBody, err := buildOpenAIImagesResponsesRequest(parsed, textModel, requestModel)
 	if err != nil {
 		return nil, err
 	}
@@ -1856,7 +1911,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
-		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
+		if s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody) {
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				ProxyID:            opsUpstreamProxyID(account),
 				ProxyName:          opsUpstreamProxyName(account),
@@ -1899,6 +1954,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 			if imageCount > 0 {
 				return &OpenAIForwardResult{
 					RequestID:        resp.Header.Get("x-request-id"),
+					UpstreamHeaders:  resp.Header,
 					Usage:            usage,
 					Model:            requestModel,
 					UpstreamModel:    requestModel,
@@ -1943,6 +1999,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	}
 	return &OpenAIForwardResult{
 		RequestID:        resp.Header.Get("x-request-id"),
+		UpstreamHeaders:  resp.Header,
 		Usage:            usage,
 		Model:            requestModel,
 		UpstreamModel:    requestModel,

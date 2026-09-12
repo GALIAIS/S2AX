@@ -75,6 +75,45 @@
         />
       </div>
 
+      <!-- OpenAI 生图测试把图片工具模型和 Responses 外层文本模型分开选择。 -->
+      <fieldset v-if="isOpenAIImageTest" class="space-y-3">
+        <legend class="text-sm font-medium text-gray-700 dark:text-gray-300">
+          {{ t('admin.accounts.openai.imageToolModelLabel') }}
+        </legend>
+        <p class="text-xs text-gray-500 dark:text-gray-400">
+          {{ t('admin.accounts.openai.imageToolModelHint') }}
+        </p>
+        <Select
+          v-model="selectedImageModelId"
+          :options="openAIImageModelOptions"
+          :disabled="loadingModels || status === 'connecting'"
+          value-key="id"
+          label-key="display_name"
+          :placeholder="loadingModels ? t('common.loading') + '...' : t('admin.accounts.openai.imageToolModelLabel')"
+          :searchable="true"
+          :creatable="true"
+          :creatable-prefix="t('admin.accounts.openai.createImageModel')"
+          data-testid="openai-image-model-select"
+        />
+        <div class="space-y-1.5">
+          <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+            {{ t('admin.accounts.openai.imageTextModelLabel') }}
+          </label>
+          <Select
+            v-model="selectedImageTextModelId"
+            :options="openAITextModelOptions"
+            :disabled="loadingModels || status === 'connecting'"
+            value-key="id"
+            label-key="display_name"
+            :placeholder="loadingModels ? t('common.loading') + '...' : t('admin.accounts.openai.imageTextModelLabel')"
+            :searchable="true"
+            :creatable="true"
+            :creatable-prefix="t('admin.accounts.openai.createTextModel')"
+            data-testid="openai-image-text-model-select"
+          />
+        </div>
+      </fieldset>
+
       <div v-if="isOpenAIAccount" class="space-y-1.5">
         <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
           {{ t('admin.accounts.openai.testMode') }}
@@ -395,6 +434,15 @@ interface PreviewMedia {
   mimeType?: string
 }
 
+// Select 支持带索引签名的动态模型对象，避免限制管理员后续添加的自定义字段。
+interface ModelSelectOption {
+  id: string
+  display_name: string
+  type?: string
+  created_at?: string
+  [key: string]: unknown
+}
+
 const props = defineProps<{
   show: boolean
   account: Account | null
@@ -418,7 +466,9 @@ const generatedImages = ref<PreviewMedia[]>([])
 const generatedAudios = ref<PreviewMedia[]>([])
 const generatedVideos = ref<PreviewMedia[]>([])
 const previewImageUrl = ref('')
-const testMode = ref<'default' | 'compact'>('default')
+const testMode = ref<'default' | 'image' | 'compact'>('default')
+const selectedImageModelId = ref('')
+const selectedImageTextModelId = ref('')
 const grokTestMode = ref<'text' | 'image' | 'video' | 'search' | 'tts' | 'stt' | 'realtime'>('text')
 const uploadImageDataURL = ref('')
 const uploadImagePreview = ref('')
@@ -431,6 +481,7 @@ const isOpenAIAccount = computed(() => props.account?.platform === 'openai')
 const isGrokAccount = computed(() => props.account?.platform === 'grok')
 const openAITestModeOptions = computed(() => [
   { value: 'default', label: t('admin.accounts.openai.testModeDefault') },
+  { value: 'image', label: t('admin.accounts.openai.testModeImage') },
   { value: 'compact', label: t('admin.accounts.openai.testModeCompact') }
 ])
 const grokTestModeOptions = computed(() => [
@@ -450,11 +501,68 @@ const supportsGeminiImageTest = computed(() => {
   return props.account?.platform === 'gemini' || (props.account?.platform === 'antigravity' && props.account?.type === 'apikey')
 })
 
-const supportsOpenAIImageTest = computed(() => {
-  const modelID = selectedModelId.value.toLowerCase()
-  if (!modelID.startsWith('gpt-image-')) return false
-  return props.account?.platform === 'openai'
+// 图片模型通过账号模型目录和 Extra 显式配置识别；自定义值由 Select 的 creatable
+// 模式直接传递，不依赖固定的 GPT Image 模型名单。
+const configuredOpenAIImageModelIds = computed(() => {
+  const extra = props.account?.extra as Record<string, unknown> | undefined
+  const ids = new Set<string>()
+  const configured = extra?.openai_image_models
+  if (Array.isArray(configured)) {
+    for (const value of configured) {
+      if (typeof value === 'string' && value.trim()) ids.add(value.trim().toLowerCase())
+    }
+  }
+  if (typeof extra?.openai_image_model === 'string' && extra.openai_image_model.trim()) {
+    ids.add(extra.openai_image_model.trim().toLowerCase())
+  }
+  return ids
 })
+
+const isOpenAIImageModel = (model: ClaudeModel) => {
+  const modelID = model.id.trim().toLowerCase()
+  const modelType = typeof model.type === 'string' ? model.type.trim().toLowerCase() : ''
+  return (
+    modelType.includes('image') ||
+    modelID.includes('image') ||
+    configuredOpenAIImageModelIds.value.has(modelID)
+  )
+}
+
+const toModelSelectOption = (model: ClaudeModel): ModelSelectOption => ({ ...model })
+
+const openAIImageModelOptions = computed<ModelSelectOption[]>(() => {
+  const options = availableModels.value.filter(isOpenAIImageModel).map(toModelSelectOption)
+  const seen = new Set(options.map((model) => model.id.trim().toLowerCase()))
+  for (const modelID of configuredOpenAIImageModelIds.value) {
+    if (seen.has(modelID)) continue
+    options.push({ id: modelID, type: 'image_generation', display_name: modelID, created_at: '' })
+    seen.add(modelID)
+  }
+  return options
+})
+
+const openAITextModelOptions = computed<ModelSelectOption[]>(() => {
+  const options = availableModels.value.filter((model) => !isOpenAIImageModel(model)).map(toModelSelectOption)
+  const configuredTextModel = props.account?.extra?.openai_image_text_model
+  if (typeof configuredTextModel === 'string' && configuredTextModel.trim()) {
+    const normalized = configuredTextModel.trim().toLowerCase()
+    if (!options.some((model) => model.id.trim().toLowerCase() === normalized)) {
+      options.unshift({
+        id: configuredTextModel.trim(),
+        type: 'model',
+        display_name: configuredTextModel.trim(),
+        created_at: ''
+      })
+    }
+  }
+  return options
+})
+
+const supportsOpenAIImageTest = computed(() => {
+  return isOpenAIAccount.value && testMode.value === 'image'
+})
+
+const isOpenAIImageTest = computed(() => supportsOpenAIImageTest.value)
 
 const isGrokImageModel = (id: string) => {
   const modelID = id.toLowerCase()
@@ -483,6 +591,7 @@ const supportsImageTest = computed(
 
 // Model select only when the mode needs a model.
 const showModelSelect = computed(() => {
+  if (isOpenAIImageTest.value) return false
   if (!isGrokAccount.value) return true
   return grokTestMode.value === 'text' || grokTestMode.value === 'image' || grokTestMode.value === 'video'
 })
@@ -680,6 +789,9 @@ const testModeSummary = computed(() => {
 
 const canStartTest = computed(() => {
   if (status.value === 'connecting') return false
+  if (isOpenAIImageTest.value) {
+    return Boolean(selectedImageModelId.value && selectedImageTextModelId.value)
+  }
   if (isGrokAccount.value) {
     if (
       grokTestMode.value === 'search' ||
@@ -738,6 +850,22 @@ const pickDefaultModelForMode = () => {
   selectedModelId.value = opts[0].id
 }
 
+// OpenAI 生图测试默认分别选择账号配置值和目录中的首个候选，避免沿用同一个模型字段。
+const pickDefaultOpenAIImageModels = () => {
+  const imageOptions = openAIImageModelOptions.value
+  const textOptions = openAITextModelOptions.value
+  const configuredImageModel = props.account?.extra?.openai_image_model
+  const configuredTextModel = props.account?.extra?.openai_image_text_model
+  selectedImageModelId.value =
+    typeof configuredImageModel === 'string' && configuredImageModel.trim()
+      ? configuredImageModel.trim()
+      : imageOptions[0]?.id || ''
+  selectedImageTextModelId.value =
+    typeof configuredTextModel === 'string' && configuredTextModel.trim()
+      ? configuredTextModel.trim()
+      : textOptions[0]?.id || ''
+}
+
 watch(
   () => props.show,
   async (newVal) => {
@@ -747,6 +875,9 @@ watch(
       grokTestMode.value = 'text'
       resetState()
       await loadAvailableModels()
+      if (isOpenAIAccount.value) {
+        pickDefaultOpenAIImageModels()
+      }
       if (isGrokAccount.value) {
         pickDefaultModelForMode()
         applyDefaultPromptForMode()
@@ -770,6 +901,8 @@ const loadAvailableModels = async () => {
 
   loadingModels.value = true
   selectedModelId.value = '' // Reset selection before loading
+  selectedImageModelId.value = ''
+  selectedImageTextModelId.value = ''
   try {
     const models = await adminAPI.accounts.getAvailableModels(props.account.id)
     availableModels.value = props.account.platform === 'gemini' || props.account.platform === 'antigravity'
@@ -784,6 +917,9 @@ const loadAvailableModels = async () => {
         const sonnetModel = availableModels.value.find((m) => m.id.includes('sonnet'))
         selectedModelId.value = sonnetModel?.id || availableModels.value[0].id
       }
+    }
+    if (props.account.platform === 'openai') {
+      pickDefaultOpenAIImageModels()
     }
   } catch (error) {
     console.error('Failed to load available models:', error)
@@ -853,14 +989,22 @@ const startTest = async () => {
       model_id: string
       prompt: string
       mode?: string
+      openai_image_text_model?: string
       image_data_url?: string
       audio_data_url?: string
     } = {
-      model_id: showModelSelect.value ? selectedModelId.value : '',
+      model_id: isOpenAIImageTest.value
+        ? selectedImageModelId.value
+        : showModelSelect.value
+          ? selectedModelId.value
+          : '',
       prompt: supportsPromptInput.value ? testPrompt.value.trim() : ''
     }
     if (isOpenAIAccount.value) {
       requestBody.mode = testMode.value
+      if (isOpenAIImageTest.value) {
+        requestBody.openai_image_text_model = selectedImageTextModelId.value
+      }
     }
     if (isGrokAccount.value) {
       // Always send explicit Grok mode. search/tts/stt/realtime are standalone

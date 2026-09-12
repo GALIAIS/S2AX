@@ -148,3 +148,65 @@ RETURNING id
 		require.Equal(t, want, readSeed(ids[i]), "retry must not rotate an existing valid seed")
 	}
 }
+
+// migration 315 只补齐 setup-token 的历史缺口，并验证合法 seed 的幂等保留。
+func TestMigration315BackfillsEnabledOpenAISetupTokenSeeds(t *testing.T) {
+	tx := testTx(t)
+	ctx := context.Background()
+	migrationSQL, err := dbmigrations.FS.ReadFile("315_backfill_codex_fingerprint_seed_setup_tokens.sql")
+	require.NoError(t, err)
+
+	var missingID, malformedID, validID, offID, oauthID int64
+	require.NoError(t, tx.QueryRowContext(ctx, `
+INSERT INTO accounts (name, platform, type, extra)
+VALUES ('migration-315-setup-missing', 'openai', 'setup-token', '{"codex_fingerprint_mode":"session"}'::jsonb)
+RETURNING id
+`).Scan(&missingID))
+	require.NoError(t, tx.QueryRowContext(ctx, `
+INSERT INTO accounts (name, platform, type, extra)
+VALUES ('migration-315-setup-malformed', 'openai', 'setup-token', '{"codex_fingerprint_mode":"full","codex_fingerprint_seed":"BAD"}'::jsonb)
+RETURNING id
+`).Scan(&malformedID))
+	require.NoError(t, tx.QueryRowContext(ctx, `
+INSERT INTO accounts (name, platform, type, extra)
+VALUES ('migration-315-setup-valid', 'openai', 'setup-token', '{"codex_fingerprint_mode":"device","codex_fingerprint_seed":"11111111-1111-4111-1111-111111111111"}'::jsonb)
+RETURNING id
+`).Scan(&validID))
+	require.NoError(t, tx.QueryRowContext(ctx, `
+INSERT INTO accounts (name, platform, type, extra)
+VALUES ('migration-315-setup-off', 'openai', 'setup-token', '{"codex_fingerprint_mode":"off"}'::jsonb)
+RETURNING id
+`).Scan(&offID))
+	require.NoError(t, tx.QueryRowContext(ctx, `
+INSERT INTO accounts (name, platform, type, extra)
+VALUES ('migration-315-oauth-control', 'openai', 'oauth', '{"codex_fingerprint_mode":"session"}'::jsonb)
+RETURNING id
+`).Scan(&oauthID))
+
+	ids := []int64{missingID, malformedID, validID, offID, oauthID}
+	t.Cleanup(func() {
+		_, _ = tx.ExecContext(context.Background(), `DELETE FROM accounts WHERE id = ANY($1)`, pq.Array(ids))
+	})
+
+	_, err = tx.ExecContext(ctx, string(migrationSQL))
+	require.NoError(t, err)
+
+	readSeed := func(id int64) string {
+		t.Helper()
+		var seed string
+		require.NoError(t, tx.QueryRowContext(ctx, `SELECT COALESCE(extra->>'codex_fingerprint_seed', '') FROM accounts WHERE id = $1`, id).Scan(&seed))
+		return seed
+	}
+	missingSeed := readSeed(missingID)
+	malformedSeed := readSeed(malformedID)
+	requireCanonicalUUIDString(t, missingSeed)
+	requireCanonicalUUIDString(t, malformedSeed)
+	require.Equal(t, "11111111-1111-4111-1111-111111111111", readSeed(validID))
+	require.Empty(t, readSeed(offID))
+	require.Empty(t, readSeed(oauthID), "315 仅应补 setup-token，不应覆盖旧 migration 的 oauth 范围")
+
+	_, err = tx.ExecContext(ctx, string(migrationSQL))
+	require.NoError(t, err)
+	require.Equal(t, missingSeed, readSeed(missingID))
+	require.Equal(t, malformedSeed, readSeed(malformedID))
+}
