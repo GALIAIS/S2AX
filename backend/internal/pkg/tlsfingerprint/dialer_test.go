@@ -294,6 +294,29 @@ func TestFilterUTLSCurvePreferences(t *testing.T) {
 	}
 }
 
+// TestToStandardTLSConnectionState 保证 net/http 能读取 uTLS 的 h2 协商结果。
+func TestToStandardTLSConnectionState(t *testing.T) {
+	got := toStandardTLSConnectionState(utls.ConnectionState{
+		Version:                    utls.VersionTLS13,
+		HandshakeComplete:          true,
+		CipherSuite:                0x1301,
+		NegotiatedProtocol:         "h2",
+		NegotiatedProtocolIsMutual: true,
+		ServerName:                 "chatgpt.com",
+		ECHAccepted:                true,
+	})
+
+	if got.Version != utls.VersionTLS13 ||
+		!got.HandshakeComplete ||
+		got.CipherSuite != 0x1301 ||
+		got.NegotiatedProtocol != "h2" ||
+		!got.NegotiatedProtocolIsMutual ||
+		got.ServerName != "chatgpt.com" ||
+		!got.ECHAccepted {
+		t.Fatalf("converted TLS state = %+v", got)
+	}
+}
+
 // Helper function to parse URL without error handling.
 func mustParseURL(rawURL string) *url.URL {
 	u, err := url.Parse(rawURL)

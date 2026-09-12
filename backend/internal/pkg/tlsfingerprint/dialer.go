@@ -6,6 +6,7 @@ package tlsfingerprint
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"log/slog"
@@ -297,7 +298,39 @@ func performTLSHandshake(ctx context.Context, conn net.Conn, profile *Profile, a
 		"cipher_suite", state.CipherSuite,
 		"alpn", state.NegotiatedProtocol)
 
-	return tlsConn, nil
+	// net/http 只有在自定义拨号连接暴露标准库 ConnectionState 时，才会
+	// 根据 ALPN 把连接切换到 HTTP/2；uTLS 的同名返回类型不同，需要适配。
+	return &httpTransportTLSConn{UConn: tlsConn}, nil
+}
+
+// httpTransportTLSConn 将 uTLS 连接包装成 net/http 能识别的 TLS 连接。
+// 底层仍是 uTLS，因此不会改变已完成的 TLS 指纹或证书校验行为。
+type httpTransportTLSConn struct {
+	*utls.UConn
+}
+
+// ConnectionState 将 uTLS 状态转换为标准库状态，尤其保留 ALPN 协商结果。
+func (c *httpTransportTLSConn) ConnectionState() tls.ConnectionState {
+	return toStandardTLSConnectionState(c.UConn.ConnectionState())
+}
+
+// toStandardTLSConnectionState 统一转换两套 TLS 实现共享的连接元数据。
+func toStandardTLSConnectionState(state utls.ConnectionState) tls.ConnectionState {
+	return tls.ConnectionState{
+		Version:                     state.Version,
+		HandshakeComplete:           state.HandshakeComplete,
+		DidResume:                   state.DidResume,
+		CipherSuite:                 state.CipherSuite,
+		NegotiatedProtocol:          state.NegotiatedProtocol,
+		NegotiatedProtocolIsMutual:  state.NegotiatedProtocolIsMutual,
+		ServerName:                  state.ServerName,
+		PeerCertificates:            state.PeerCertificates,
+		VerifiedChains:              state.VerifiedChains,
+		SignedCertificateTimestamps: state.SignedCertificateTimestamps,
+		OCSPResponse:                state.OCSPResponse,
+		TLSUnique:                   state.TLSUnique,
+		ECHAccepted:                 state.ECHAccepted,
+	}
 }
 
 // toUTLSCurves converts uint16 slice to utls.CurveID slice.
