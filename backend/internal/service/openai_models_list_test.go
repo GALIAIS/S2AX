@@ -232,9 +232,14 @@ func TestFetchOpenAIModelsListEmptyAndMalformedResponses(t *testing.T) {
 }
 
 func TestPinnedOpenAIModelsListMixedAccountsShareColdCacheAcrossGroups(t *testing.T) {
-	_, oauthCalls := newCodexModelsOAuthCacheServer(t, `{"models":[{"slug":"shared-model"},{"slug":"oauth-special"}]}`)
+	oauthServer, oauthCalls := newCodexModelsOAuthCacheServer(t, `{"models":[{"slug":"shared-model"},{"slug":"oauth-special"}]}`)
 	var apiCalls atomic.Int32
-	s := newCodexModelsAPIKeyTestService(&codexModelsHTTPUpstreamStub{do: func(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	s := newCodexModelsAPIKeyTestService(&codexModelsHTTPUpstreamStub{do: func(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+		// OAuth 模型清单也经过 HTTPUpstream.DoWithTLS；测试替身需把该请求转回本地
+		// OAuth 服务，避免用 API Key 的 data 信封冒充 Codex models 信封。
+		if req.URL.Host == oauthServer.Listener.Addr().String() {
+			return oauthServer.Client().Do(req)
+		}
 		apiCalls.Add(1)
 		return ordinaryModelsUpstreamResponse(`{"data":[{"id":"shared-model","owned_by":"api-provider"},{"id":"api-special"}]}`), nil
 	}})

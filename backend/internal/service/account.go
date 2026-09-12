@@ -2341,11 +2341,24 @@ func (a *Account) IsAnthropicOAuthOrSetupToken() bool {
 	return a.Platform == PlatformAnthropic && (a.Type == AccountTypeOAuth || a.Type == AccountTypeSetupToken)
 }
 
-// IsTLSFingerprintEnabled 检查是否启用 TLS 指纹伪装
-// 仅适用于 Anthropic OAuth/SetupToken 类型账号
-// 启用后将模拟 Claude Code (Node.js) 客户端的 TLS 握手特征
+// IsTLSFingerprintEnabled 检查是否启用 TLS 指纹伪装。
+// Anthropic OAuth/SetupToken 仍按原有显式开关使用 Claude Code 模板；
+// OpenAI OAuth/SetupToken 默认使用 Codex rustls 模板，只有明确写入 false
+// 才关闭，避免新增的 Codex 出站请求意外退回 Go 标准 TLS。
 func (a *Account) IsTLSFingerprintEnabled() bool {
-	// 仅支持 Anthropic OAuth/SetupToken 账号
+	if a == nil {
+		return false
+	}
+	if a.IsOpenAIOAuthLike() {
+		if a.Extra == nil {
+			return true
+		}
+		if value, exists := a.Extra["enable_tls_fingerprint"]; exists {
+			enabled, ok := value.(bool)
+			return ok && enabled
+		}
+		return true
+	}
 	if !a.IsAnthropicOAuthOrSetupToken() {
 		return false
 	}

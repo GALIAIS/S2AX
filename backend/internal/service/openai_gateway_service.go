@@ -36,12 +36,13 @@ const (
 	// 与真实 Codex TUI 的 User-Agent 结构对齐：
 	// {originator}/{version} ({OS} {OS_version}; {arch}) {terminal}
 	// 缺少 OS/架构/终端后缀的形态易被上游指纹识别为非官方客户端。
-	// 该后缀是 UA 形态的唯一定义处，buildCodexCLIUserAgent 按运行时版本号复用它。
-	codexCLIUserAgentSuffix = " (Ubuntu 22.4.0; x86_64) xterm-256color"
-	// codexCLIUserAgent 是编译期兜底 UA；运行时优先使用由后台版本号拼出的规范 UA。
+	// 该后缀由 openai_codex_identity.go 按 Codex CLI 的 os_info 与
+	// terminal-detection 规则生成；下面的常量仅用于运行时探测失败时的安全兜底。
+	codexCLIUserAgentFallbackSuffix = " (Unknown Unknown; unknown) unknown"
+	// codexCLIUserAgent 是按当前进程环境生成的编译期默认 UA；后台版本号变化时，
+	// buildCodexCLIUserAgent 会复用同一套系统/终端后缀重新构造。
 	// 版本段必须来自 codexCLIVersion：UA 与 version 头是同一个版本声明的两个出口，
 	// 各自硬编码会漂移成互相矛盾的身份。
-	codexCLIUserAgent = openai.CodexDefaultOriginator + "/" + codexCLIVersion + codexCLIUserAgentSuffix
 	// codex_cli_only 拒绝时单个请求头日志长度上限（字符）
 	codexCLIOnlyHeaderValueMaxBytes = 256
 
@@ -68,6 +69,13 @@ const (
 	// 被暂停的账号收不到流量，其快照永远不会从上游响应头刷新；该兜底让账号在快照
 	// 陈旧时放行一次请求，从而通过正常响应头自愈，而无需等待整个窗口（5h/7d）重置。
 	openAICodexAutoPauseStaleAfter = 2 * time.Hour
+)
+
+var (
+	// codexCLIUserAgentSuffix 是进程级稳定快照，避免每个请求重新读取操作系统信息。
+	codexCLIUserAgentSuffix = detectCodexCLIUserAgentSuffix()
+	// codexCLIUserAgent 是默认出口身份；显式配置的 UA 仍由设置服务和收口逻辑处理。
+	codexCLIUserAgent = openai.CodexDefaultOriginator + "/" + codexCLIVersion + codexCLIUserAgentSuffix
 )
 
 // OpenAI allowed headers whitelist (for non-passthrough).
@@ -449,6 +457,7 @@ type OpenAIGatewayService struct {
 	billingCacheService      *BillingCacheService
 	userGroupRateResolver    *userGroupRateResolver
 	httpUpstream             HTTPUpstream
+	tlsFPProfileService      *TLSFingerprintProfileService
 	deferredService          *DeferredService
 	openAITokenProvider      *OpenAITokenProvider
 	grokTokenProvider        *GrokTokenProvider

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -108,6 +109,11 @@ func (u *codexModelsFailoverHTTPUpstream) Do(_ *http.Request, _ string, accountI
 		Header:     make(http.Header),
 		Body:       io.NopCloser(strings.NewReader(`{"models":[{"slug":"gpt-5.6-sol"}]}`)),
 	}, nil
+}
+
+// DoWithTLS 让模型清单测试替身覆盖 OAuth 的 TLS 出口，同时复用原有响应逻辑。
+func (u *codexModelsFailoverHTTPUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxyURL, accountID, concurrency)
 }
 
 func (u *codexModelsFailoverHTTPUpstream) calls() []int64 {
@@ -722,6 +728,11 @@ func (u *codexModelsPinnedHTTPUpstream) Do(_ *http.Request, _ string, accountID 
 		Header:     make(http.Header),
 		Body:       io.NopCloser(strings.NewReader(body)),
 	}, nil
+}
+
+// DoWithTLS 保持固定账号模型清单替身与生产 OAuth 请求接口一致。
+func (u *codexModelsPinnedHTTPUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxyURL, accountID, concurrency)
 }
 
 func (u *codexModelsPinnedHTTPUpstream) accountIDs() []int64 {

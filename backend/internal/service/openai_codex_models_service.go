@@ -1862,22 +1862,54 @@ func (s *OpenAIGatewayService) fetchOpenAIModelsUpstream(ctx context.Context, re
 			return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_UPSTREAM_NOT_CONFIGURED", "Codex models upstream HTTP client is not configured")
 		}
 		req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
-		resp, err = s.httpUpstream.Do(req, request.proxyURL, request.accountID, request.accountConcurrency)
+		// API Key 默认没有 Codex TLS profile；profile 为空时保留 Do 路径，
+		// 也兼容只实现普通上游接口的扩展测试替身。
+		tlsProfile := s.resolveTLSProfile(request.credentialAccount)
+		if tlsProfile == nil {
+			resp, err = s.httpUpstream.Do(req, request.proxyURL, request.accountID, request.accountConcurrency)
+		} else {
+			resp, err = s.httpUpstream.DoWithTLS(
+				req,
+				request.proxyURL,
+				request.accountID,
+				request.accountConcurrency,
+				tlsProfile,
+			)
+		}
 	} else {
 		handled := false
 		if s.pluginManager != nil {
 			resp, handled, err = s.pluginManager.RoundTripOpenAIOAuth(reqCtx, req, request.proxyURL, request.credentialAccount)
 		}
 		if !handled {
-			client, clientErr := httpclient.GetClient(httpclient.Options{
-				ProxyURL:              request.proxyURL,
-				Timeout:               codexModelsManifestRequestTimeout,
-				ResponseHeaderTimeout: 10 * time.Second,
-			})
-			if clientErr != nil {
-				return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_PROXY_INVALID", "invalid proxy configuration: %v", clientErr)
+			if s.httpUpstream != nil {
+				req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
+				// 显式关闭 TLS 指纹时仍走普通 Do；默认 OAuth profile 非空时走
+				// DoWithTLS，确保真实 Codex 模型清单请求与推理请求一致。
+				tlsProfile := s.resolveTLSProfile(request.credentialAccount)
+				if tlsProfile == nil {
+					resp, err = s.httpUpstream.Do(req, request.proxyURL, request.accountID, request.accountConcurrency)
+				} else {
+					resp, err = s.httpUpstream.DoWithTLS(
+						req,
+						request.proxyURL,
+						request.accountID,
+						request.accountConcurrency,
+						tlsProfile,
+					)
+				}
+			} else {
+				// 没有注入通用上游时保留旧的直接客户端兜底，便于最小化测试装配。
+				client, clientErr := httpclient.GetClient(httpclient.Options{
+					ProxyURL:              request.proxyURL,
+					Timeout:               codexModelsManifestRequestTimeout,
+					ResponseHeaderTimeout: 10 * time.Second,
+				})
+				if clientErr != nil {
+					return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_PROXY_INVALID", "invalid proxy configuration: %v", clientErr)
+				}
+				resp, err = client.Do(req)
 			}
-			resp, err = client.Do(req)
 		}
 	}
 	if err != nil {

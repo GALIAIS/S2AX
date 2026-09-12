@@ -135,6 +135,9 @@ func (s *TLSFingerprintProfileService) Delete(ctx context.Context, id int64) err
 // GetProfileByID 根据 ID 从本地缓存获取 Profile（用于 DoWithTLS 热路径）
 // 返回 nil 表示未找到，调用方应 fallback 到内置默认 Profile
 func (s *TLSFingerprintProfileService) GetProfileByID(id int64) *tlsfingerprint.Profile {
+	if s == nil {
+		return nil
+	}
 	s.localMu.RLock()
 	p, ok := s.localCache[id]
 	s.localMu.RUnlock()
@@ -147,6 +150,9 @@ func (s *TLSFingerprintProfileService) GetProfileByID(id int64) *tlsfingerprint.
 
 // getRandomProfile 从本地缓存中随机选择一个 Profile
 func (s *TLSFingerprintProfileService) getRandomProfile() *tlsfingerprint.Profile {
+	if s == nil {
+		return nil
+	}
 	s.localMu.RLock()
 	defer s.localMu.RUnlock()
 
@@ -190,7 +196,11 @@ func (s *TLSFingerprintProfileService) ResolveTLSProfile(account *Account) *tlsf
 			return p
 		}
 	}
-	// TLS 启用但无绑定 profile → 空 Profile → dialer 使用内置默认值
+	if account.IsOpenAIOAuthLike() {
+		// OpenAI OAuth/SetupToken 使用 Codex CLI rustls 参数；显式 profile 仍优先。
+		return tlsfingerprint.CodexRustlsProfile()
+	}
+	// Anthropic TLS 启用但无绑定 profile → 空 Profile → dialer 使用 Node.js 默认值。
 	return &tlsfingerprint.Profile{Name: "Built-in Default (Node.js 24.x)"}
 }
 

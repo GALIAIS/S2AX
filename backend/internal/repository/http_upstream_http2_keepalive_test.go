@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/stretchr/testify/require"
 )
 
@@ -105,4 +106,19 @@ func TestBuildUpstreamTransport_LongStreamH2_WithHTTPProxy_EnablesKeepAlive(t *t
 	require.True(t, tr.ForceAttemptHTTP2)
 	requireHTTP2Configured(t, tr, "经代理的 long_stream_h2 也必须启用 http2 keepalive")
 	require.NotNil(t, tr.Proxy, "HTTP 代理仍须通过 Transport.Proxy 生效")
+}
+
+// Codex rustls 模板声明 h2 时，带指纹的 Transport 也必须显式配置 HTTP/2，
+// 否则只改 ClientHello 会造成 ALPN 与实际请求协议不一致。
+func TestBuildUpstreamTransportWithTLSFingerprint_CodexUsesHTTP2(t *testing.T) {
+	tr, err := buildUpstreamTransportWithTLSFingerprintForMode(
+		http2KeepAliveTestPoolSettings(),
+		nil,
+		tlsfingerprint.CodexRustlsProfile(),
+		upstreamProtocolModeOpenAIH2,
+	)
+	require.NoError(t, err)
+	require.True(t, tr.ForceAttemptHTTP2)
+	requireHTTP2Configured(t, tr, "Codex 指纹 Transport 必须显式配置 HTTP/2")
+	require.NotNil(t, tr.DialTLSContext, "Codex 指纹必须使用自定义 TLS dialer")
 }

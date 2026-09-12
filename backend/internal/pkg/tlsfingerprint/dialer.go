@@ -1,5 +1,6 @@
 // Package tlsfingerprint provides TLS fingerprint simulation for HTTP clients.
-// It uses the utls library to create TLS connections that mimic Node.js/Claude Code clients.
+// It uses uTLS to reproduce the configured Node.js/Claude Code or Codex rustls
+// ClientHello shape while leaving certificate verification to the normal handshake.
 package tlsfingerprint
 
 import (
@@ -17,7 +18,8 @@ import (
 )
 
 // Profile contains TLS fingerprint configuration.
-// All slice fields use built-in defaults when empty.
+// All slice fields use built-in defaults when empty; SupportedVersions also
+// determines the ClientHello TLS version bounds when present.
 type Profile struct {
 	Name                string // Profile name for identification
 	CipherSuites        []uint16
@@ -391,6 +393,7 @@ func buildClientHelloSpecFromProfile(profile *Profile) *utls.ClientHelloSpec {
 	if profile != nil && len(profile.Extensions) > 0 {
 		extOrder = profile.Extensions
 	}
+	tlsVersMin, tlsVersMax := tlsVersionBounds(supportedVersions)
 
 	// Build extensions list from the ordered IDs.
 	// Parametric extensions (curves, sigalgs, etc.) are populated with resolved profile values.
@@ -451,9 +454,35 @@ func buildClientHelloSpecFromProfile(profile *Profile) *utls.ClientHelloSpec {
 		CipherSuites:       cipherSuites,
 		CompressionMethods: []uint8{0}, // null compression only (standard)
 		Extensions:         extensions,
-		TLSVersMax:         utls.VersionTLS13,
-		TLSVersMin:         utls.VersionTLS10,
+		TLSVersMax:         tlsVersMax,
+		TLSVersMin:         tlsVersMin,
 	}
+}
+
+// tlsVersionBounds 从 supported_versions 推导 uTLS 的 min/max 版本。
+// 不识别的 GREASE 或未来版本不会改变当前安全边界；没有可用版本时回退
+// 到 TLS 1.2-1.3，避免旧实现默认发送 TLS 1.0 的不一致 ClientHello。
+func tlsVersionBounds(versions []uint16) (uint16, uint16) {
+	minVersion := uint16(0)
+	maxVersion := uint16(0)
+	for _, version := range versions {
+		if isGREASEValue(version) {
+			continue
+		}
+		switch version {
+		case utls.VersionTLS10, utls.VersionTLS11, utls.VersionTLS12, utls.VersionTLS13:
+			if minVersion == 0 || version < minVersion {
+				minVersion = version
+			}
+			if version > maxVersion {
+				maxVersion = version
+			}
+		}
+	}
+	if minVersion == 0 || maxVersion == 0 {
+		return utls.VersionTLS12, utls.VersionTLS13
+	}
+	return minVersion, maxVersion
 }
 
 // toUint8s converts []uint16 to []uint8 (for utls fields that require []uint8).

@@ -1,15 +1,223 @@
 package service
 
 import (
+	"fmt"
 	"net/http"
+	"os"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/google/uuid"
+	"github.com/shirou/gopsutil/v4/host"
 )
+
+// codexRuntimeSystemIdentity 是 Codex CLI UA 中的系统三元组快照。
+// os_info::get() 只在构造默认身份时读取一次；网关请求热路径不能反复访问系统信息。
+type codexRuntimeSystemIdentity struct {
+	osName       string
+	osVersion    string
+	architecture string
+}
+
+var (
+	codexRuntimeSystemIdentityOnce  sync.Once
+	codexRuntimeSystemIdentityValue codexRuntimeSystemIdentity
+	codexRuntimeTerminalOnce        sync.Once
+	codexRuntimeTerminalValue       string
+)
+
+// detectCodexCLIUserAgentSuffix 按 codex-rs login/default_client.rs 的格式生成 UA 后缀。
+// 运行时探测失败时使用兼容性兜底，保证异常主机环境不会生成空身份或破坏 Header。
+func detectCodexCLIUserAgentSuffix() string {
+	system := codexRuntimeSystemInfo()
+	terminal := codexRuntimeTerminalUserAgent()
+	if system.osName == "" || system.osVersion == "" || system.architecture == "" || terminal == "" {
+		return codexCLIUserAgentFallbackSuffix
+	}
+	return sanitizeCodexHeaderValue(
+		fmt.Sprintf(" (%s %s; %s) %s", system.osName, system.osVersion, system.architecture, terminal),
+		codexCLIUserAgentFallbackSuffix,
+	)
+}
+
+// codexRuntimeSystemInfo 将 gopsutil 的平台标识转换为 os_info 的展示形态。
+// gopsutil 已是项目现有依赖，只读取平台信息，不调用完整 HostInfo，避免额外采集主机状态。
+func codexRuntimeSystemInfo() codexRuntimeSystemIdentity {
+	codexRuntimeSystemIdentityOnce.Do(func() {
+		platform, _, version, err := host.PlatformInformation()
+		if err != nil {
+			platform = ""
+			version = ""
+		}
+		codexRuntimeSystemIdentityValue = codexRuntimeSystemIdentity{
+			osName:       codexOSDisplayName(platform),
+			osVersion:    strings.TrimSpace(version),
+			architecture: codexArchitecture(runtime.GOARCH),
+		}
+		if codexRuntimeSystemIdentityValue.osName == "" {
+			codexRuntimeSystemIdentityValue.osName = codexOSDisplayName(runtime.GOOS)
+		}
+		if codexRuntimeSystemIdentityValue.osVersion == "" {
+			codexRuntimeSystemIdentityValue.osVersion = "unknown"
+		}
+		if codexRuntimeSystemIdentityValue.architecture == "" {
+			codexRuntimeSystemIdentityValue.architecture = "unknown"
+		}
+	})
+	return codexRuntimeSystemIdentityValue
+}
+
+// codexOSDisplayName 对齐 os_info::Type 的常见显示名称，避免把内部小写平台值直接发给上游。
+func codexOSDisplayName(platform string) string {
+	normalized := strings.ToLower(strings.TrimSpace(platform))
+	switch normalized {
+	case "darwin", "macos", "mac os", "mac os x":
+		return "Mac OS"
+	case "ubuntu":
+		return "Ubuntu"
+	case "debian":
+		return "Debian"
+	case "linuxmint":
+		return "Linux Mint"
+	case "windows", "win32":
+		return "Windows"
+	case "freebsd":
+		return "FreeBSD"
+	case "openbsd":
+		return "OpenBSD"
+	case "netbsd":
+		return "NetBSD"
+	case "linux":
+		return "Linux"
+	}
+	if strings.Contains(normalized, "windows") {
+		return "Windows"
+	}
+	value := strings.TrimSpace(platform)
+	if value == "" {
+		return ""
+	}
+	runes := []rune(value)
+	return strings.ToUpper(string(runes[0])) + string(runes[1:])
+}
+
+// codexArchitecture 把 Go 的架构名称转换为 os_info 在 UA 中使用的名称。
+func codexArchitecture(architecture string) string {
+	switch strings.ToLower(strings.TrimSpace(architecture)) {
+	case "amd64":
+		return "x86_64"
+	case "386":
+		return "i686"
+	case "arm64", "aarch64":
+		return "arm64"
+	default:
+		return strings.TrimSpace(architecture)
+	}
+}
+
+// codexRuntimeTerminalUserAgent 缓存 terminal-detection 的环境探测结果。
+// 只读取环境变量，不执行 PATH 中的程序，保持 Codex CLI 的安全边界。
+func codexRuntimeTerminalUserAgent() string {
+	codexRuntimeTerminalOnce.Do(func() {
+		codexRuntimeTerminalValue = detectCodexTerminalUserAgent(os.LookupEnv)
+	})
+	if codexRuntimeTerminalValue == "" {
+		return "unknown"
+	}
+	return codexRuntimeTerminalValue
+}
+
+// detectCodexTerminalUserAgent 复刻 codex-terminal-detection 的优先级和令牌格式。
+// lookup 作为参数注入，测试可以覆盖 TERM_PROGRAM、TERM 和各终端专用变量而不改写进程环境。
+func detectCodexTerminalUserAgent(lookup func(string) (string, bool)) string {
+	value := func(key string) string {
+		if raw, ok := lookup(key); ok {
+			return strings.TrimSpace(raw)
+		}
+		return ""
+	}
+	has := func(key string) bool {
+		_, ok := lookup(key)
+		return ok
+	}
+	hasNonEmpty := func(key string) bool {
+		return value(key) != ""
+	}
+	withVersion := func(name, version string) string {
+		if version == "" {
+			return sanitizeCodexTerminalToken(name)
+		}
+		return sanitizeCodexTerminalToken(name + "/" + version)
+	}
+
+	if termProgram := value("TERM_PROGRAM"); termProgram != "" && !strings.EqualFold(termProgram, "tmux") {
+		return withVersion(termProgram, value("TERM_PROGRAM_VERSION"))
+	}
+	if hasNonEmpty("GHOSTTY_RESOURCES_DIR") {
+		return "Ghostty"
+	}
+	if has("WEZTERM_VERSION") {
+		return withVersion("WezTerm", value("WEZTERM_VERSION"))
+	}
+	if has("ITERM_SESSION_ID") || has("ITERM_PROFILE") || has("ITERM_PROFILE_NAME") {
+		return "iTerm.app"
+	}
+	if has("TERM_SESSION_ID") {
+		return "Apple_Terminal"
+	}
+	term := value("TERM")
+	if has("KITTY_WINDOW_ID") || strings.Contains(term, "kitty") {
+		return "kitty"
+	}
+	if has("ALACRITTY_SOCKET") || term == "alacritty" {
+		return "Alacritty"
+	}
+	if has("KONSOLE_VERSION") {
+		return withVersion("Konsole", value("KONSOLE_VERSION"))
+	}
+	if has("GNOME_TERMINAL_SCREEN") {
+		return "gnome-terminal"
+	}
+	if has("VTE_VERSION") {
+		return withVersion("VTE", value("VTE_VERSION"))
+	}
+	if has("WT_SESSION") {
+		return "WindowsTerminal"
+	}
+	if term != "" {
+		return sanitizeCodexTerminalToken(term)
+	}
+	return "unknown"
+}
+
+// sanitizeCodexTerminalToken 仅保留 terminal-detection 允许的 ASCII token 字符。
+func sanitizeCodexTerminalToken(value string) string {
+	return strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' || r == '/' {
+			return r
+		}
+		return '_'
+	}, value)
+}
+
+// sanitizeCodexHeaderValue 对齐 Codex 的非法 Header 字符替换策略，保留可打印 ASCII。
+func sanitizeCodexHeaderValue(value, fallback string) string {
+	sanitized := strings.Map(func(r rune) rune {
+		if r >= 0x20 && r <= 0x7e {
+			return r
+		}
+		return '_'
+	}, value)
+	if sanitized != "" {
+		return sanitized
+	}
+	return fallback
+}
 
 // codexUpstreamMinVersion 上游 /backend-api/codex 接受的最低 version 头：
 // 若请求携带 version 且低于该值，上游直接 404（issue #3901，2026-07 实测）。

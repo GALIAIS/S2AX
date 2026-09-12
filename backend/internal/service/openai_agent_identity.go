@@ -344,8 +344,9 @@ func registerAgentIdentityRuntime(ctx context.Context, accessToken, proxyURL str
 	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(accessToken))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Originator", "codex_cli_rs")
-	req.Header.Set("User-Agent", codexCLIUserAgent)
+	// agent/register 与 auth.openai.com 属于凭据面，沿用 Codex CLI 默认客户端的
+	// originator/UA 配对，避免静态身份与自动同步版本或运行时环境脱节。
+	ApplyCodexCanonicalAuthIdentity(req.Header)
 	if isFedRAMP {
 		req.Header.Set("X-OpenAI-Fedramp", "true")
 	}
