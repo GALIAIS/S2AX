@@ -28,6 +28,10 @@ const (
 	PlatformZhipu     = "zhipu"    // 智谱 GLM (bigmodel)
 	PlatformDeepseek  = "deepseek" // DeepSeek
 	PlatformMiniMax   = "minimax"  // MiniMax (M 系列)
+	// PlatformDevin 是 Cognition Devin 平台：上游为 Devin Cloud ACP
+	// （Agent Client Protocol over WebSocket, wss://app.devin.ai/api/acp/live），
+	// 模型即 session/new configOptions 中的 devin_version 档位。
+	PlatformDevin     = "devin"
 	PlatformComposite = "composite"
 )
 
@@ -184,4 +188,21 @@ var DefaultBedrockModelMapping = map[string]string{
 	// Claude Haiku
 	"claude-haiku-4-5":          "us.anthropic.claude-haiku-4-5-20251001-v1:0",
 	"claude-haiku-4-5-20251001": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+}
+
+// DefaultDevinModelMapping 是 Devin 平台的默认模型映射。
+// Devin Cloud ACP 的 "模型" 实际是 devin_version 档位（session/new configOptions），
+// 公共模型名与上游值一一对应；映射目标必须与上游 select 选项 value 完全一致。
+var DefaultDevinModelMapping = map[string]string{
+	"devin-2-5":         "devin-2-5",         // Normal（默认档）
+	"devin-auto":        "devin-auto",        // Fusion 自动路由
+	"devin-ultra":       "devin-ultra",
+	"devin_lite":        "devin_lite",
+	"devin-fast-opus":   "devin-fast-opus",
+	"devin-gpt-5-6":     "devin-gpt-5-6",
+	"devin-swe-2-low":   "devin-swe-2-low",   // SWE-2 Medium
+	"devin-swe-2-high":  "devin-swe-2-high",
+	"devin-swe-2-max":   "devin-swe-2-max",
+	"devin-gpt-6-astra": "devin-gpt-6-astra", // Preview
+	"devin-fable-5-1":   "devin-fable-5-1",   // Preview
 }

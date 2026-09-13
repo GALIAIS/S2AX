@@ -289,6 +289,11 @@ func (a *Account) IsMiniMax() bool {
 	return a.Platform == PlatformMiniMax
 }
 
+// IsDevin 标识 Devin（Cognition）账号：上游为 Devin Cloud ACP over WebSocket。
+func (a *Account) IsDevin() bool {
+	return a != nil && a.Platform == PlatformDevin
+}
+
 // IsCNProvider 报告是否为国产 OpenAI 兼容供应商（kimi/zhipu/deepseek/minimax）。
 func (a *Account) IsCNProvider() bool {
 	return a != nil && IsCNProvider(a.Platform)
@@ -296,9 +301,10 @@ func (a *Account) IsCNProvider() bool {
 
 // IsOpenAICompatible 报告账号是否走 OpenAI 网关（OpenAI 协议族）。
 // openai/grok 原生走 OpenAI 网关；国产供应商同为 OpenAI Chat Completions
-// 兼容上游，也经 OpenAI 网关转发。
+// 兼容上游，也经 OpenAI 网关转发；devin 虽上游为 ACP/WS，但入站面与调度
+// 语义同属 OpenAI 兼容族（仅支持 chat_completions / responses 入站）。
 func (a *Account) IsOpenAICompatible() bool {
-	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformGrok || a.IsCNProvider())
+	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformGrok || a.IsCNProvider() || a.IsDevin())
 }
 
 func (a *Account) GeminiOAuthType() string {
@@ -994,6 +1000,58 @@ func (a *Account) GetExtraString(key string) string {
 		}
 	}
 	return ""
+}
+
+// DevinSessionToken 返回 Devin 会话令牌（devin-session-token$ 前缀原样保存）。
+// 兼容管理员把 token 填进 api_key 字段的场景。
+func (a *Account) DevinSessionToken() string {
+	if v := strings.TrimSpace(a.GetCredential("session_token")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(a.GetCredential("api_key")); v != "" && strings.HasPrefix(v, DevinSessionTokenPrefix) {
+		return v
+	}
+	return ""
+}
+
+// DevinAPIKey 返回底层 Codeium/Devin API Key（sk-ws- / cog_ 等非 session 前缀值），
+// 用于经 GetSelfDevinSessionToken 换取会话令牌。
+func (a *Account) DevinAPIKey() string {
+	if v := strings.TrimSpace(a.GetCredential("api_key")); v != "" && !strings.HasPrefix(v, DevinSessionTokenPrefix) {
+		return v
+	}
+	return ""
+}
+
+// DevinOrgID 返回 Devin 组织 ID；留空时由云端 session/new 自动解析默认组织。
+func (a *Account) DevinOrgID() string {
+	return strings.TrimSpace(a.GetCredential("org_id"))
+}
+
+// DevinWebappHost 返回 Devin 云端 Web 主机名（默认 app.devin.ai）。
+func (a *Account) DevinWebappHost() string {
+	if v := strings.TrimSpace(a.GetCredential("webapp_host")); v != "" {
+		return v
+	}
+	return DevinDefaultWebappHost
+}
+
+// DevinAPIServerURL 返回 Codeium API server（用于换 session token）。
+func (a *Account) DevinAPIServerURL() string {
+	if v := strings.TrimSpace(a.GetCredential("api_server_url")); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	return DevinDefaultAPIServerURL
+}
+
+// DevinAutoApprove 报告是否自动批准 agent 的 session/request_permission 请求。
+// 云端沙箱执行场景默认开启；设 credentials.auto_approve=false 可关闭
+// （关闭后 permission 请求会被拒绝，工具调用可能失败）。
+func (a *Account) DevinAutoApprove() bool {
+	if v := strings.TrimSpace(a.GetCredential("auto_approve")); v != "" {
+		return v != "false" && v != "0"
+	}
+	return true
 }
 
 func (a *Account) GetClaudeUserID() string {

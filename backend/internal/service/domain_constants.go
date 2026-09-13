@@ -48,6 +48,7 @@ const (
 	PlatformZhipu     = domain.PlatformZhipu
 	PlatformDeepseek  = domain.PlatformDeepseek
 	PlatformMiniMax   = domain.PlatformMiniMax
+	PlatformDevin     = domain.PlatformDevin
 	PlatformComposite = domain.PlatformComposite
 	// PlatformKiro is retained for unsupported-platform threshold tests and legacy
 	// account rows. Scheduling-threshold evaluation never pauses kiro accounts.
@@ -78,6 +79,22 @@ const (
 	DefaultDeepseekBaseURL    = "https://api.deepseek.com"
 	// MiniMax 按量付费与 Coding/Token Plan 共用推理域名，靠 API Key 区分套餐。
 	DefaultMiniMaxBaseURL = "https://api.minimaxi.com/v1"
+)
+
+// Devin（Cognition）平台常量：上游为 Devin Cloud ACP over WebSocket。
+const (
+	// DevinSessionTokenPrefix 是云端会话令牌前缀（`devin-session-token$<jwt>`）。
+	DevinSessionTokenPrefix = "devin-session-token$"
+	// DevinDefaultWebappHost 是 Devin Cloud ACP WebSocket 所在主机。
+	DevinDefaultWebappHost = "app.devin.ai"
+	// DevinACPPath 是 ACP WebSocket 端点路径。
+	DevinACPPath = "/api/acp/live"
+	// DevinDefaultAPIServerURL 是 Codeium API server（X-Api-Key 换 session token）。
+	DevinDefaultAPIServerURL = "https://server.codeium.com"
+	// DevinConfigIDVersion 是 session/new configOptions 里"模型档位"的 configId。
+	DevinConfigIDVersion = "devin_version"
+	// DevinConfigIDOrg 是组织选择 configId（多组织账号可切换）。
+	DevinConfigIDOrg = "org_id"
 )
 
 // 国产供应商 Anthropic 协议端点的默认 base_url（上游路径为 {base}/v1/messages）。
@@ -113,6 +130,7 @@ var AllowedQuotaPlatforms = []string{
 	PlatformZhipu,
 	PlatformDeepseek,
 	PlatformMiniMax,
+	PlatformDevin,
 }
 
 // AllowedSchedulingThresholdPlatforms 是允许设置账号自动停调阈值的平台列表。
