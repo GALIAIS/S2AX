@@ -2879,6 +2879,28 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 		return
 	}
 
+	// Handle Devin accounts: models are the devin_version tiers (default mapping)
+	// plus any custom model_mapping keys configured on the account.
+	if account.IsDevin() {
+		mapping := account.GetModelMapping()
+		ids := make([]string, 0, len(mapping))
+		for requestedModel := range mapping {
+			ids = append(ids, requestedModel)
+		}
+		sort.Strings(ids)
+		var models []openai.Model
+		for _, id := range ids {
+			models = append(models, openai.Model{
+				ID:          id,
+				Object:      "model",
+				Type:        "model",
+				DisplayName: id,
+			})
+		}
+		response.Success(c, models)
+		return
+	}
+
 	// Handle Grok accounts
 	if account.Platform == service.PlatformGrok {
 		defaultModels := xai.DefaultModels()
