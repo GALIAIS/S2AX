@@ -31,6 +31,10 @@ func resolveOpenAIForwardModel(account *Account, requestedModel, messagesDispatc
 // ResolveThinkingProtocol（thinking_protocol.go）。
 var openAIOAuthForeignModelPrefixes = []string{
 	"deepseek-",
+	"devin-",
+	"devin_",
+	"swe-",
+	"swe_",
 	"glm-",
 	"kimi-",
 	"moonshot-",
