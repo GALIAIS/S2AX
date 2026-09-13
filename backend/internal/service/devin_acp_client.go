@@ -35,11 +35,20 @@ const (
 	devinACPCloseTimeout    = 5 * time.Second
 )
 
+// devinACPUsage 是一次 turn 的 token 用量（来自 session/update 的 usage_update）。
+type devinACPUsage struct {
+	InputTokens  int
+	OutputTokens int
+	TotalTokens  int
+	Raw          json.RawMessage // 原始 update 负载（字段结构随服务端演进）
+}
+
 // devinACPEvent 是 session/update 通知里对客户端有意义的增量事件。
 type devinACPEvent struct {
-	// Kind: "message"（agent_message_chunk）| "thought"（agent_thought_chunk）
-	Kind string
-	Text string
+	// Kind: "message"（agent_message_chunk）| "thought"（agent_thought_chunk）| "usage"（usage_update）
+	Kind  string
+	Text  string
+	Usage *devinACPUsage
 }
 
 // devinACPTurnResult 是 session/prompt 的终态结果。
@@ -117,6 +126,18 @@ func devinDialACP(ctx context.Context, account *Account, token, proxyURL string)
 	dialCtx, cancel := context.WithTimeout(ctx, devinACPDialTimeout)
 	defer cancel()
 	conn, resp, err := coderws.Dial(dialCtx, wsURL, opts)
+	// ACP 网关偶发 502/503 空错误页；dial 幂等，对 5xx 做一次快速重试。
+	for i := 0; err != nil && i < 1 && dial5xx(resp); i++ {
+		if resp.Body != nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(2 * time.Second):
+		}
+		conn, resp, err = coderws.Dial(dialCtx, wsURL, opts)
+	}
 	if err != nil {
 		status := 0
 		var body []byte
@@ -126,6 +147,9 @@ func devinDialACP(ctx context.Context, account *Account, token, proxyURL string)
 				body, _ = io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 				_ = resp.Body.Close()
 			}
+		}
+		if len(body) == 0 {
+			body = []byte(err.Error())
 		}
 		return nil, &UpstreamFailoverError{
 			StatusCode:             statusOr(status, http.StatusBadGateway),
@@ -154,6 +178,10 @@ func devinDialACP(ctx context.Context, account *Account, token, proxyURL string)
 		return nil, fmt.Errorf("devin acp initialize: %w", err)
 	}
 	return cl, nil
+}
+
+func dial5xx(resp *http.Response) bool {
+	return resp != nil && resp.StatusCode >= 500 && resp.StatusCode < 600
 }
 
 func statusOr(v, dflt int) int {
@@ -263,30 +291,66 @@ func (cl *devinACPClient) readPump() {
 // handleSessionUpdate 解析 session/update 通知并回调增量文本。
 func (cl *devinACPClient) handleSessionUpdate(params json.RawMessage) {
 	var p struct {
-		SessionID string `json:"sessionId"`
-		Update    struct {
-			SessionUpdate string `json:"sessionUpdate"`
-			Content       *struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"content"`
-		} `json:"update"`
+		SessionID string          `json:"sessionId"`
+		Update    json.RawMessage `json:"update"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil || cl.onEvent == nil {
 		return
 	}
-	var kind string
-	switch p.Update.SessionUpdate {
-	case "agent_message_chunk":
-		kind = "message"
-	case "agent_thought_chunk":
-		kind = "thought"
-	default:
+	var upd struct {
+		SessionUpdate string `json:"sessionUpdate"`
+		Content       *struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(p.Update, &upd); err != nil {
 		return
 	}
-	if p.Update.Content != nil && p.Update.Content.Text != "" {
-		cl.onEvent(p.SessionID, devinACPEvent{Kind: kind, Text: p.Update.Content.Text})
+	switch upd.SessionUpdate {
+	case "agent_message_chunk", "agent_thought_chunk":
+		kind := "message"
+		if upd.SessionUpdate == "agent_thought_chunk" {
+			kind = "thought"
+		}
+		if upd.Content != nil && upd.Content.Text != "" {
+			cl.onEvent(p.SessionID, devinACPEvent{Kind: kind, Text: upd.Content.Text})
+		}
+	case "usage_update":
+		cl.onEvent(p.SessionID, devinACPEvent{Kind: "usage", Usage: devinParseUsage(p.Update)})
 	}
+}
+
+// devinParseUsage 从 usage_update 负载中尽力提取 token 计数。
+// Devin 云端已观测到的字段形状未完全固定，按常见命名逐一探测。
+func devinParseUsage(update json.RawMessage) *devinACPUsage {
+	u := &devinACPUsage{Raw: update}
+	pick := func(keys ...string) int {
+		for _, k := range keys {
+			var v struct {
+				N int `json:"n"`
+			}
+			_ = v
+			var m map[string]json.RawMessage
+			if err := json.Unmarshal(update, &m); err != nil {
+				return 0
+			}
+			if raw, ok := m[k]; ok {
+				var n int
+				if json.Unmarshal(raw, &n) == nil {
+					return n
+				}
+			}
+		}
+		return 0
+	}
+	u.InputTokens = pick("inputTokens", "input_tokens", "promptTokens", "prompt_tokens", "input")
+	u.OutputTokens = pick("outputTokens", "output_tokens", "completionTokens", "completion_tokens", "output")
+	u.TotalTokens = pick("totalTokens", "total_tokens", "tokensUsed", "used", "total")
+	if u.TotalTokens == 0 && (u.InputTokens > 0 || u.OutputTokens > 0) {
+		u.TotalTokens = u.InputTokens + u.OutputTokens
+	}
+	return u
 }
 
 // handleAgentRequest 应答 agent->client 请求。
@@ -460,6 +524,7 @@ func resolveDevinSessionToken(ctx context.Context, account *Account, proxyURL st
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Connect-Protocol-Version", "1")
 	req.Header.Set("X-Api-Key", apiKey)
 	resp, err := httpClient.Do(req)
 	if err != nil {

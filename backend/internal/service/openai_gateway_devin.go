@@ -141,11 +141,16 @@ func (s *OpenAIGatewayService) devinStreamPrompt(
 	}()
 
 	var turn *devinACPTurnResult
+	var lastUsage *devinACPUsage
 	clientGone := false
 loop:
 	for {
 		select {
 		case ev := <-events:
+			if ev.Kind == "usage" {
+				lastUsage = ev.Usage
+				continue
+			}
 			if firstTokenMs == 0 {
 				firstTokenMs = time.Since(startTime).Milliseconds()
 			}
@@ -192,10 +197,11 @@ loop:
 	if err := devinWriteChunk(w, chunkID, created, originalModel, &apicompat.ChatDelta{}, &finishReason); err != nil {
 		return nil, err
 	}
+	inTok, outTok := devinEffectiveUsage(turn, lastUsage)
 	usage := &apicompat.ChatUsage{
-		PromptTokens:     turn.InputTokens,
-		CompletionTokens: turn.OutputTokens,
-		TotalTokens:      turn.TotalTokens,
+		PromptTokens:     inTok,
+		CompletionTokens: outTok,
+		TotalTokens:      inTok + outTok,
 	}
 	if chatReq.StreamOptions != nil && chatReq.StreamOptions.IncludeUsage {
 		if err := devinWriteUsageChunk(w, chunkID, created, originalModel, usage); err != nil {
@@ -214,8 +220,8 @@ loop:
 		UpstreamEndpoint: devinUpstreamEndpoint,
 		FirstTokenMs:     intPtrFrom(firstTokenMs),
 		Usage: OpenAIUsage{
-			InputTokens:  turn.InputTokens,
-			OutputTokens: turn.OutputTokens,
+			InputTokens:  inTok,
+			OutputTokens: outTok,
 		},
 	}, nil
 }
@@ -231,8 +237,13 @@ func (s *OpenAIGatewayService) devinBufferedPrompt(
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
 	var textBuf, thoughtBuf strings.Builder
+	var lastUsage *devinACPUsage
 	firstTokenMs := int64(0)
 	cl.onEvent = func(_ string, ev devinACPEvent) {
+		if ev.Kind == "usage" {
+			lastUsage = ev.Usage
+			return
+		}
 		if firstTokenMs == 0 {
 			firstTokenMs = time.Since(startTime).Milliseconds()
 		}
@@ -247,6 +258,7 @@ func (s *OpenAIGatewayService) devinBufferedPrompt(
 	if err != nil {
 		return nil, devinWrapUpstreamError(c, err, false)
 	}
+	inTok, outTok := devinEffectiveUsage(turn, lastUsage)
 
 	msg := apicompat.ChatMessage{Role: "assistant"}
 	if contentJSON, err := json.Marshal(textBuf.String()); err == nil {
@@ -266,9 +278,9 @@ func (s *OpenAIGatewayService) devinBufferedPrompt(
 			FinishReason: devinMapStopReason(turn.StopReason),
 		}},
 		Usage: &apicompat.ChatUsage{
-			PromptTokens:     turn.InputTokens,
-			CompletionTokens: turn.OutputTokens,
-			TotalTokens:      turn.TotalTokens,
+			PromptTokens:     inTok,
+			CompletionTokens: outTok,
+			TotalTokens:      inTok + outTok,
 		},
 	}
 	respBody, err := json.Marshal(resp)
@@ -287,10 +299,19 @@ func (s *OpenAIGatewayService) devinBufferedPrompt(
 		UpstreamEndpoint: devinUpstreamEndpoint,
 		FirstTokenMs:     intPtrFrom(firstTokenMs),
 		Usage: OpenAIUsage{
-			InputTokens:  turn.InputTokens,
-			OutputTokens: turn.OutputTokens,
+			InputTokens:  inTok,
+			OutputTokens: outTok,
 		},
 	}, nil
+}
+
+// devinEffectiveUsage 取 turn 结果 usage；缺失时回退到流中的最后一个 usage_update。
+func devinEffectiveUsage(turn *devinACPTurnResult, last *devinACPUsage) (input, output int) {
+	input, output = turn.InputTokens, turn.OutputTokens
+	if (input == 0 && output == 0) && last != nil {
+		input, output = last.InputTokens, last.OutputTokens
+	}
+	return input, output
 }
 
 // devinBuildPromptBlocks 把 chat messages 展平成 ACP prompt 内容块。
