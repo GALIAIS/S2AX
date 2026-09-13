@@ -651,6 +651,9 @@ func (a *Account) resolveModelMapping(rawMapping map[string]any) map[string]stri
 		if a.Platform == domain.PlatformGrok {
 			return xai.DefaultModelMapping()
 		}
+		if a.Platform == domain.PlatformDevin {
+			return domain.DefaultDevinModelMapping
+		}
 		return nil
 	}
 
@@ -686,6 +689,9 @@ func (a *Account) resolveModelMapping(rawMapping map[string]any) map[string]stri
 	}
 	if a.Platform == domain.PlatformGrok {
 		return xai.DefaultModelMapping()
+	}
+	if a.Platform == domain.PlatformDevin {
+		return domain.DefaultDevinModelMapping
 	}
 	return nil
 }

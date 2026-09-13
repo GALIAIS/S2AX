@@ -94,6 +94,12 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		return nil, errors.New("codex_cli_only restriction: only codex official clients are allowed")
 	}
 
+	// Devin：上游为云端 ACP/WS 会话而非 HTTP，直接走专用转发器；
+	// 必须早于 isResponsesShape 探测（其上游分支对 devin 无意义）。
+	if account.Platform == PlatformDevin {
+		return s.forwardAsDevinACP(ctx, c, account, body, defaultMappedModel)
+	}
+
 	if account.Platform == PlatformGrok {
 		if account.IsGrokOAuth() {
 			if eligible, reason := grokChatResponsesBridgeEligibility(body); eligible {
