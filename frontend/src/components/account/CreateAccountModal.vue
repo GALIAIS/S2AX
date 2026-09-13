@@ -160,6 +160,19 @@
             <PlatformIcon platform="grok" size="sm" />
             Grok
           </button>
+          <button
+            type="button"
+            @click="form.platform = 'devin'"
+            :class="[
+              'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
+              form.platform === 'devin'
+                ? 'bg-white text-violet-600 shadow-sm dark:bg-dark-600 dark:text-violet-400'
+                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+            ]"
+          >
+            <PlatformIcon platform="devin" size="sm" />
+            Devin
+          </button>
         </div>
         <!-- CN providers row: Kimi / Zhipu GLM / DeepSeek -->
         <div class="mt-2 flex flex-wrap rounded-lg bg-gray-100 p-1 dark:bg-dark-700">
@@ -1293,7 +1306,13 @@
 
       <!-- API Key input (only for apikey type, excluding Antigravity which has its own fields) -->
       <div v-if="form.type === 'apikey' && form.platform !== 'antigravity'" class="space-y-4">
-        <div v-if="!isCNPlatform || apiProtocol !== 'adaptive'">
+        <!-- Devin：上游为固定 ACP/WS 端点，无 HTTP base_url 概念 -->
+        <div v-if="form.platform === 'devin'" class="rounded-lg border border-violet-200 bg-violet-50 p-3 dark:border-violet-800 dark:bg-violet-900/20">
+          <p class="text-xs text-violet-700 dark:text-violet-300">
+            {{ t('admin.accounts.devin.acpEndpointHint') }}
+          </p>
+        </div>
+        <div v-else-if="!isCNPlatform || apiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
             v-model="apiKeyBaseUrl"
@@ -1346,6 +1365,18 @@
             :placeholder="apiKeyValuePlaceholder"
           />
           <p v-if="apiKeyHint" class="input-hint">{{ apiKeyHint }}</p>
+        </div>
+
+        <!-- Devin 组织 ID（可选；多组织账号用于指定目标组织） -->
+        <div v-if="form.platform === 'devin'">
+          <label class="input-label">{{ t('admin.accounts.devin.orgId') }}</label>
+          <input
+            v-model="devinOrgId"
+            type="text"
+            class="input font-mono"
+            placeholder="org-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          />
+          <p class="input-hint">{{ t('admin.accounts.devin.orgIdHint') }}</p>
         </div>
 
         <!-- 上游倍率自动探测：全部 API-key 平台可用（所在区块已限定 apikey 类型） -->
@@ -3912,6 +3943,7 @@ import {
   applyAntigravityProjectID,
   applyHeaderOverride,
   applyInterceptWarmup,
+  buildDevinCredentials,
   cnSupportsNativeResponses,
   defaultCNAdaptiveBaseUrls,
   defaultCNBaseUrl,
@@ -3991,6 +4023,7 @@ const apiKeyHint = computed(() => {
   if (form.platform === 'openai') return t('admin.accounts.openai.apiKeyHint')
   if (form.platform === 'gemini') return t('admin.accounts.gemini.apiKeyHint')
   if (form.platform === 'grok') return ''
+  if (form.platform === 'devin') return t('admin.accounts.devin.sessionTokenHint')
   return t('admin.accounts.apiKeyHint')
 })
 
@@ -4027,6 +4060,8 @@ const apiKeyValuePlaceholder = computed(() => {
       return 'sk-...'
     case 'minimax':
       return 'sk-...'
+    case 'devin':
+      return 'devin-session-token$... / sk-...'
     default:
       return 'sk-ant-...'
   }
@@ -4113,6 +4148,8 @@ const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock' | 'service_acco
 const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
 const apiKeyBaseUrl = ref('https://api.anthropic.com')
 const apiKeyValue = ref('')
+// Devin 可选组织 ID（写入 credentials.org_id）
+const devinOrgId = ref('')
 const upstreamBillingAutoProbeEnabled = ref(true)
 
 // ── 国产供应商（Kimi / Zhipu / DeepSeek）账号类型、API 协议与端点 ──
@@ -4783,6 +4820,13 @@ watch(
     if (newPlatform === 'grok') {
       accountCategory.value = 'oauth-based'
       addMethod.value = 'oauth'
+      modelRestrictionMode.value = 'mapping'
+      form.concurrency = 1
+      form.load_factor = null
+    }
+    if (newPlatform === 'devin') {
+      // Devin 只有 apikey 类型（session token / api key 凭据）
+      accountCategory.value = 'apikey'
       modelRestrictionMode.value = 'mapping'
       form.concurrency = 1
       form.load_factor = null
@@ -5709,10 +5753,14 @@ const handleSubmit = async () => {
           : 'https://api.anthropic.com'
 
   // Build credentials with optional model mapping
-  const credentials: Record<string, unknown> = {
-    base_url: apiKeyBaseUrl.value.trim() || defaultBaseUrl,
-    api_key: apiKeyValue.value.trim()
-  }
+  // Devin：ACP/WS 上游无 base_url；按值前缀写 session_token 或 api_key + 可选 org_id
+  const credentials: Record<string, unknown> =
+    form.platform === 'devin'
+      ? buildDevinCredentials(apiKeyValue.value, devinOrgId.value)
+      : {
+          base_url: apiKeyBaseUrl.value.trim() || defaultBaseUrl,
+          api_key: apiKeyValue.value.trim()
+        }
   if (form.platform === 'gemini') {
     credentials.tier_id = geminiTierAIStudio.value
   }

@@ -200,6 +200,12 @@ export default {
         codexConfigTomlHint: 'Download the model catalog below, save both files under the Codex config directory, and restart Codex.',
         codexNote: 'Export SUB2API_API_KEY before starting Codex. The downloaded catalog contains model metadata only, not your API key.',
       },
+      devin: {
+        description: 'Configure Claude Code, Codex, or OpenCode through the current Devin group.',
+        codexDescription: 'Configure Codex with API key authentication through the current Devin group.',
+        codexConfigTomlHint: 'Download the model catalog below, save both files under the Codex config directory, and restart Codex.',
+        codexNote: 'Export SUB2API_API_KEY before starting Codex. The downloaded catalog contains model metadata only, not your API key.',
+      },
       composite: {
         description: 'Configure supported clients through the current Composite routing group.',
         codexDescription: 'Configure Codex with API key authentication and the complete model catalog for this Composite group.',
@@ -486,7 +492,8 @@ export default {
       kimi: 'Kimi',
       zhipu: 'Zhipu GLM',
       deepseek: 'DeepSeek',
-      minimax: 'MiniMax'
+      minimax: 'MiniMax',
+      devin: 'Devin'
     },
     // Check modes (how a monitor performs its checks)
     checkMode: {

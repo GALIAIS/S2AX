@@ -133,6 +133,7 @@ export default {
         zhipu: 'Zhipu GLM',
         deepseek: 'DeepSeek',
         minimax: 'MiniMax',
+        devin: 'Devin',
       },
       cnProviders: {
         accountMode: {
@@ -725,6 +726,15 @@ export default {
         imageTextModel: 'Image bridge text model',
         imageTextModelDesc: 'The outer Responses text model for OAuth/Codex image requests; leave empty to select one from the account catalog.',
         modelRestrictionDisabledByPassthrough: 'Automatic passthrough is enabled: model whitelist/mapping will not take effect.',
+      },
+      devin: {
+        acpEndpointHint:
+          'Devin forwards to the cloud ACP endpoint (wss://app.devin.ai/api/acp/live); no base URL is required.',
+        sessionTokenHint:
+          'Paste a Devin session token (devin-session-token$...) or a Cognition API key (exchanged for a session token automatically).',
+        orgId: 'Organization ID (optional)',
+        orgIdHint:
+          'Only needed when the account belongs to multiple Devin organizations; the default org is used when empty.',
       },
       grok: {
         baseUrlHint: 'Grok OAuth accounts forward to the official xAI API base URL.',

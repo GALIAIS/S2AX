@@ -257,6 +257,7 @@ const PLATFORM_LABELS: Record<string, string> = {
   zhipu: 'Zhipu GLM',
   deepseek: 'DeepSeek',
   minimax: 'MiniMax',
+  devin: 'Devin',
 }
 
 const platformLabel = (p: string) => PLATFORM_LABELS[p] ?? p

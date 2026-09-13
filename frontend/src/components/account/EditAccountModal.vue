@@ -28,7 +28,13 @@
 
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
-        <div v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
+        <!-- Devin：上游为固定 ACP/WS 端点，无 HTTP base_url 概念 -->
+        <div v-if="account.platform === 'devin'" class="rounded-lg border border-violet-200 bg-violet-50 p-3 dark:border-violet-800 dark:bg-violet-900/20">
+          <p class="text-xs text-violet-700 dark:text-violet-300">
+            {{ t('admin.accounts.devin.acpEndpointHint') }}
+          </p>
+        </div>
+        <div v-else-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
             v-model="editBaseUrl"
@@ -62,7 +68,7 @@
             @select="onCnPresetSelect"
           />
         </div>
-        <div v-else>
+        <div v-else-if="isCNApiKeyAccount">
           <label class="input-label">{{ t('admin.accounts.cnProviders.apiProtocol.endpoints') }}</label>
           <div class="mt-2 space-y-3">
             <div v-for="item in editAdaptiveProtocolOptions" :key="item.value">
@@ -166,10 +172,27 @@
                     ? 'sk-...'
                     : account.platform === 'grok'
                       ? 'xai-...'
-                      : 'sk-ant-...'
+                      : account.platform === 'devin'
+                        ? 'devin-session-token$... / sk-...'
+                        : 'sk-ant-...'
             "
           />
           <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
+          <p v-if="account.platform === 'devin'" class="input-hint">
+            {{ t('admin.accounts.devin.sessionTokenHint') }}
+          </p>
+        </div>
+
+        <!-- Devin 组织 ID（可选） -->
+        <div v-if="account.platform === 'devin'">
+          <label class="input-label">{{ t('admin.accounts.devin.orgId') }}</label>
+          <input
+            v-model="editDevinOrgId"
+            type="text"
+            class="input font-mono"
+            placeholder="org-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          />
+          <p class="input-hint">{{ t('admin.accounts.devin.orgIdHint') }}</p>
         </div>
 
         <!-- Model Restriction Section (不适用于 Antigravity) -->
@@ -3049,6 +3072,7 @@ import {
   defaultCNAdaptiveBaseUrls,
   defaultCNBaseUrl,
   isCNProviderPlatform,
+  DEVIN_SESSION_TOKEN_PREFIX,
   HEADER_OVERRIDE_ENABLED_CREDENTIAL_KEY,
   HEADER_OVERRIDES_CREDENTIAL_KEY,
   type CnAccountMode,
@@ -3175,6 +3199,7 @@ const editApiProtocol = ref<CnApiProtocol>('adaptive')
 const editAccountMode = ref<CnAccountMode>('payg')
 // 智谱团队版 Coding Plan：组织/项目 ID，写入 credentials 供额度探测切换团队端点
 const editZhipuOrganization = ref('')
+const editDevinOrgId = ref('')
 const editZhipuProject = ref('')
 const editAdaptiveBaseUrls = ref<Record<CnNativeApiProtocol, string>>({
   chat_completions: '',
@@ -4212,6 +4237,10 @@ const syncFormFromAccount = (newAccount: Account | null) => {
         editZhipuProject.value = typeof credentials.zhipu_project === 'string' ? credentials.zhipu_project : ''
       }
     }
+    // Devin：回填可选组织 ID
+    if (newAccount.platform === 'devin') {
+      editDevinOrgId.value = typeof credentials.org_id === 'string' ? credentials.org_id : ''
+    }
     const platformDefaultUrl =
       newAccount.platform === 'openai'
         ? 'https://api.openai.com'
@@ -4948,9 +4977,12 @@ const handleSubmit = async () => {
       const shouldApplyModelMapping = !(props.account.platform === 'openai' && openaiPassthroughEnabled.value)
 
       // Always update credentials for apikey type to handle model mapping changes
-      const newCredentials: Record<string, unknown> = {
-        ...currentCredentials,
-        base_url: newBaseUrl
+      // Devin 上游为固定 ACP/WS 端点，不写 base_url
+      const newCredentials: Record<string, unknown> = { ...currentCredentials }
+      if (props.account.platform === 'devin') {
+        delete newCredentials.base_url
+      } else {
+        newCredentials.base_url = newBaseUrl
       }
 
       // 国产供应商：模式与协议写入凭据（决定额度/余额探测与转发端点/格式）。
@@ -4990,7 +5022,29 @@ const handleSubmit = async () => {
       // 两者都无才报错。
       const hasExistingApiKey =
         props.account.credentials_status?.has_api_key ?? Boolean(currentCredentials.api_key)
-      if (editApiKey.value.trim()) {
+      if (props.account.platform === 'devin') {
+        // Devin：按前缀区分 session_token / api_key；session_token 亦算已有凭据
+        const hasExistingDevinCred = hasExistingApiKey || Boolean(currentCredentials.session_token)
+        const devinCred = editApiKey.value.trim()
+        if (devinCred) {
+          if (devinCred.startsWith(DEVIN_SESSION_TOKEN_PREFIX)) {
+            newCredentials.session_token = devinCred
+            delete newCredentials.api_key
+          } else {
+            newCredentials.api_key = devinCred
+            delete newCredentials.session_token
+          }
+        } else if (!hasExistingDevinCred) {
+          appStore.showError(t('admin.accounts.apiKeyIsRequired'))
+          return
+        }
+        const org = editDevinOrgId.value.trim()
+        if (org) {
+          newCredentials.org_id = org
+        } else {
+          delete newCredentials.org_id
+        }
+      } else if (editApiKey.value.trim()) {
         newCredentials.api_key = editApiKey.value.trim()
       } else if (!hasExistingApiKey) {
         appStore.showError(t('admin.accounts.apiKeyIsRequired'))

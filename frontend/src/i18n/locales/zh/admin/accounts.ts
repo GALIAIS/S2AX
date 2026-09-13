@@ -342,6 +342,7 @@ export default {
         zhipu: 'Zhipu GLM',
         deepseek: 'DeepSeek',
         minimax: 'MiniMax',
+        devin: 'Devin',
       },
       cnProviders: {
         accountMode: {
@@ -805,6 +806,14 @@ export default {
         imageTextModel: '生图桥接文本模型',
         imageTextModelDesc: 'OAuth/Codex 生图请求的 Responses 外层文本模型；留空时按账号模型目录自动选择。',
         modelRestrictionDisabledByPassthrough: '已开启自动透传：模型白名单/映射不会生效。',
+      },
+      devin: {
+        acpEndpointHint:
+          'Devin 转发至云端 ACP 端点（wss://app.devin.ai/api/acp/live），无需填写 Base URL。',
+        sessionTokenHint:
+          '粘贴 Devin session token（devin-session-token$...）或 Cognition API Key（将自动换取 session token）。',
+        orgId: '组织 ID（可选）',
+        orgIdHint: '仅当账号隶属多个 Devin 组织时填写；留空使用默认组织。',
       },
       grok: {
         baseUrlHint: 'Grok OAuth 账号会转发到官方 xAI API Base URL。',

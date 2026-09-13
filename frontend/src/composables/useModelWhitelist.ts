@@ -219,6 +219,21 @@ const minimaxModels = [
   'abab5.5-chat', 'abab5.5s-chat'
 ]
 
+// Devin（Cognition）云端档位——对应 ACP session configOptions 的 devin_version 值
+const devinModels = [
+  'devin-2-5',
+  'devin-auto',
+  'devin-ultra',
+  'devin_lite',
+  'devin-fast-opus',
+  'devin-gpt-5-6',
+  'devin-gpt-6-astra',
+  'devin-fable-5-1',
+  'devin-swe-2-low',
+  'devin-swe-2-high',
+  'devin-swe-2-max'
+]
+
 // 百度 文心
 const baiduModels = [
   'ernie-4.0-8k-latest', 'ernie-4.0-8k', 'ernie-4.0-turbo-8k',
@@ -265,6 +280,7 @@ const allModelsList: string[] = [
   ...moonshotModels,
   ...doubaoModels,
   ...minimaxModels,
+  ...devinModels,
   ...baiduModels,
   ...sparkModels,
   ...hunyuanModels,
@@ -381,6 +397,14 @@ const antigravityPresetMappings = [
   { label: 'Opus 4.8', from: 'claude-opus-4-8', to: 'claude-opus-4-8', color: 'bg-pink-100 text-pink-700 hover:bg-pink-200 dark:bg-pink-900/30 dark:text-pink-400' }
 ]
 
+// Devin 预设映射：公共名 -> ACP devin_version 档位值（与后端 DefaultDevinModelMapping 一致）
+const devinPresetMappings = [
+  { label: 'Devin 2.5', from: 'devin-2-5', to: 'devin-2-5', color: 'bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-400' },
+  { label: 'SWE-2 Max', from: 'swe-2-max', to: 'devin-swe-2-max', color: 'bg-violet-100 text-violet-700 hover:bg-violet-200 dark:bg-violet-900/30 dark:text-violet-400' },
+  { label: 'SWE-2 High', from: 'swe-2-high', to: 'devin-swe-2-high', color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400' },
+  { label: 'Devin Ultra', from: 'devin-ultra', to: 'devin-ultra', color: 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400' }
+]
+
 // Bedrock 预设映射（与后端 DefaultBedrockModelMapping 保持一致）
 const bedrockPresetMappings = [
   { label: 'Fable 5.1', from: 'claude-fable-5-1', to: 'anthropic.claude-fable-5-1', color: 'bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-900/30 dark:text-rose-400' },
@@ -455,6 +479,7 @@ export function getModelsByPlatform(platform: string): string[] {
     case 'kimi': return moonshotModels
     case 'doubao': return doubaoModels
     case 'minimax': return minimaxModels
+    case 'devin': return devinModels
     case 'baidu': return baiduModels
     case 'spark': return sparkModels
     case 'hunyuan': return hunyuanModels
@@ -470,6 +495,7 @@ export function getPresetMappingsByPlatform(platform: string) {
   if (platform === 'grok' || platform === 'xai') return grokPresetMappings
   if (platform === 'antigravity') return antigravityPresetMappings
   if (platform === 'bedrock') return bedrockPresetMappings
+  if (platform === 'devin') return devinPresetMappings
   return anthropicPresetMappings
 }
 
