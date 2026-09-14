@@ -58,8 +58,10 @@ func (s *OpenAIGatewayService) forwardAsDevinDirect(
 	SetOpsUpstreamModel(c, upstreamModel)
 
 	// 3. messages -> chatMessagePrompts（system 单独提到顶层 prompt）
-	cascadeID := uuid.NewString()
-	systemPrompt, msgs := devinConvertMessages(&chatReq, cascadeID)
+	// cascade_id 由会话前缀派生而非随机：与消息 ID 一起保证请求字节流
+	// 前缀跨请求稳定，上游 EPHEMERAL prompt cache 才能命中。
+	cascadeID := deriveDevinCascadeID(&chatReq)
+	systemPrompt, msgs := devinConvertMessages(&chatReq)
 	if len(msgs) == 0 {
 		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", "messages are required")
 		return nil, errors.New("empty prompt after conversion")
@@ -174,6 +176,15 @@ func (s *OpenAIGatewayService) devinStreamPrompt(
 		}
 	}
 
+	// 大 prompt prefill / 长 thinking 期间上游可能长时间无帧下发；
+	// SSE 注释心跳保持客户端链路，避免中间层 idle timeout 断流。
+	var keepaliveCh <-chan time.Time
+	if s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
+		kt := time.NewTicker(time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second)
+		defer kt.Stop()
+		keepaliveCh = kt.C
+	}
+
 loop:
 	for {
 		select {
@@ -248,6 +259,11 @@ loop:
 				}
 				w.Flush()
 			}
+		case <-keepaliveCh:
+			if _, err := fmt.Fprint(w, ":\n\n"); err != nil {
+				break loop
+			}
+			w.Flush()
 		case <-ctx.Done():
 			return &OpenAIForwardResult{
 				Model:            originalModel,

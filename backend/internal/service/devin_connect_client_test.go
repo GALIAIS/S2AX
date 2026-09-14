@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/binary"
+	"encoding/json"
 	"io"
 	"testing"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 )
 
 // devinTestFrame 构造一帧 Connect envelope。
@@ -149,5 +152,69 @@ func TestDevinConnectStream_OversizedFrameRejected(t *testing.T) {
 	evs := devinCollectEvents(t, b.Bytes())
 	if len(evs) != 1 || evs[0].Kind != "error" {
 		t.Fatalf("evs=%+v", evs)
+	}
+}
+
+// 同一对话历史多次转换必须产出相同消息 ID 与请求字节流前缀，
+// 否则上游 EPHEMERAL prompt cache 永远无法命中（回归：此前消息 ID
+// 混入每请求随机 cascadeID 导致缓存全 miss）。
+func TestDevinConvertMessages_StableIDsAcrossCalls(t *testing.T) {
+	mk := func() *apicompat.ChatCompletionsRequest {
+		u1, _ := json.Marshal("hello")
+		a1, _ := json.Marshal("hi there")
+		u2, _ := json.Marshal("what is 2+2")
+		return &apicompat.ChatCompletionsRequest{
+			Messages: []apicompat.ChatMessage{
+				{Role: "user", Content: u1},
+				{Role: "assistant", Content: a1, ReasoningContent: "thinking"},
+				{Role: "user", Content: u2},
+			},
+		}
+	}
+	_, msgs1 := devinConvertMessages(mk())
+	_, msgs2 := devinConvertMessages(mk())
+	if len(msgs1) != len(msgs2) || len(msgs1) != 3 {
+		t.Fatalf("msgs=%d", len(msgs1))
+	}
+	for i := range msgs1 {
+		if msgs1[i].ID != msgs2[i].ID {
+			t.Fatalf("msg %d id unstable: %q vs %q", i, msgs1[i].ID, msgs2[i].ID)
+		}
+	}
+	// 完整请求体（除末尾 execution_id）也应逐字节一致。
+	b1 := devinBuildChatRequestBody("tok", &devinConnectRequest{Messages: msgs1, Model: "swe-2-max", CascadeID: deriveDevinCascadeID(mk())})
+	b2 := devinBuildChatRequestBody("tok", &devinConnectRequest{Messages: msgs2, Model: "swe-2-max", CascadeID: deriveDevinCascadeID(mk())})
+	// field 22 execution_id 是尾部随机字段：前缀（到 field 22 之前）必须一致。
+	if !bytes.Equal(b1[:len(b1)-50], b2[:len(b2)-50]) {
+		t.Fatal("request body prefix differs across identical histories")
+	}
+}
+
+func TestDeriveDevinCascadeID_StablePerConversation(t *testing.T) {
+	mk := func(extra bool) *apicompat.ChatCompletionsRequest {
+		s, _ := json.Marshal("you are helpful")
+		u, _ := json.Marshal("hi")
+		msgs := []apicompat.ChatMessage{
+			{Role: "system", Content: s},
+			{Role: "user", Content: u},
+		}
+		if extra {
+			a, _ := json.Marshal("hello!")
+			msgs = append(msgs, apicompat.ChatMessage{Role: "assistant", Content: a})
+		}
+		return &apicompat.ChatCompletionsRequest{Messages: msgs}
+	}
+	// 追加消息不改变 cascade（前缀一致）。
+	if deriveDevinCascadeID(mk(false)) != deriveDevinCascadeID(mk(true)) {
+		t.Fatal("cascade id must be stable when history only appends")
+	}
+	// 不同首条消息 -> 不同 cascade。
+	other, _ := json.Marshal("different question")
+	req2 := &apicompat.ChatCompletionsRequest{Messages: []apicompat.ChatMessage{
+		{Role: "system", Content: json.RawMessage(`"you are helpful"`)},
+		{Role: "user", Content: other},
+	}}
+	if deriveDevinCascadeID(mk(false)) == deriveDevinCascadeID(req2) {
+		t.Fatal("different conversations must not share cascade id")
 	}
 }

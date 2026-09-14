@@ -9,7 +9,6 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 // testDevinPrompt 是账号测试使用的最小探针文本（与用户验证时一致）。
@@ -38,7 +37,6 @@ func (s *AccountTestService) testDevinAccountConnection(c *gin.Context, account 
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 
-	cascadeID := uuid.NewString()
 	contentJSON, _ := json.Marshal(prompt)
 	chatReq := &apicompat.ChatCompletionsRequest{
 		Model: testModelID,
@@ -47,12 +45,12 @@ func (s *AccountTestService) testDevinAccountConnection(c *gin.Context, account 
 			Content: contentJSON,
 		}},
 	}
-	_, msgs := devinConvertMessages(chatReq, cascadeID)
+	_, msgs := devinConvertMessages(chatReq)
 	upReq := &devinConnectRequest{
 		SystemPrompt: "You are a helpful assistant.",
 		Messages:     msgs,
 		Model:        upstreamModel,
-		CascadeID:    cascadeID,
+		CascadeID:    deriveDevinCascadeID(chatReq),
 	}
 	events, err := devinChatStream(ctx, account.DevinAPIServerURL(), token, proxyURL, upReq)
 	if err != nil {

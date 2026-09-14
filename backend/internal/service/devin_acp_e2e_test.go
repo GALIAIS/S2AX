@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
-	"github.com/google/uuid"
 )
 
 func TestDevinConnect_E2E(t *testing.T) {
@@ -49,7 +48,6 @@ func TestDevinConnect_E2E(t *testing.T) {
 		t.Fatalf("resolve token: %v", err)
 	}
 
-	cascadeID := uuid.NewString()
 	contentJSON, _ := json.Marshal("Say exactly: PONG")
 	chatReq := &apicompat.ChatCompletionsRequest{
 		Model: model,
@@ -58,7 +56,8 @@ func TestDevinConnect_E2E(t *testing.T) {
 			Content: contentJSON,
 		}},
 	}
-	_, msgs := devinConvertMessages(chatReq, cascadeID)
+	cascadeID := deriveDevinCascadeID(chatReq)
+	_, msgs := devinConvertMessages(chatReq)
 	upReq := &devinConnectRequest{
 		SystemPrompt: "You are a helpful assistant.",
 		Messages:     msgs,

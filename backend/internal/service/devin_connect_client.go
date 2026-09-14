@@ -608,17 +608,16 @@ func devinParseUsageStats(b []byte) *devinUsageStats {
 //
 // 与 devin.exe 的差异：不注入任何 devin 侧 system 提示/工具提示——agent loop
 // 由 OpenAI 客户端驱动，上下文即用户给的 messages 本身。
-func devinConvertMessages(req *apicompat.ChatCompletionsRequest, cascadeID string) (system string, msgs []devinChatMsg) {
+func devinConvertMessages(req *apicompat.ChatCompletionsRequest) (system string, msgs []devinChatMsg) {
 	var sysParts []string
-	for i, m := range req.Messages {
-		id := deterministicDevinMsgID(cascadeID, i, m.Role)
+	for _, m := range req.Messages {
 		switch m.Role {
 		case "system", "developer":
 			if s := devinMessageText(m); s != "" {
 				sysParts = append(sysParts, s)
 			}
 		case "assistant":
-			dm := devinChatMsg{ID: id, Source: 2, Prompt: devinMessageText(m)}
+			dm := devinChatMsg{Source: 2, Prompt: devinMessageText(m)}
 			if think := m.ReasoningContent + m.Reasoning; think != "" {
 				dm.Thinking = think
 			}
@@ -632,17 +631,19 @@ func devinConvertMessages(req *apicompat.ChatCompletionsRequest, cascadeID strin
 			msgs = append(msgs, dm)
 		case "tool", "function":
 			dm := devinChatMsg{
-				ID:         id,
 				Source:     4,
 				Prompt:     devinMessageText(m),
 				ToolCallID: m.ToolCallID,
 			}
 			msgs = append(msgs, dm)
 		default: // user 及其他
-			dm := devinChatMsg{ID: id, Source: 1, Prompt: devinMessageText(m)}
+			dm := devinChatMsg{Source: 1, Prompt: devinMessageText(m)}
 			dm.Images = devinMessageImages(m)
 			msgs = append(msgs, dm)
 		}
+	}
+	for i := range msgs {
+		msgs[i].ID = deterministicDevinMsgID(i, &msgs[i])
 	}
 	return strings.Join(sysParts, "\n\n"), msgs
 }
@@ -693,11 +694,40 @@ func devinMessageImages(m apicompat.ChatMessage) []devinImage {
 	return out
 }
 
-// deterministicDevinMsgID 生成稳定消息 id（同 cascadeId+index+role 不变）。
-func deterministicDevinMsgID(cascadeID string, idx int, role string) string {
-	h := sha256.Sum256([]byte(cascadeID + "\x00" + fmt.Sprint(idx) + "\x00" + role))
+// deterministicDevinMsgID 生成内容寻址的消息 id：同一对话历史中同位置
+// 同内容的消息跨请求得到相同 id，保证请求字节流前缀稳定（上游
+// EPHEMERAL prompt cache 才能命中）。不得混入每请求随机值。
+func deterministicDevinMsgID(idx int, m *devinChatMsg) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "%d\x00%d\x00%s\x00%s\x00%s\x00%t",
+		idx, m.Source, m.Prompt, m.ToolCallID, m.Thinking, m.ToolError)
+	for _, tc := range m.ToolCalls {
+		fmt.Fprintf(h, "\x00%s\x00%s\x00%s", tc.ID, tc.Name, tc.ArgumentsJSON)
+	}
+	for _, img := range m.Images {
+		fmt.Fprintf(h, "\x00%s\x00%s", img.MimeType, img.Base64)
+	}
+	sum := h.Sum(nil)
 	return fmt.Sprintf("%x-%x-%x-%x-%x",
-		h[0:4], h[4:6], h[6:8], h[8:10], h[10:16])
+		sum[0:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
+}
+
+// deriveDevinCascadeID 从会话前缀派生稳定的 cascade_id：同一对话的连续
+// 请求（消息只向后追加、前缀不变）得到相同值，不同对话不同 id。cascade
+// 语义上是会话标识，派生稳定值可让上游会话级缓存/状态关联命中。
+func deriveDevinCascadeID(req *apicompat.ChatCompletionsRequest) string {
+	h := sha256.New()
+	for _, m := range req.Messages {
+		if m.Role == "system" || m.Role == "developer" {
+			fmt.Fprintf(h, "sys\x00%s\x00", devinMessageText(m))
+			continue
+		}
+		fmt.Fprintf(h, "first\x00%s\x00%s", m.Role, devinMessageText(m))
+		break
+	}
+	sum := h.Sum(nil)
+	return fmt.Sprintf("%x-%x-%x-%x-%x",
+		sum[0:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
 }
 
 // ---------------------------------------------------------------------------
