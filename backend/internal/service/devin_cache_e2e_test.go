@@ -67,11 +67,14 @@ func TestDevinCache_E2E(t *testing.T) {
 			t.Fatalf("%s resolve token: %v", tag, err)
 		}
 		systemPrompt, msgs := devinConvertMessages(req)
+		trajectoryID, cascadeID := deriveDevinSessionIDs(req, systemPrompt, got)
 		events, err := devinChatStream(ctx, account.DevinAPIServerURL(), got, proxy, &devinConnectRequest{
 			SystemPrompt: systemPrompt,
 			Messages:     msgs,
 			Model:        model,
-			CascadeID:    deriveDevinCascadeID(req, got),
+			TrajectoryID: trajectoryID,
+			StepIndex:    devinNextStepIndex(trajectoryID),
+			CascadeID:    cascadeID,
 		})
 		if err != nil {
 			t.Fatalf("%s stream: %v", tag, err)

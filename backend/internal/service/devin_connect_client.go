@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"runtime"
@@ -141,10 +143,17 @@ type devinChatMsg struct {
 	Prompt     string
 	Thinking   string
 	Signature  string
-	ToolCalls  []devinToolCall // assistant 消息携带的工具调用
-	ToolCallID string          // source=TOOL 时关联的调用 id
-	ToolError  bool
-	Images     []devinImage
+	// SignatureType/OutputID 必须随 signature 原样回传：实测错配
+	// signature_type 触发上游 invalid_argument。
+	SignatureType    string
+	OutputID         string
+	ThinkingRedacted bool
+	ToolCalls        []devinToolCall // assistant 消息携带的工具调用
+	ToolCallID       string          // source=TOOL 时关联的调用 id
+	ToolError        bool
+	Images           []devinImage
+	// PromptCache 标记 EPHEMERAL 断点：缓存到该消息为止的全部历史前缀。
+	PromptCache bool
 }
 
 type devinToolCall struct {
@@ -178,6 +187,12 @@ func (m *devinChatMsg) marshal(buf *bytes.Buffer) {
 	if m.ToolError {
 		devinPVVar(&inner, 9, 1)
 	}
+	if m.PromptCache {
+		// 8: prompt_cache_options {type=CACHE_CONTROL_TYPE_EPHEMERAL(1)}
+		var pc bytes.Buffer
+		devinPVVar(&pc, 1, 1)
+		devinPVBytes(&inner, 8, pc.Bytes())
+	}
 	for _, img := range m.Images {
 		var im bytes.Buffer
 		devinPVStr(&im, 1, img.Base64)
@@ -189,6 +204,15 @@ func (m *devinChatMsg) marshal(buf *bytes.Buffer) {
 	}
 	if m.Signature != "" {
 		devinPVStr(&inner, 12, m.Signature)
+	}
+	if m.ThinkingRedacted {
+		devinPVVar(&inner, 13, 1)
+	}
+	if m.OutputID != "" {
+		devinPVStr(&inner, 15, m.OutputID)
+	}
+	if m.SignatureType != "" {
+		devinPVStr(&inner, 18, m.SignatureType)
 	}
 	devinPVBytes(buf, 3, inner.Bytes())
 }
@@ -203,7 +227,11 @@ type devinConnectRequest struct {
 	MaxTokens    int
 	Temperature  *float64
 	TopP         *float64
+	TopK         *int
+	Seed         *int64
 	Stop         []string
+	TrajectoryID string // cortex 轨迹标识，会话内稳定
+	StepIndex    int32  // 会话内单调步数（真实 CLI 每请求发送）
 	CascadeID    string
 }
 
@@ -254,7 +282,11 @@ func devinBuildChatRequestBody(token string, req *devinConnectRequest) []byte {
 	}
 	devinPVF64(&cfg, 5, temp)
 	devinPVF64(&cfg, 6, temp) // first_temperature
-	devinPVVar(&cfg, 7, 50)   // top_k
+	topK := uint64(50)
+	if req.TopK != nil && *req.TopK > 0 {
+		topK = uint64(*req.TopK)
+	}
+	devinPVVar(&cfg, 7, topK)
 	topP := 1.0
 	if req.TopP != nil {
 		topP = *req.TopP
@@ -264,6 +296,9 @@ func devinBuildChatRequestBody(token string, req *devinConnectRequest) []byte {
 	stops = append(stops, req.Stop...)
 	for _, s := range stops {
 		devinPVStr(&cfg, 9, s)
+	}
+	if req.Seed != nil {
+		devinPVVar(&cfg, 10, uint64(*req.Seed)) // seed
 	}
 	devinPVF64(&cfg, 11, 1) // fim_eot_prob_threshold
 	devinPVBytes(&b, 8, cfg.Bytes())
@@ -287,16 +322,30 @@ func devinBuildChatRequestBody(token string, req *devinConnectRequest) []byte {
 	}
 	// 11: disable_parallel_tool_calls
 	devinPVVar(&b, 11, 1)
-	// 12: tool_choice {option_name}
-	if oc := devinToolChoiceOption(req.ToolChoice); oc != "" {
+	// 12: tool_choice oneof {1:option_name, 2:tool_name}
+	if oc, tn := devinToolChoiceOption(req.ToolChoice); oc != "" || tn != "" {
 		var tc bytes.Buffer
-		devinPVStr(&tc, 1, oc)
+		if tn != "" {
+			devinPVStr(&tc, 2, tn)
+		} else {
+			devinPVStr(&tc, 1, oc)
+		}
 		devinPVBytes(&b, 12, tc.Bytes())
 	}
 	// 13: system_prompt_cache_options {type=EPHEMERAL(1)}
 	var cache bytes.Buffer
 	devinPVVar(&cache, 1, 1)
 	devinPVBytes(&b, 13, cache.Bytes())
+	// 15: trajectory_reference {1:trajectory_id, 2:step_index, 3:trajectory_type, 4:step_type}
+	// 真实 CLI 必发：会话内单调 step_index 关联同一 trajectory。
+	if req.TrajectoryID != "" {
+		var tr bytes.Buffer
+		devinPVStr(&tr, 1, req.TrajectoryID)
+		devinPVVar(&tr, 2, uint64(req.StepIndex))
+		devinPVVar(&tr, 3, 4)  // CORTEX_TRAJECTORY_TYPE_CASCADE
+		devinPVVar(&tr, 4, 14) // CORTEX_STEP_TYPE_USER_INPUT
+		devinPVBytes(&b, 15, tr.Bytes())
+	}
 	// 16: cascade_id
 	cascadeID := req.CascadeID
 	if cascadeID == "" {
@@ -316,22 +365,32 @@ var devinDefaultStopPatterns = []string{
 	"<|user|>", "<|bot|>", "<|context_request|>", "<|endoftext|>", "<|end_of_turn|>",
 }
 
-// devinToolChoiceOption 把 OpenAI tool_choice 映射成 option_name。
-// "auto"/"required"/"none" 原样；{"type":"function","function":{"name":X}}
-// 仍走 optionName=auto（上游 ChatToolChoice.tool_name 语义不同，不强转）。
-func devinToolChoiceOption(raw json.RawMessage) string {
+// devinToolChoiceOption 把 OpenAI tool_choice 映射成上游 ChatToolChoice oneof：
+// "auto"/"required"/"none" -> option_name(field 1)；
+// {"type":"function","function":{"name":X}} -> tool_name(field 2)。
+// auto 上游缺省即等价，仍发送以保持显式语义。
+func devinToolChoiceOption(raw json.RawMessage) (option, toolName string) {
 	if len(raw) == 0 {
-		return ""
+		return "", ""
 	}
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
 		switch s {
 		case "auto", "required", "none":
-			return s
+			return s, ""
 		}
-		return ""
+		return "", ""
 	}
-	return "auto"
+	var obj struct {
+		Type     string `json:"type"`
+		Function struct {
+			Name string `json:"name"`
+		} `json:"function"`
+	}
+	if err := json.Unmarshal(raw, &obj); err == nil && obj.Type == "function" && obj.Function.Name != "" {
+		return "", obj.Function.Name
+	}
+	return "auto", ""
 }
 
 // ---------------------------------------------------------------------------
@@ -340,13 +399,15 @@ func devinToolChoiceOption(raw json.RawMessage) string {
 
 // devinChatEvent 是 GetChatMessage 响应流里的一帧。
 type devinChatEvent struct {
-	Kind       string // "text" | "thinking" | "toolcall" | "usage" | "done" | "error"
-	Text       string
-	Signature  string
-	ToolCall   *devinToolCall
-	Usage      *devinUsageStats
-	StopReason int
-	Err        error
+	Kind          string // "text" | "thinking" | "toolcall" | "usage" | "done" | "error"
+	Text          string
+	Signature     string
+	SignatureType string
+	OutputID      string
+	ToolCall      *devinToolCall
+	Usage         *devinUsageStats
+	StopReason    int
+	Err           error
 }
 
 type devinUsageStats struct {
@@ -370,8 +431,65 @@ const (
 	devinMaxFramePayload   = 16 << 20
 )
 
+// devinMaxConnectAttempts 是 GetChatMessage 建流阶段对瞬时传输错误的最大尝试次数。
+const devinMaxConnectAttempts = 3
+
 // devinChatStream 发起 GetChatMessage 调用并把响应帧解析成事件通道。
+// 建流阶段对瞬时传输错误（EOF/连接重置/超时）重试最多 3 次，递增退避
+// 加 ±25% 抖动；流一旦建立，错误只通过事件通道上报不再重发。
 func devinChatStream(ctx context.Context, apiBase, token, proxyURL string, req *devinConnectRequest) (<-chan devinChatEvent, error) {
+	var lastErr error
+	for attempt := 0; attempt < devinMaxConnectAttempts; attempt++ {
+		if attempt > 0 {
+			base := time.Duration(attempt) * 400 * time.Millisecond
+			backoff := time.Duration(float64(base) * (0.75 + 0.5*devinRandFloat()))
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoff):
+			}
+		}
+		events, err := devinChatStreamOnce(ctx, apiBase, token, proxyURL, req)
+		if err == nil {
+			return events, nil
+		}
+		lastErr = err
+		if !devinIsTransientStreamError(err) {
+			break
+		}
+	}
+	return nil, lastErr
+}
+
+// devinRandFloat 取 [0,1) 随机数做退避抖动。
+var devinRandFloat = func() float64 {
+	return rand.Float64()
+}
+
+// devinIsTransientStreamError 判断建流/流内错误是否为传输层断裂：
+// 只对 EOF、UnexpectedEOF、net.Error（含超时/连接重置）重试；上游语义
+// 拒绝（非 200 状态、trailer 错误）重试只会复现同样失败，直接放行。
+func devinIsTransientStreamError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	// client.Do 失败时已包成 RequestScopedTransient 的 502——可重试。
+	var fo *UpstreamFailoverError
+	if errors.As(err, &fo) {
+		return fo.RequestScopedTransient && fo.ResponseBody == nil
+	}
+	return false
+}
+
+// devinChatStreamOnce 执行单次建流：发送请求帧，成功后启动读协程。
+func devinChatStreamOnce(ctx context.Context, apiBase, token, proxyURL string, req *devinConnectRequest) (<-chan devinChatEvent, error) {
 	body := devinBuildChatRequestBody(token, req)
 	var frame bytes.Buffer
 	frame.WriteByte(0) // uncompressed
@@ -389,7 +507,9 @@ func devinChatStream(ctx context.Context, apiBase, token, proxyURL string, req *
 	httpReq.Header.Set("Connect-Protocol-Version", "1")
 	httpReq.Header.Set("Accept-Encoding", "identity")
 	httpReq.Header.Set("Connect-Accept-Encoding", "gzip")
-	httpReq.Header.Set("User-Agent", "connect-go/1.18.1")
+	// 真实 CLI 不发送 User-Agent；置空对齐 wire 形态（Go 默认会补
+	// Go-http-client，空值显式抑制）。
+	httpReq.Header["User-Agent"] = []string{}
 	httpReq.Header.Set("Authorization", "Basic "+token+"-"+token)
 
 	client := &http.Client{Timeout: 0}
@@ -485,7 +605,8 @@ func devinParseTrailerError(payload []byte) error {
 
 // devinParseChatMessage 解码一帧 GetChatMessageResponse：
 // 1=message_id 3=delta_text 5=stop_reason 6=delta_tool_calls
-// 7=usage 9=delta_thinking 10=delta_signature。
+// 7=usage 9=delta_thinking 10=delta_signature 15=output_id
+// 21=delta_signature_type。
 func devinParseChatMessage(payload []byte, events chan<- devinChatEvent) {
 	r := &devinPVReader{buf: payload}
 	for {
@@ -536,6 +657,22 @@ func devinParseChatMessage(payload []byte, events chan<- devinChatEvent) {
 			if wt == 2 {
 				if s := r.str(); s != "" {
 					events <- devinChatEvent{Kind: "signature", Signature: s}
+				}
+			} else {
+				r.skip(wt)
+			}
+		case 15:
+			if wt == 2 {
+				if s := r.str(); s != "" {
+					events <- devinChatEvent{Kind: "output_id", OutputID: s}
+				}
+			} else {
+				r.skip(wt)
+			}
+		case 21:
+			if wt == 2 {
+				if s := r.str(); s != "" {
+					events <- devinChatEvent{Kind: "signature_type", SignatureType: s}
 				}
 			} else {
 				r.skip(wt)
@@ -609,15 +746,24 @@ func devinParseUsageStats(b []byte) *devinUsageStats {
 
 // devinConvertMessages 把 ChatCompletions 消息映射成 ChatMessagePrompt 列表：
 //   - system/developer -> 顶层 prompt（不混入历史）
-//   - user -> source=USER
-//   - assistant -> source=SYSTEM + tool_calls + reasoning(signature)
-//   - tool -> source=TOOL + tool_call_id + tool_result_is_error
+//   - user -> source=USER（仅「当前轮」允许携带图片）
+//   - assistant -> source=SYSTEM + tool_calls + thinking/signature 回传
+//   - tool -> source=TOOL + tool_call_id
 //
 // 与 devin.exe 的差异：不注入任何 devin 侧 system 提示/工具提示——agent loop
 // 由 OpenAI 客户端驱动，上下文即用户给的 messages 本身。
 func devinConvertMessages(req *apicompat.ChatCompletionsRequest) (system string, msgs []devinChatMsg) {
 	var sysParts []string
-	for _, m := range req.Messages {
+	// Devin/Cascade 只可靠接受「当前轮」图片（最后一条 assistant 之后的
+	// user/tool 消息）；历史图进 Images 触发上游 invalid_argument，降级为
+	// 文本占位保住上下文语义。
+	lastAssistant := -1
+	for i, m := range req.Messages {
+		if m.Role == "assistant" {
+			lastAssistant = i
+		}
+	}
+	for i, m := range req.Messages {
 		switch m.Role {
 		case "system", "developer":
 			if s := devinMessageText(m); s != "" {
@@ -628,12 +774,21 @@ func devinConvertMessages(req *apicompat.ChatCompletionsRequest) (system string,
 			if think := m.ReasoningContent + m.Reasoning; think != "" {
 				dm.Thinking = think
 			}
+			dm.Signature = m.Signature
+			dm.SignatureType = m.SignatureType
+			dm.OutputID = m.OutputID
+			// 有签名而无 thinking 明文 = redacted 推理轮次，原样标回。
+			dm.ThinkingRedacted = dm.Signature != "" && dm.Thinking == ""
 			for _, tc := range m.ToolCalls {
 				dm.ToolCalls = append(dm.ToolCalls, devinToolCall{
 					ID:            tc.ID,
 					Name:          tc.Function.Name,
 					ArgumentsJSON: tc.Function.Arguments,
 				})
+			}
+			// 完全空的 assistant（无文本无调用）会诱发上游空回复退化，跳过。
+			if dm.Prompt == "" && len(dm.ToolCalls) == 0 && dm.Thinking == "" && dm.Signature == "" {
+				continue
 			}
 			msgs = append(msgs, dm)
 		case "tool", "function":
@@ -642,17 +797,119 @@ func devinConvertMessages(req *apicompat.ChatCompletionsRequest) (system string,
 				Prompt:     devinMessageText(m),
 				ToolCallID: m.ToolCallID,
 			}
+			if dm.Prompt == "" {
+				dm.Prompt = "[tool result]" // 上游不接受空工具结果文本
+			}
 			msgs = append(msgs, dm)
 		default: // user 及其他
 			dm := devinChatMsg{Source: 1, Prompt: devinMessageText(m)}
-			dm.Images = devinMessageImages(m)
+			images := devinMessageImages(m)
+			if i > lastAssistant {
+				dm.Images = images
+			} else {
+				for range images {
+					if dm.Prompt != "" {
+						dm.Prompt += "\n"
+					}
+					dm.Prompt += "[Image omitted from history]"
+				}
+			}
 			msgs = append(msgs, dm)
 		}
 	}
+	// 上游要求 call→result 紧邻配对；OpenAI 历史是「全部调用→全部结果」
+	// 分组结构，按 call id 重排成交错序列；无配对的孤立结果降级为 USER。
+	msgs = devinPairToolCallsWithResults(msgs)
+	msgs = devinDemoteOrphanToolResults(msgs)
+	// 重排后的最终位置决定内容寻址 ID；最后一条消息标 EPHEMERAL 缓存断点，
+	// 下一轮新消息追加在断点后即可命中历史前缀缓存。
 	for i := range msgs {
 		msgs[i].ID = deterministicDevinMsgID(i, &msgs[i])
 	}
+	if n := len(msgs); n > 0 {
+		msgs[n-1].PromptCache = true
+	}
 	return strings.Join(sysParts, "\n\n"), msgs
+}
+
+// devinPairToolCallsWithResults 把「连续调用消息 + 连续结果消息」的分组
+// 序列重排为 call_i, result_i, call_j, result_j 交错序列。已交错的序列
+// 保持不变；找不到匹配结果的调用与孤立结果都按原序保留（后者由
+// devinDemoteOrphanToolResults 处理）。
+func devinPairToolCallsWithResults(msgs []devinChatMsg) []devinChatMsg {
+	isCall := func(m *devinChatMsg) bool { return m.Source == 2 && len(m.ToolCalls) > 0 }
+	isResult := func(m *devinChatMsg) bool { return m.Source == 4 }
+	var out []*devinChatMsg
+	for i := 0; i < len(msgs); {
+		if !isCall(&msgs[i]) {
+			out = append(out, &msgs[i])
+			i++
+			continue
+		}
+		var calls []*devinChatMsg
+		for i < len(msgs) && isCall(&msgs[i]) {
+			calls = append(calls, &msgs[i])
+			i++
+		}
+		byID := make(map[string]*devinChatMsg)
+		j := i
+		for j < len(msgs) && isResult(&msgs[j]) {
+			byID[msgs[j].ToolCallID] = &msgs[j]
+			j++
+		}
+		consumed := make(map[string]struct{})
+		for _, cp := range calls {
+			out = append(out, cp)
+			for _, call := range cp.ToolCalls {
+				// 同 id 重复调用按位置绑定：配对消费后即移除，第二个
+				// 同 id 调用不再挂到同一份结果上。
+				if res, ok := byID[call.ID]; ok {
+					out = append(out, res)
+					consumed[call.ID] = struct{}{}
+					delete(byID, call.ID)
+				}
+			}
+		}
+		for k := i; k < j; k++ {
+			if _, ok := consumed[msgs[k].ToolCallID]; !ok {
+				out = append(out, &msgs[k])
+			}
+		}
+		i = j
+	}
+	res := make([]devinChatMsg, 0, len(out))
+	for _, p := range out {
+		res = append(res, *p)
+	}
+	return res
+}
+
+// devinDemoteOrphanToolResults 把找不到对应 tool call 的孤立 TOOL 结果
+// （客户端压缩丢掉 function_call 时产生）降级为 USER 文本消息：
+// 上游对无配对 TOOL prompt 返回 invalid_argument，降级保住结果内容。
+func devinDemoteOrphanToolResults(msgs []devinChatMsg) []devinChatMsg {
+	callIDs := make(map[string]struct{})
+	for _, m := range msgs {
+		for _, c := range m.ToolCalls {
+			callIDs[c.ID] = struct{}{}
+		}
+	}
+	for i := range msgs {
+		m := &msgs[i]
+		if m.Source != 4 {
+			continue
+		}
+		if _, ok := callIDs[m.ToolCallID]; ok {
+			continue
+		}
+		msgs[i] = devinChatMsg{
+			Source:      1,
+			Prompt:      "[tool result, original call lost]\n" + m.Prompt,
+			Images:      m.Images,
+			PromptCache: m.PromptCache,
+		}
+	}
+	return msgs
 }
 
 // devinMessageText 取消息的纯文本（字符串 content 或 text parts 拼接）。
@@ -701,6 +958,11 @@ func devinMessageImages(m apicompat.ChatMessage) []devinImage {
 	return out
 }
 
+// devinUUIDFromBytes 把 16 字节格式化为 UUID 字符串。
+func devinUUIDFromBytes(b []byte) string {
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
 // deterministicDevinMsgID 生成内容寻址的消息 id：同一对话历史中同位置
 // 同内容的消息跨请求得到相同 id，保证请求字节流前缀稳定（上游
 // EPHEMERAL prompt cache 才能命中）。不得混入每请求随机值。
@@ -715,28 +977,68 @@ func deterministicDevinMsgID(idx int, m *devinChatMsg) string {
 		fmt.Fprintf(h, "\x00%s\x00%s", img.MimeType, img.Base64)
 	}
 	sum := h.Sum(nil)
-	return fmt.Sprintf("%x-%x-%x-%x-%x",
-		sum[0:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
+	return devinUUIDFromBytes(sum[:16])
 }
 
-// deriveDevinCascadeID 从账号与会话前缀派生稳定的 cascade_id：同一对话
-// 的连续请求（消息只向后追加、前缀不变）得到相同值，不同对话不同 id。
-// 混入 token 作账号级盐：不同用户即使以相同 system+首条消息开头也不会
-// 共享 cascade。cascade 语义上是会话标识，稳定值让上游缓存/会话关联命中。
-func deriveDevinCascadeID(req *apicompat.ChatCompletionsRequest, token string) string {
-	h := sha256.New()
-	fmt.Fprintf(h, "acct\x00%s\x00", token)
-	for _, m := range req.Messages {
-		if m.Role == "system" || m.Role == "developer" {
-			fmt.Fprintf(h, "sys\x00%s\x00", devinMessageText(m))
-			continue
-		}
-		fmt.Fprintf(h, "first\x00%s\x00%s", m.Role, devinMessageText(m))
-		break
+// deriveDevinSessionIDs 为一次请求派生上游 trajectory/cascade ID：
+//   - 优先取客户端显式会话键（prompt_cache_key / user）：线程级标识，
+//     压缩改写历史也不打断轨迹连续性；
+//   - 无显式键时退回「system 头 4KB + 首条非 system 消息文本头 1KB」
+//     内容哈希：同会话多轮前缀不变 → 稳定，不同会话 → 自然分散；
+//   - token 作账号级盐混种：不同账号即使前缀相同也不共享轨迹。
+//
+// 同一 hash 拆两半：前 16 字节 trajectory_id，后 16 字节 cascade_id。
+func deriveDevinSessionIDs(req *apicompat.ChatCompletionsRequest, systemPrompt, token string) (trajectoryID, cascadeID string) {
+	var seed strings.Builder
+	fmt.Fprintf(&seed, "acct\x00%s\x00", token)
+	sessionKey := req.PromptCacheKey
+	if sessionKey == "" {
+		sessionKey = req.User
 	}
-	sum := h.Sum(nil)
-	return fmt.Sprintf("%x-%x-%x-%x-%x",
-		sum[0:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
+	if sessionKey != "" {
+		fmt.Fprintf(&seed, "sess\x00%s", sessionKey)
+	} else {
+		head := systemPrompt
+		if len(head) > 4096 {
+			head = head[:4096]
+		}
+		seed.WriteString(head)
+		for _, m := range req.Messages {
+			if m.Role == "system" || m.Role == "developer" {
+				continue
+			}
+			text := devinMessageText(m)
+			if text == "" {
+				continue
+			}
+			if len(text) > 1024 {
+				text = text[:1024]
+			}
+			seed.WriteByte(0)
+			seed.WriteString(text)
+			break
+		}
+	}
+	sum := sha256.Sum256([]byte(seed.String()))
+	return devinUUIDFromBytes(sum[:16]), devinUUIDFromBytes(sum[16:32])
+}
+
+// devinStepIndexRegistry 按 trajectory_id 记录已发送的上游步数：真实 CLI
+// 每请求发送会话内单调递增的 step_index（抓包实测）。计数随进程重启归零，
+// 与 CLI 重启行为一致；容量封顶防止会话数累积成无界 map。
+var devinStepIndexRegistry = struct {
+	sync.Mutex
+	counts map[string]int32
+}{counts: make(map[string]int32)}
+
+func devinNextStepIndex(trajectoryID string) int32 {
+	devinStepIndexRegistry.Lock()
+	defer devinStepIndexRegistry.Unlock()
+	if len(devinStepIndexRegistry.counts) >= 65536 {
+		devinStepIndexRegistry.counts = make(map[string]int32)
+	}
+	devinStepIndexRegistry.counts[trajectoryID]++
+	return devinStepIndexRegistry.counts[trajectoryID]
 }
 
 // ---------------------------------------------------------------------------

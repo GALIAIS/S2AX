@@ -58,8 +58,6 @@ func (s *OpenAIGatewayService) forwardAsDevinDirect(
 	SetOpsUpstreamModel(c, upstreamModel)
 
 	// 3. messages -> chatMessagePrompts（system 单独提到顶层 prompt）
-	// cascade_id 由账号盐+会话前缀派生而非随机：与消息 ID 一起保证请求
-	// 字节流前缀跨请求稳定，上游 EPHEMERAL prompt cache 才能命中。
 	systemPrompt, msgs := devinConvertMessages(&chatReq)
 	if len(msgs) == 0 {
 		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", "messages are required")
@@ -72,7 +70,9 @@ func (s *OpenAIGatewayService) forwardAsDevinDirect(
 	if err != nil {
 		return nil, devinWrapUpstreamError(c, err, true)
 	}
-	cascadeID := deriveDevinCascadeID(&chatReq, token)
+	// trajectory/cascade 由账号盐+会话键（或内容前缀）派生而非随机：
+	// 会话内稳定保证请求字节流前缀一致，上游 prompt cache 才能命中。
+	trajectoryID, cascadeID := deriveDevinSessionIDs(&chatReq, systemPrompt, token)
 
 	// 5. 发起 GetChatMessage 流
 	maxTok := 0
@@ -81,28 +81,51 @@ func (s *OpenAIGatewayService) forwardAsDevinDirect(
 	} else if chatReq.MaxTokens != nil {
 		maxTok = *chatReq.MaxTokens
 	}
-	upReq := &devinConnectRequest{
-		SystemPrompt: systemPrompt,
-		Messages:     msgs,
-		Model:        upstreamModel,
-		Tools:        chatReq.Tools,
-		ToolChoice:   chatReq.ToolChoice,
-		MaxTokens:    maxTok,
-		Temperature:  chatReq.Temperature,
-		TopP:         chatReq.TopP,
-		Stop:         devinParseStop(chatReq.Stop),
-		CascadeID:    cascadeID,
+	newUpReq := func(msgs []devinChatMsg) *devinConnectRequest {
+		return &devinConnectRequest{
+			SystemPrompt: systemPrompt,
+			Messages:     msgs,
+			Model:        upstreamModel,
+			Tools:        chatReq.Tools,
+			ToolChoice:   chatReq.ToolChoice,
+			MaxTokens:    maxTok,
+			Temperature:  chatReq.Temperature,
+			TopP:         chatReq.TopP,
+			TopK:         chatReq.TopK,
+			Seed:         chatReq.Seed,
+			Stop:         devinParseStop(chatReq.Stop),
+			TrajectoryID: trajectoryID,
+			StepIndex:    devinNextStepIndex(trajectoryID),
+			CascadeID:    cascadeID,
+		}
 	}
-	events, err := devinChatStream(ctx, account.DevinAPIServerURL(), token, proxyURL, upReq)
+	events, err := devinChatStream(ctx, account.DevinAPIServerURL(), token, proxyURL, newUpReq(msgs))
 	if err != nil {
 		return nil, devinWrapUpstreamError(c, err, true)
+	}
+	// reopen 给「流建立后、首个内容前」的失败一次整体重发机会：
+	// continueEmpty 时追加 continue 用户消息让模型在同一上下文续说
+	// （上游实测存在有 stopReason 但零内容的空 end_turn 退化形态）。
+	reopen := func(continueEmpty bool) (<-chan devinChatEvent, error) {
+		retryMsgs := msgs
+		if continueEmpty {
+			retryMsgs = append(append([]devinChatMsg{}, msgs...),
+				devinChatMsg{Source: 1, Prompt: "continue"})
+			for i := range retryMsgs {
+				retryMsgs[i].PromptCache = false
+			}
+			last := &retryMsgs[len(retryMsgs)-1]
+			last.ID = deterministicDevinMsgID(len(retryMsgs)-1, last)
+			last.PromptCache = true
+		}
+		return devinChatStream(ctx, account.DevinAPIServerURL(), token, proxyURL, newUpReq(retryMsgs))
 	}
 
 	// 6. 按客户端 stream 选项分流
 	if clientStream {
-		return s.devinStreamPrompt(ctx, c, events, originalModel, upstreamModel, billingModel, startTime, &chatReq)
+		return s.devinStreamPrompt(ctx, c, events, reopen, originalModel, upstreamModel, billingModel, startTime, &chatReq)
 	}
-	return s.devinBufferedPrompt(ctx, c, events, originalModel, upstreamModel, billingModel, startTime)
+	return s.devinBufferedPrompt(ctx, c, events, reopen, originalModel, upstreamModel, billingModel, startTime)
 }
 
 // devinParseStop 把 OpenAI stop（string 或 []string）展平成列表。
@@ -145,10 +168,12 @@ type devinToolAcc struct {
 
 // devinStreamPrompt 流式：text->content delta、thinking->reasoning_content
 // delta、toolcall->tool_calls delta、usage->末帧 usage。
+// reopen 在首个内容事件前的瞬时断流/空 end_turn 时整体重发一次。
 func (s *OpenAIGatewayService) devinStreamPrompt(
 	ctx context.Context,
 	c *gin.Context,
 	events <-chan devinChatEvent,
+	reopen func(continueEmpty bool) (<-chan devinChatEvent, error),
 	originalModel, upstreamModel, billingModel string,
 	startTime time.Time,
 	chatReq *apicompat.ChatCompletionsRequest,
@@ -170,10 +195,25 @@ func (s *OpenAIGatewayService) devinStreamPrompt(
 	tools := map[string]*devinToolAcc{}
 	toolOrder := []string{}
 	activeToolID := ""
+	producedContent := false // 首个内容事件前才允许 reopen
+	reopenAttempts := 0
+	tryReopen := func(continueEmpty bool) bool {
+		if producedContent || reopenAttempts >= 2 || reopen == nil {
+			return false
+		}
+		reopenAttempts++
+		next, err := reopen(continueEmpty)
+		if err != nil {
+			return false
+		}
+		events = next
+		return true
+	}
 	mark := func() {
 		if firstTokenMs == 0 {
 			firstTokenMs = time.Since(startTime).Milliseconds()
 		}
+		producedContent = true
 	}
 
 	// 大 prompt prefill / 长 thinking 期间上游可能长时间无帧下发；
@@ -190,17 +230,40 @@ loop:
 		select {
 		case ev, ok := <-events:
 			if !ok {
+				// 流静默终结且未产出内容：按传输断裂重开一次。
+				if tryReopen(false) {
+					continue
+				}
 				break loop
 			}
 			switch ev.Kind {
 			case "done":
+				// 空 end_turn：零内容收尾是上游实测退化形态，追加
+				// continue 重发让模型在同一上下文续说。
+				if !producedContent && tryReopen(true) {
+					continue
+				}
 				break loop
 			case "error":
+				if devinIsTransientStreamError(ev.Err) && tryReopen(false) {
+					continue
+				}
 				return nil, devinWrapUpstreamError(c, ev.Err, false)
 			case "usage":
 				usage = ev.Usage
 			case "stop":
 				stopReason = ev.StopReason
+			case "signature", "signature_type", "output_id":
+				// 供应商签名/输出标识透传：客户端回显后随历史回传上游。
+				delta := &apicompat.ChatDelta{
+					Signature:     ev.Signature,
+					SignatureType: ev.SignatureType,
+					OutputID:      ev.OutputID,
+				}
+				if err := devinWriteChunk(w, chunkID, created, originalModel, delta, nil); err != nil {
+					break loop
+				}
+				w.Flush()
 			case "thinking":
 				mark()
 				if err := devinWriteChunk(w, chunkID, created, originalModel,
@@ -325,41 +388,74 @@ loop:
 }
 
 // devinBufferedPrompt 非流式：聚合全部增量后一次性返回 chat.completion。
+// reopen 语义同 devinStreamPrompt。
 func (s *OpenAIGatewayService) devinBufferedPrompt(
 	ctx context.Context,
 	c *gin.Context,
 	events <-chan devinChatEvent,
+	reopen func(continueEmpty bool) (<-chan devinChatEvent, error),
 	originalModel, upstreamModel, billingModel string,
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
 	var textBuf, thoughtBuf strings.Builder
+	var signature, signatureType, outputID string
 	var usage *devinUsageStats
 	stopReason := 0
 	tools := map[string]*devinToolAcc{}
 	toolOrder := []string{}
 	activeToolID := ""
 	firstTokenMs := int64(0)
+	producedContent := false
+	reopenAttempts := 0
+	tryReopen := func(continueEmpty bool) bool {
+		if producedContent || reopenAttempts >= 2 || reopen == nil {
+			return false
+		}
+		reopenAttempts++
+		next, err := reopen(continueEmpty)
+		if err != nil {
+			return false
+		}
+		events = next
+		return true
+	}
 	mark := func() {
 		if firstTokenMs == 0 {
 			firstTokenMs = time.Since(startTime).Milliseconds()
 		}
+		producedContent = true
 	}
 
 	for {
 		select {
 		case ev, ok := <-events:
 			if !ok {
+				if tryReopen(false) {
+					continue
+				}
 				goto done
 			}
 			switch ev.Kind {
 			case "done":
+				if !producedContent && tryReopen(true) {
+					continue
+				}
 				goto done
 			case "error":
+				if devinIsTransientStreamError(ev.Err) && tryReopen(false) {
+					continue
+				}
 				return nil, devinWrapUpstreamError(c, ev.Err, false)
 			case "usage":
 				usage = ev.Usage
 			case "stop":
 				stopReason = ev.StopReason
+			case "signature":
+				signature = ev.Signature
+			case "signature_type":
+				signatureType = ev.SignatureType
+			case "output_id":
+				outputID = ev.OutputID
 			case "thinking":
 				mark()
 				thoughtBuf.WriteString(ev.Text)
@@ -413,6 +509,9 @@ done:
 	if thought := thoughtBuf.String(); thought != "" {
 		msg.ReasoningContent = thought
 	}
+	msg.Signature = signature
+	msg.SignatureType = signatureType
+	msg.OutputID = outputID
 	for _, id := range toolOrder {
 		acc := tools[id]
 		msg.ToolCalls = append(msg.ToolCalls, apicompat.ChatToolCall{

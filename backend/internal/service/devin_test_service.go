@@ -45,12 +45,16 @@ func (s *AccountTestService) testDevinAccountConnection(c *gin.Context, account 
 			Content: contentJSON,
 		}},
 	}
+	sysPrompt := "You are a helpful assistant."
 	_, msgs := devinConvertMessages(chatReq)
+	trajectoryID, cascadeID := deriveDevinSessionIDs(chatReq, sysPrompt, token)
 	upReq := &devinConnectRequest{
-		SystemPrompt: "You are a helpful assistant.",
+		SystemPrompt: sysPrompt,
 		Messages:     msgs,
 		Model:        upstreamModel,
-		CascadeID:    deriveDevinCascadeID(chatReq, token),
+		TrajectoryID: trajectoryID,
+		StepIndex:    devinNextStepIndex(trajectoryID),
+		CascadeID:    cascadeID,
 	}
 	events, err := devinChatStream(ctx, account.DevinAPIServerURL(), token, proxyURL, upReq)
 	if err != nil {

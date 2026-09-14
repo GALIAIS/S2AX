@@ -668,6 +668,13 @@ type ChatCompletionsRequest struct {
 	ServiceTier         string             `json:"service_tier,omitempty"`
 	Stop                json.RawMessage    `json:"stop,omitempty"` // string or []string
 	ResponseFormat      json.RawMessage    `json:"response_format,omitempty"`
+	Seed                *int64             `json:"seed,omitempty"`
+	TopK                *int               `json:"top_k,omitempty"` // OpenRouter 系扩展字段
+
+	// 会话粘性键：prompt_cache_key（Codex 线程级）/user（OpenAI 传统字段），
+	// 供 Devin 等需要会话标识的上游派生 trajectory/cascade ID。
+	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
+	User           string `json:"user,omitempty"`
 
 	// Legacy function calling (deprecated but still supported)
 	Functions    []ChatFunction  `json:"functions,omitempty"`
@@ -688,6 +695,12 @@ type ChatMessage struct {
 	Name             string          `json:"name,omitempty"`
 	ToolCalls        []ChatToolCall  `json:"tool_calls,omitempty"`
 	ToolCallID       string          `json:"tool_call_id,omitempty"`
+
+	// Devin signature passthrough：assistant 轮次的供应商推理签名/输出标识，
+	// 客户端回显消息对象时随历史原样回传（上游错配会 invalid_argument）。
+	Signature     string `json:"signature,omitempty"`
+	SignatureType string `json:"signature_type,omitempty"`
+	OutputID      string `json:"output_id,omitempty"`
 
 	// Legacy function calling
 	FunctionCall *ChatFunctionCall `json:"function_call,omitempty"`
@@ -825,6 +838,11 @@ type ChatDelta struct {
 	ReasoningContent *string        `json:"reasoning_content,omitempty"`
 	Reasoning        *string        `json:"reasoning,omitempty"`
 	ToolCalls        []ChatToolCall `json:"tool_calls,omitempty"`
+
+	// Devin signature passthrough（流式增量里的供应商签名/输出标识）。
+	Signature     string `json:"signature,omitempty"`
+	SignatureType string `json:"signature_type,omitempty"`
+	OutputID      string `json:"output_id,omitempty"`
 }
 
 func (m ChatMessage) reasoningText() string {
