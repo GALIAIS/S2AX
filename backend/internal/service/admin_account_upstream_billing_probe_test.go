@@ -161,6 +161,26 @@ func TestCreateAccountAcceptsDedicatedUpstreamBillingProbeSetting(t *testing.T) 
 	require.ErrorIs(t, err, ErrUpstreamBillingProbeAccountInvalid)
 }
 
+// devin 是 apikey 类型但平台无上游计费探测端点（直连 Codeium GetChatMessage），
+// 应得到平台专属的明确错误而非"not an API key account"。
+func TestCreateAccountDevinProbeEnabledGetsPlatformSpecificError(t *testing.T) {
+	enabled := true
+	repo := &upstreamBillingProbeAccountRepo{}
+	_, err := (&adminServiceImpl{accountRepo: repo}).CreateAccount(context.Background(), &CreateAccountInput{
+		Name:                 "devin",
+		Platform:             PlatformDevin,
+		Type:                 AccountTypeAPIKey,
+		Credentials:          map[string]any{"session_token": "devin-session-token$x"},
+		ProbeEnabled:         &enabled,
+		SkipDefaultGroupBind: true,
+	})
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrUpstreamBillingProbeAccountInvalid)
+	require.Contains(t, err.Error(), "devin")
+	require.Contains(t, err.Error(), "does not support upstream billing probe")
+}
+
 func TestUpdateAccountPreservesManagedUpstreamBillingProbeStateForUnrelatedEdit(t *testing.T) {
 	accountID := int64(110)
 	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{

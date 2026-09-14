@@ -497,7 +497,7 @@ func (s *UpstreamBillingProbeService) probeAccountWithMode(ctx context.Context, 
 			return nil, loadErr
 		}
 		if !isUpstreamBillingProbeAccount(account) {
-			return nil, ErrUpstreamBillingProbeAccountInvalid
+			return nil, upstreamBillingProbeIneligibleError(account)
 		}
 		if requireEnabled {
 			if !account.IsActive() || !upstreamBillingProbeEnabled(account) {
@@ -605,7 +605,7 @@ func (s *UpstreamBillingProbeService) SetAccountEnabled(ctx context.Context, acc
 		return err
 	}
 	if !isUpstreamBillingProbeAccount(account) {
-		return ErrUpstreamBillingProbeAccountInvalid
+		return upstreamBillingProbeIneligibleError(account)
 	}
 	updates := map[string]any{UpstreamBillingProbeEnabledExtraKey: enabled}
 	if !enabled {
@@ -1022,6 +1022,20 @@ func IsUpstreamBillingProbeIdentity(platform, accountType string) bool {
 
 func isUpstreamBillingProbeAccount(account *Account) bool {
 	return account != nil && IsUpstreamBillingProbeIdentity(account.Platform, account.Type)
+}
+
+// upstreamBillingProbeIneligibleError 区分两种不合格原因：非 apikey 账号沿用
+// ErrUpstreamBillingProbeAccountInvalid；apikey 账号但平台没有上游计费探测
+// 约定（devin 直连 Codeium GetChatMessage，无 /v1/sub2api/billing 端点）时
+// 明确报平台不支持，避免"不是 API key 账号"的误导性文案。
+func upstreamBillingProbeIneligibleError(account *Account) error {
+	if account != nil && account.Type == AccountTypeAPIKey {
+		return infraerrors.BadRequest(
+			"UPSTREAM_BILLING_PROBE_UNSUPPORTED_PLATFORM",
+			fmt.Sprintf("platform %q does not support upstream billing probe", account.Platform),
+		)
+	}
+	return ErrUpstreamBillingProbeAccountInvalid
 }
 
 // upstreamBillingProbeOfficialAPIDomains lists the root domains of official

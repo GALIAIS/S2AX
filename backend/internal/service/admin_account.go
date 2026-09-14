@@ -431,7 +431,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	}
 	if input.ProbeEnabled != nil && *input.ProbeEnabled {
 		if !isUpstreamBillingProbeAccount(account) {
-			return nil, ErrUpstreamBillingProbeAccountInvalid
+			return nil, upstreamBillingProbeIneligibleError(account)
 		}
 		if account.Extra == nil {
 			account.Extra = make(map[string]any)
@@ -733,7 +733,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if (requestedProbeEnabledUpdate != nil && *requestedProbeEnabledUpdate) ||
 		(requestedRateSyncEnabledUpdate != nil && *requestedRateSyncEnabledUpdate) {
 		if !isUpstreamBillingProbeAccount(account) {
-			return nil, ErrUpstreamBillingProbeAccountInvalid
+			return nil, upstreamBillingProbeIneligibleError(account)
 		}
 	}
 	if account.Extra == nil && (requestedProbeEnabledUpdate != nil || requestedRateSyncEnabledUpdate != nil) {
@@ -1001,7 +1001,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 				return nil, ErrAccountNotFound
 			}
 			if !isUpstreamBillingProbeAccount(account) {
-				return nil, ErrUpstreamBillingProbeAccountInvalid
+				return nil, upstreamBillingProbeIneligibleError(account)
 			}
 		}
 	}

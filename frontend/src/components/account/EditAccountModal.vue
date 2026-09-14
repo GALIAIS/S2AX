@@ -1667,7 +1667,7 @@
               )
             }}
           </p>
-          <div v-if="account?.type === 'apikey'" class="mt-3 flex items-center justify-between gap-3">
+          <div v-if="account?.type === 'apikey' && account?.platform !== 'devin'" class="mt-3 flex items-center justify-between gap-3">
             <div class="min-w-0">
               <p class="text-xs font-medium text-gray-700 dark:text-gray-200">
                 {{ t('admin.accounts.upstreamBilling.syncRate') }}
@@ -1972,7 +1972,7 @@
       </div>
 
       <div
-        v-if="account?.type === 'apikey'"
+        v-if="account?.type === 'apikey' && account?.platform !== 'devin'"
         class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div>
@@ -4962,7 +4962,8 @@ const handleSubmit = async () => {
       updatePayload.load_factor = 0
     }
     updatePayload.auto_pause_on_expired = autoPauseOnExpired.value
-    if (props.account.type === 'apikey') {
+    // devin 直连 Codeium，无上游计费探测端点，不发送探测/倍率同步字段
+    if (props.account.type === 'apikey' && props.account.platform !== 'devin') {
       updatePayload.upstream_billing_probe_enabled = upstreamBillingAutoProbeEnabled.value
       updatePayload.upstream_billing_rate_sync_enabled = upstreamBillingRateSyncEnabled.value
       if (upstreamBillingRateSyncEnabled.value) {

@@ -1597,8 +1597,15 @@ const allOpenAIAPIKey = computed(() => {
 const allBillingProbeCapable = computed(() => {
   return (
     targetSelectedTypes.value.length > 0 &&
-    targetSelectedTypes.value.every(t => t === 'apikey')
+    targetSelectedTypes.value.every(t => t === 'apikey') &&
+    // devin 直连 Codeium，无上游计费探测端点
+    !targetSelectedPlatforms.value.includes('devin')
   )
+})
+
+// 选中集合变化导致探测区块隐藏时同步关掉残留勾选，避免把 probe 字段误发给 devin
+watch(allBillingProbeCapable, capable => {
+  if (!capable) enableUpstreamBillingAutoProbe.value = false
 })
 
 // 是否全部为支持请求头覆写的平台/账号类型
