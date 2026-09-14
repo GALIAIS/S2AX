@@ -50,7 +50,7 @@ func (s *AccountTestService) testDevinAccountConnection(c *gin.Context, account 
 		SystemPrompt: "You are a helpful assistant.",
 		Messages:     msgs,
 		Model:        upstreamModel,
-		CascadeID:    deriveDevinCascadeID(chatReq),
+		CascadeID:    deriveDevinCascadeID(chatReq, token),
 	}
 	events, err := devinChatStream(ctx, account.DevinAPIServerURL(), token, proxyURL, upReq)
 	if err != nil {
@@ -76,8 +76,10 @@ func (s *AccountTestService) testDevinAccountConnection(c *gin.Context, account 
 		"stop_reason": stopReason,
 	}
 	if lastUsage != nil {
-		data["input_tokens"] = lastUsage.InputTokens
+		data["input_tokens"] = devinTotalInputTokens(lastUsage)
 		data["output_tokens"] = lastUsage.OutputTokens
+		data["cache_read_tokens"] = lastUsage.CacheReadTokens
+		data["cache_write_tokens"] = lastUsage.CacheWriteTokens
 		data["model_uid"] = lastUsage.ModelUID
 	}
 	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true, Data: data})

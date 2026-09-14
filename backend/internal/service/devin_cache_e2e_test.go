@@ -71,7 +71,7 @@ func TestDevinCache_E2E(t *testing.T) {
 			SystemPrompt: systemPrompt,
 			Messages:     msgs,
 			Model:        model,
-			CascadeID:    deriveDevinCascadeID(req),
+			CascadeID:    deriveDevinCascadeID(req, got),
 		})
 		if err != nil {
 			t.Fatalf("%s stream: %v", tag, err)

@@ -357,6 +357,13 @@ type devinUsageStats struct {
 	ModelUID         string
 }
 
+// devinTotalInputTokens 上游 input_tokens 只计未命中缓存的输入部分；
+// 按 OpenAIUsage 惯例 InputTokens 记总量（=input+cache_read+cache_write），
+// 计费层再按 cache 子集反算实际输入。
+func devinTotalInputTokens(u *devinUsageStats) int {
+	return u.InputTokens + u.CacheReadTokens + u.CacheWriteTokens
+}
+
 const (
 	devinConnectCompressed = 0x01
 	devinConnectEndStream  = 0x02
@@ -712,11 +719,13 @@ func deterministicDevinMsgID(idx int, m *devinChatMsg) string {
 		sum[0:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
 }
 
-// deriveDevinCascadeID 从会话前缀派生稳定的 cascade_id：同一对话的连续
-// 请求（消息只向后追加、前缀不变）得到相同值，不同对话不同 id。cascade
-// 语义上是会话标识，派生稳定值可让上游会话级缓存/状态关联命中。
-func deriveDevinCascadeID(req *apicompat.ChatCompletionsRequest) string {
+// deriveDevinCascadeID 从账号与会话前缀派生稳定的 cascade_id：同一对话
+// 的连续请求（消息只向后追加、前缀不变）得到相同值，不同对话不同 id。
+// 混入 token 作账号级盐：不同用户即使以相同 system+首条消息开头也不会
+// 共享 cascade。cascade 语义上是会话标识，稳定值让上游缓存/会话关联命中。
+func deriveDevinCascadeID(req *apicompat.ChatCompletionsRequest, token string) string {
 	h := sha256.New()
+	fmt.Fprintf(h, "acct\x00%s\x00", token)
 	for _, m := range req.Messages {
 		if m.Role == "system" || m.Role == "developer" {
 			fmt.Fprintf(h, "sys\x00%s\x00", devinMessageText(m))

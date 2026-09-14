@@ -58,9 +58,8 @@ func (s *OpenAIGatewayService) forwardAsDevinDirect(
 	SetOpsUpstreamModel(c, upstreamModel)
 
 	// 3. messages -> chatMessagePrompts（system 单独提到顶层 prompt）
-	// cascade_id 由会话前缀派生而非随机：与消息 ID 一起保证请求字节流
-	// 前缀跨请求稳定，上游 EPHEMERAL prompt cache 才能命中。
-	cascadeID := deriveDevinCascadeID(&chatReq)
+	// cascade_id 由账号盐+会话前缀派生而非随机：与消息 ID 一起保证请求
+	// 字节流前缀跨请求稳定，上游 EPHEMERAL prompt cache 才能命中。
 	systemPrompt, msgs := devinConvertMessages(&chatReq)
 	if len(msgs) == 0 {
 		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", "messages are required")
@@ -73,6 +72,7 @@ func (s *OpenAIGatewayService) forwardAsDevinDirect(
 	if err != nil {
 		return nil, devinWrapUpstreamError(c, err, true)
 	}
+	cascadeID := deriveDevinCascadeID(&chatReq, token)
 
 	// 5. 发起 GetChatMessage 流
 	maxTok := 0
@@ -282,19 +282,20 @@ loop:
 	if err := devinWriteChunk(w, chunkID, created, originalModel, &apicompat.ChatDelta{}, &finishReason); err != nil {
 		return nil, err
 	}
-	inTok, outTok := 0, 0
+	inTok, outTok, cacheRead, cacheWrite := 0, 0, 0, 0
 	var usageOut *apicompat.ChatUsage
 	if usage != nil {
-		inTok, outTok = usage.InputTokens, usage.OutputTokens
+		inTok, outTok = devinTotalInputTokens(usage), usage.OutputTokens
+		cacheRead, cacheWrite = usage.CacheReadTokens, usage.CacheWriteTokens
 		usageOut = &apicompat.ChatUsage{
 			PromptTokens:     inTok,
 			CompletionTokens: outTok,
 			TotalTokens:      inTok + outTok,
 		}
-		if usage.CacheReadTokens > 0 || usage.CacheWriteTokens > 0 {
+		if cacheRead > 0 || cacheWrite > 0 {
 			usageOut.PromptTokensDetails = &apicompat.ChatTokenDetails{
-				CachedTokens:        usage.CacheReadTokens,
-				CacheCreationTokens: usage.CacheWriteTokens,
+				CachedTokens:        cacheRead,
+				CacheCreationTokens: cacheWrite,
 			}
 		}
 	}
@@ -315,8 +316,10 @@ loop:
 		UpstreamEndpoint: devinUpstreamEndpoint,
 		FirstTokenMs:     intPtrFrom(firstTokenMs),
 		Usage: OpenAIUsage{
-			InputTokens:  inTok,
-			OutputTokens: outTok,
+			InputTokens:              inTok,
+			OutputTokens:             outTok,
+			CacheReadInputTokens:     cacheRead,
+			CacheCreationInputTokens: cacheWrite,
 		},
 	}, nil
 }
@@ -421,17 +424,18 @@ done:
 			},
 		})
 	}
-	inTok, outTok := 0, 0
+	inTok, outTok, cacheRead, cacheWrite := 0, 0, 0, 0
 	usageOut := &apicompat.ChatUsage{}
 	if usage != nil {
-		inTok, outTok = usage.InputTokens, usage.OutputTokens
+		inTok, outTok = devinTotalInputTokens(usage), usage.OutputTokens
+		cacheRead, cacheWrite = usage.CacheReadTokens, usage.CacheWriteTokens
 		usageOut.PromptTokens = inTok
 		usageOut.CompletionTokens = outTok
 		usageOut.TotalTokens = inTok + outTok
-		if usage.CacheReadTokens > 0 || usage.CacheWriteTokens > 0 {
+		if cacheRead > 0 || cacheWrite > 0 {
 			usageOut.PromptTokensDetails = &apicompat.ChatTokenDetails{
-				CachedTokens:        usage.CacheReadTokens,
-				CacheCreationTokens: usage.CacheWriteTokens,
+				CachedTokens:        cacheRead,
+				CacheCreationTokens: cacheWrite,
 			}
 		}
 	}
@@ -463,8 +467,10 @@ done:
 		UpstreamEndpoint: devinUpstreamEndpoint,
 		FirstTokenMs:     intPtrFrom(firstTokenMs),
 		Usage: OpenAIUsage{
-			InputTokens:  inTok,
-			OutputTokens: outTok,
+			InputTokens:              inTok,
+			OutputTokens:             outTok,
+			CacheReadInputTokens:     cacheRead,
+			CacheCreationInputTokens: cacheWrite,
 		},
 	}, nil
 }

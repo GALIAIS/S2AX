@@ -56,7 +56,7 @@ func TestDevinConnect_E2E(t *testing.T) {
 			Content: contentJSON,
 		}},
 	}
-	cascadeID := deriveDevinCascadeID(chatReq)
+	cascadeID := deriveDevinCascadeID(chatReq, got)
 	_, msgs := devinConvertMessages(chatReq)
 	upReq := &devinConnectRequest{
 		SystemPrompt: "You are a helpful assistant.",

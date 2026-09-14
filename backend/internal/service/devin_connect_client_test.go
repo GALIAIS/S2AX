@@ -182,8 +182,8 @@ func TestDevinConvertMessages_StableIDsAcrossCalls(t *testing.T) {
 		}
 	}
 	// 完整请求体（除末尾 execution_id）也应逐字节一致。
-	b1 := devinBuildChatRequestBody("tok", &devinConnectRequest{Messages: msgs1, Model: "swe-2-max", CascadeID: deriveDevinCascadeID(mk())})
-	b2 := devinBuildChatRequestBody("tok", &devinConnectRequest{Messages: msgs2, Model: "swe-2-max", CascadeID: deriveDevinCascadeID(mk())})
+	b1 := devinBuildChatRequestBody("tok", &devinConnectRequest{Messages: msgs1, Model: "swe-2-max", CascadeID: deriveDevinCascadeID(mk(), "tok")})
+	b2 := devinBuildChatRequestBody("tok", &devinConnectRequest{Messages: msgs2, Model: "swe-2-max", CascadeID: deriveDevinCascadeID(mk(), "tok")})
 	// field 22 execution_id 是尾部随机字段：前缀（到 field 22 之前）必须一致。
 	if !bytes.Equal(b1[:len(b1)-50], b2[:len(b2)-50]) {
 		t.Fatal("request body prefix differs across identical histories")
@@ -205,7 +205,7 @@ func TestDeriveDevinCascadeID_StablePerConversation(t *testing.T) {
 		return &apicompat.ChatCompletionsRequest{Messages: msgs}
 	}
 	// 追加消息不改变 cascade（前缀一致）。
-	if deriveDevinCascadeID(mk(false)) != deriveDevinCascadeID(mk(true)) {
+	if deriveDevinCascadeID(mk(false), "tok") != deriveDevinCascadeID(mk(true), "tok") {
 		t.Fatal("cascade id must be stable when history only appends")
 	}
 	// 不同首条消息 -> 不同 cascade。
@@ -214,7 +214,11 @@ func TestDeriveDevinCascadeID_StablePerConversation(t *testing.T) {
 		{Role: "system", Content: json.RawMessage(`"you are helpful"`)},
 		{Role: "user", Content: other},
 	}}
-	if deriveDevinCascadeID(mk(false)) == deriveDevinCascadeID(req2) {
+	if deriveDevinCascadeID(mk(false), "tok") == deriveDevinCascadeID(req2, "tok") {
 		t.Fatal("different conversations must not share cascade id")
+	}
+	// 同一会话前缀但不同账号 token -> 不同 cascade（账号级盐隔离）。
+	if deriveDevinCascadeID(mk(false), "tok") == deriveDevinCascadeID(mk(false), "other-token") {
+		t.Fatal("different accounts must not share cascade id")
 	}
 }
