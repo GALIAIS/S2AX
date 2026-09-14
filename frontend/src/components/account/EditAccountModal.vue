@@ -28,7 +28,7 @@
 
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
-        <!-- Devin：上游为固定 ACP/WS 端点，无 HTTP base_url 概念 -->
+        <!-- Devin：直连 Codeium GetChatMessage，无 HTTP base_url 概念 -->
         <div v-if="account.platform === 'devin'" class="rounded-lg border border-violet-200 bg-violet-50 p-3 dark:border-violet-800 dark:bg-violet-900/20">
           <p class="text-xs text-violet-700 dark:text-violet-300">
             {{ t('admin.accounts.devin.acpEndpointHint') }}
@@ -183,16 +183,16 @@
           </p>
         </div>
 
-        <!-- Devin 组织 ID（可选） -->
+        <!-- Devin API server（可选） -->
         <div v-if="account.platform === 'devin'">
-          <label class="input-label">{{ t('admin.accounts.devin.orgId') }}</label>
+          <label class="input-label">{{ t('admin.accounts.devin.apiServerUrl') }}</label>
           <input
-            v-model="editDevinOrgId"
+            v-model="editDevinApiServerUrl"
             type="text"
             class="input font-mono"
-            placeholder="org-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            placeholder="https://server.codeium.com"
           />
-          <p class="input-hint">{{ t('admin.accounts.devin.orgIdHint') }}</p>
+          <p class="input-hint">{{ t('admin.accounts.devin.apiServerUrlHint') }}</p>
         </div>
 
         <!-- Model Restriction Section (不适用于 Antigravity) -->
@@ -3199,7 +3199,7 @@ const editApiProtocol = ref<CnApiProtocol>('adaptive')
 const editAccountMode = ref<CnAccountMode>('payg')
 // 智谱团队版 Coding Plan：组织/项目 ID，写入 credentials 供额度探测切换团队端点
 const editZhipuOrganization = ref('')
-const editDevinOrgId = ref('')
+const editDevinApiServerUrl = ref('')
 const editZhipuProject = ref('')
 const editAdaptiveBaseUrls = ref<Record<CnNativeApiProtocol, string>>({
   chat_completions: '',
@@ -4237,9 +4237,9 @@ const syncFormFromAccount = (newAccount: Account | null) => {
         editZhipuProject.value = typeof credentials.zhipu_project === 'string' ? credentials.zhipu_project : ''
       }
     }
-    // Devin：回填可选组织 ID
+    // Devin：回填可选 API server
     if (newAccount.platform === 'devin') {
-      editDevinOrgId.value = typeof credentials.org_id === 'string' ? credentials.org_id : ''
+      editDevinApiServerUrl.value = typeof credentials.api_server_url === 'string' ? credentials.api_server_url : ''
     }
     const platformDefaultUrl =
       newAccount.platform === 'openai'
@@ -4977,7 +4977,7 @@ const handleSubmit = async () => {
       const shouldApplyModelMapping = !(props.account.platform === 'openai' && openaiPassthroughEnabled.value)
 
       // Always update credentials for apikey type to handle model mapping changes
-      // Devin 上游为固定 ACP/WS 端点，不写 base_url
+      // Devin 直连上游无 base_url
       const newCredentials: Record<string, unknown> = { ...currentCredentials }
       if (props.account.platform === 'devin') {
         delete newCredentials.base_url
@@ -5038,12 +5038,13 @@ const handleSubmit = async () => {
           appStore.showError(t('admin.accounts.apiKeyIsRequired'))
           return
         }
-        const org = editDevinOrgId.value.trim()
-        if (org) {
-          newCredentials.org_id = org
+        const apiServer = editDevinApiServerUrl.value.trim()
+        if (apiServer) {
+          newCredentials.api_server_url = apiServer
         } else {
-          delete newCredentials.org_id
+          delete newCredentials.api_server_url
         }
+        delete newCredentials.org_id
       } else if (editApiKey.value.trim()) {
         newCredentials.api_key = editApiKey.value.trim()
       } else if (!hasExistingApiKey) {

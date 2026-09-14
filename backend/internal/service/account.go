@@ -1029,35 +1029,12 @@ func (a *Account) DevinAPIKey() string {
 	return ""
 }
 
-// DevinOrgID 返回 Devin 组织 ID；留空时由云端 session/new 自动解析默认组织。
-func (a *Account) DevinOrgID() string {
-	return strings.TrimSpace(a.GetCredential("org_id"))
-}
-
-// DevinWebappHost 返回 Devin 云端 Web 主机名（默认 app.devin.ai）。
-func (a *Account) DevinWebappHost() string {
-	if v := strings.TrimSpace(a.GetCredential("webapp_host")); v != "" {
-		return v
-	}
-	return DevinDefaultWebappHost
-}
-
-// DevinAPIServerURL 返回 Codeium API server（用于换 session token）。
+// DevinAPIServerURL 返回 Codeium API server（GetChatMessage 直连 + 换 session token）。
 func (a *Account) DevinAPIServerURL() string {
 	if v := strings.TrimSpace(a.GetCredential("api_server_url")); v != "" {
 		return strings.TrimRight(v, "/")
 	}
 	return DevinDefaultAPIServerURL
-}
-
-// DevinAutoApprove 报告是否自动批准 agent 的 session/request_permission 请求。
-// 云端沙箱执行场景默认开启；设 credentials.auto_approve=false 可关闭
-// （关闭后 permission 请求会被拒绝，工具调用可能失败）。
-func (a *Account) DevinAutoApprove() bool {
-	if v := strings.TrimSpace(a.GetCredential("auto_approve")); v != "" {
-		return v != "false" && v != "0"
-	}
-	return true
 }
 
 func (a *Account) GetClaudeUserID() string {

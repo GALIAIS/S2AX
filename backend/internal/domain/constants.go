@@ -24,10 +24,10 @@ const (
 	PlatformAntigravity = "antigravity"
 	PlatformGrok        = "grok"
 	// 国产 OpenAI 兼容供应商（经 OpenAI 网关转发，按 Chat Completions 协议）。
-	PlatformKimi      = "kimi"     // Kimi (月之暗面 / Moonshot)
-	PlatformZhipu     = "zhipu"    // 智谱 GLM (bigmodel)
-	PlatformDeepseek  = "deepseek" // DeepSeek
-	PlatformMiniMax   = "minimax"  // MiniMax (M 系列)
+	PlatformKimi     = "kimi"     // Kimi (月之暗面 / Moonshot)
+	PlatformZhipu    = "zhipu"    // 智谱 GLM (bigmodel)
+	PlatformDeepseek = "deepseek" // DeepSeek
+	PlatformMiniMax  = "minimax"  // MiniMax (M 系列)
 	// PlatformDevin 是 Cognition Devin 平台：上游为 Devin Cloud ACP
 	// （Agent Client Protocol over WebSocket, wss://app.devin.ai/api/acp/live），
 	// 模型即 session/new configOptions 中的 devin_version 档位。
@@ -191,18 +191,27 @@ var DefaultBedrockModelMapping = map[string]string{
 }
 
 // DefaultDevinModelMapping 是 Devin 平台的默认模型映射。
-// Devin Cloud ACP 的 "模型" 实际是 devin_version 档位（session/new configOptions），
-// 公共模型名与上游值一一对应；映射目标必须与上游 select 选项 value 完全一致。
+// 直连 Codeium GetChatMessage（本地模型档，免费），公共模型名即上游
+// chat_model_uid；完整枚举见 devin session/new configOptions（~180 个），
+// 这里列出常用免费档。devin- 前缀的旧 cloud 档位名会被自动剥离。
 var DefaultDevinModelMapping = map[string]string{
-	"devin-2-5":         "devin-2-5",         // Normal（默认档）
-	"devin-auto":        "devin-auto",        // Fusion 自动路由
-	"devin-ultra":       "devin-ultra",
-	"devin_lite":        "devin_lite",
-	"devin-fast-opus":   "devin-fast-opus",
-	"devin-gpt-5-6":     "devin-gpt-5-6",
-	"devin-swe-2-low":   "devin-swe-2-low",   // SWE-2 Medium
-	"devin-swe-2-high":  "devin-swe-2-high",
-	"devin-swe-2-max":   "devin-swe-2-max",
-	"devin-gpt-6-astra": "devin-gpt-6-astra", // Preview
-	"devin-fable-5-1":   "devin-fable-5-1",   // Preview
+	// 主推免费档
+	"adaptive":                 "adaptive", // Fusion 自动路由
+	"swe-2-max":                "swe-2-max",
+	"swe-2-high":               "swe-2-high",
+	"swe-2-medium":             "swe-2-medium",
+	"swe-1-7-lightning":        "swe-1-7-lightning",
+	"swe-1-7-lightning-medium": "swe-1-7-lightning-medium",
+	"glm-5-2":                  "glm-5-2", // GLM-5.2 High
+	"glm-5-2-max":              "glm-5-2-max",
+	"glm-5-2-none":             "glm-5-2-none", // No Thinking
+	"glm-5-3-high":             "glm-5-3-high",
+	"glm-5-3-max":              "glm-5-3-max",
+	"kimi-k3-high":             "kimi-k3-high",
+	"kimi-k3-max":              "kimi-k3-max",
+	// 旧 cloud 档位名兼容（normalize 剥 devin- 前缀后落回本地 uid）
+	"devin-swe-2-max":  "swe-2-max",
+	"devin-swe-2-high": "swe-2-high",
+	"devin-auto":       "adaptive",
+	"devin-2-5":        "adaptive",
 }

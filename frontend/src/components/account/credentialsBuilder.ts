@@ -205,7 +205,8 @@ export function serializeHeaderOverrideRows(rows: HeaderOverrideRow[]): string {
 }
 
 // ========== Devin（Cognition）凭据 ==========
-// 上游为 wss://app.devin.ai/api/acp/live 的 ACP 会话，无 HTTP base_url。
+// 上游为 server.codeium.com 的 ApiServerService/GetChatMessage
+// （Connect-RPC proto streaming），本地模型档免费，不经 Devin Cloud。
 // 支持两种凭据来源：devin-session-token$ 前缀的会话令牌（session_token），
 // 或 Codeium/Devin API Key（api_key，后端经 GetSelfDevinSessionToken 换发）。
 
@@ -213,7 +214,7 @@ export const DEVIN_SESSION_TOKEN_PREFIX = 'devin-session-token$'
 
 export function buildDevinCredentials(
   tokenOrKey: string,
-  orgId: string
+  apiServerUrl: string
 ): Record<string, unknown> {
   const value = tokenOrKey.trim()
   const credentials: Record<string, unknown> = {}
@@ -222,9 +223,9 @@ export function buildDevinCredentials(
   } else {
     credentials.api_key = value
   }
-  const org = orgId.trim()
-  if (org) {
-    credentials.org_id = org
+  const server = apiServerUrl.trim()
+  if (server) {
+    credentials.api_server_url = server
   }
   return credentials
 }

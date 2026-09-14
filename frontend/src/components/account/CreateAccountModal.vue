@@ -1306,7 +1306,7 @@
 
       <!-- API Key input (only for apikey type, excluding Antigravity which has its own fields) -->
       <div v-if="form.type === 'apikey' && form.platform !== 'antigravity'" class="space-y-4">
-        <!-- Devin：上游为固定 ACP/WS 端点，无 HTTP base_url 概念 -->
+        <!-- Devin：直连 Codeium GetChatMessage，无 HTTP base_url 概念 -->
         <div v-if="form.platform === 'devin'" class="rounded-lg border border-violet-200 bg-violet-50 p-3 dark:border-violet-800 dark:bg-violet-900/20">
           <p class="text-xs text-violet-700 dark:text-violet-300">
             {{ t('admin.accounts.devin.acpEndpointHint') }}
@@ -1367,16 +1367,16 @@
           <p v-if="apiKeyHint" class="input-hint">{{ apiKeyHint }}</p>
         </div>
 
-        <!-- Devin 组织 ID（可选；多组织账号用于指定目标组织） -->
+        <!-- Devin API server（可选；默认 server.codeium.com） -->
         <div v-if="form.platform === 'devin'">
-          <label class="input-label">{{ t('admin.accounts.devin.orgId') }}</label>
+          <label class="input-label">{{ t('admin.accounts.devin.apiServerUrl') }}</label>
           <input
-            v-model="devinOrgId"
+            v-model="devinApiServerUrl"
             type="text"
             class="input font-mono"
-            placeholder="org-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            placeholder="https://server.codeium.com"
           />
-          <p class="input-hint">{{ t('admin.accounts.devin.orgIdHint') }}</p>
+          <p class="input-hint">{{ t('admin.accounts.devin.apiServerUrlHint') }}</p>
         </div>
 
         <!-- 上游倍率自动探测：全部 API-key 平台可用（所在区块已限定 apikey 类型） -->
@@ -4148,8 +4148,8 @@ const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock' | 'service_acco
 const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
 const apiKeyBaseUrl = ref('https://api.anthropic.com')
 const apiKeyValue = ref('')
-// Devin 可选组织 ID（写入 credentials.org_id）
-const devinOrgId = ref('')
+// Devin 可选 API server（写入 credentials.api_server_url）
+const devinApiServerUrl = ref('')
 const upstreamBillingAutoProbeEnabled = ref(true)
 
 // ── 国产供应商（Kimi / Zhipu / DeepSeek）账号类型、API 协议与端点 ──
@@ -5753,10 +5753,10 @@ const handleSubmit = async () => {
           : 'https://api.anthropic.com'
 
   // Build credentials with optional model mapping
-  // Devin：ACP/WS 上游无 base_url；按值前缀写 session_token 或 api_key + 可选 org_id
+  // Devin：直连上游无 base_url；按值前缀写 session_token 或 api_key + 可选 api_server_url
   const credentials: Record<string, unknown> =
     form.platform === 'devin'
-      ? buildDevinCredentials(apiKeyValue.value, devinOrgId.value)
+      ? buildDevinCredentials(apiKeyValue.value, devinApiServerUrl.value)
       : {
           base_url: apiKeyBaseUrl.value.trim() || defaultBaseUrl,
           api_key: apiKeyValue.value.trim()

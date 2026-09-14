@@ -1,12 +1,15 @@
 package service
 
-// Devin 账号连通性测试：拨号 ACP -> session/new -> 发一个最小 prompt，
-// 把 agent_message_chunk 增量按现有 TestEvent 格式推给管理端 SSE。
+// Devin 账号连通性测试：直连 Codeium GetChatMessage（Connect-RPC），
+// 发一个最小 prompt，把文本增量按现有 TestEvent 格式推给管理端 SSE。
 
 import (
+	"encoding/json"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // testDevinPrompt 是账号测试使用的最小探针文本（与用户验证时一致）。
@@ -16,12 +19,13 @@ func (s *AccountTestService) testDevinAccountConnection(c *gin.Context, account 
 	ctx := c.Request.Context()
 	testModelID := strings.TrimSpace(modelID)
 	if testModelID == "" {
-		testModelID = "devin-2-5"
+		testModelID = "glm-5-2"
 	}
 	upstreamModel := account.GetMappedModel(testModelID)
 	if upstreamModel == "" {
 		upstreamModel = testModelID
 	}
+	upstreamModel = normalizeDevinLocalModel(upstreamModel)
 	if strings.TrimSpace(prompt) == "" {
 		prompt = testDevinPrompt
 	}
@@ -34,44 +38,50 @@ func (s *AccountTestService) testDevinAccountConnection(c *gin.Context, account 
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 
-	cl, err := devinDialACP(ctx, account, token, proxyURL)
+	cascadeID := uuid.NewString()
+	contentJSON, _ := json.Marshal(prompt)
+	chatReq := &apicompat.ChatCompletionsRequest{
+		Model: testModelID,
+		Messages: []apicompat.ChatMessage{{
+			Role:    "user",
+			Content: contentJSON,
+		}},
+	}
+	_, msgs := devinConvertMessages(chatReq, cascadeID)
+	upReq := &devinConnectRequest{
+		SystemPrompt: "You are a helpful assistant.",
+		Messages:     msgs,
+		Model:        upstreamModel,
+		CascadeID:    cascadeID,
+	}
+	events, err := devinChatStream(ctx, account.DevinAPIServerURL(), token, proxyURL, upReq)
 	if err != nil {
-		return s.sendErrorAndEnd(c, "ACP dial failed: "+err.Error())
-	}
-	defer cl.Close()
-
-	sessionID, err := cl.devinNewSession(ctx, "/")
-	if err != nil {
-		return s.sendErrorAndEnd(c, "session/new failed: "+err.Error())
-	}
-	defer func() { go cl.devinCloseSession(sessionID) }()
-
-	if err := cl.devinSetConfig(ctx, sessionID, DevinConfigIDVersion, upstreamModel); err != nil {
-		return s.sendErrorAndEnd(c, "set devin_version failed: "+err.Error())
-	}
-	if org := account.DevinOrgID(); org != "" {
-		_ = cl.devinSetConfig(ctx, sessionID, DevinConfigIDOrg, org)
+		return s.sendErrorAndEnd(c, "GetChatMessage failed: "+err.Error())
 	}
 
-	cl.onEvent = func(_ string, ev devinACPEvent) {
-		if ev.Kind == "message" && ev.Text != "" {
+	var lastUsage *devinUsageStats
+	stopReason := 0
+	for ev := range events {
+		switch ev.Kind {
+		case "error":
+			return s.sendErrorAndEnd(c, "stream error: "+ev.Err.Error())
+		case "text":
 			s.sendEvent(c, TestEvent{Type: "content", Text: ev.Text})
+		case "usage":
+			lastUsage = ev.Usage
+		case "stop":
+			stopReason = ev.StopReason
+		case "done":
 		}
 	}
-
-	turn, err := cl.devinPrompt(ctx, sessionID, []map[string]any{{"type": "text", "text": prompt}})
-	if err != nil {
-		return s.sendErrorAndEnd(c, "session/prompt failed: "+err.Error())
+	data := map[string]any{
+		"stop_reason": stopReason,
 	}
-	s.sendEvent(c, TestEvent{
-		Type:    "test_complete",
-		Success: true,
-		Data: map[string]any{
-			"session_id":    turn.SessionID,
-			"stop_reason":   turn.StopReason,
-			"input_tokens":  turn.InputTokens,
-			"output_tokens": turn.OutputTokens,
-		},
-	})
+	if lastUsage != nil {
+		data["input_tokens"] = lastUsage.InputTokens
+		data["output_tokens"] = lastUsage.OutputTokens
+		data["model_uid"] = lastUsage.ModelUID
+	}
+	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true, Data: data})
 	return nil
 }

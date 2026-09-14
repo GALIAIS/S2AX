@@ -81,20 +81,14 @@ const (
 	DefaultMiniMaxBaseURL = "https://api.minimaxi.com/v1"
 )
 
-// Devin（Cognition）平台常量：上游为 Devin Cloud ACP over WebSocket。
+// Devin（Cognition）平台常量：上游为 server.codeium.com 的
+// ApiServerService/GetChatMessage（Connect-RPC proto streaming），不经过
+// Devin Cloud ACP（app.devin.ai 云端会话按订阅/ACU 计费，已移除）。
 const (
-	// DevinSessionTokenPrefix 是云端会话令牌前缀（`devin-session-token$<jwt>`）。
+	// DevinSessionTokenPrefix 是会话令牌前缀（`devin-session-token$<jwt>`）。
 	DevinSessionTokenPrefix = "devin-session-token$"
-	// DevinDefaultWebappHost 是 Devin Cloud ACP WebSocket 所在主机。
-	DevinDefaultWebappHost = "app.devin.ai"
-	// DevinACPPath 是 ACP WebSocket 端点路径。
-	DevinACPPath = "/api/acp/live"
-	// DevinDefaultAPIServerURL 是 Codeium API server（X-Api-Key 换 session token）。
+	// DevinDefaultAPIServerURL 是 Codeium API server（X-Api-Key 换 session token + GetChatMessage）。
 	DevinDefaultAPIServerURL = "https://server.codeium.com"
-	// DevinConfigIDVersion 是 session/new configOptions 里"模型档位"的 configId。
-	DevinConfigIDVersion = "devin_version"
-	// DevinConfigIDOrg 是组织选择 configId（多组织账号可切换）。
-	DevinConfigIDOrg = "org_id"
 )
 
 // 国产供应商 Anthropic 协议端点的默认 base_url（上游路径为 {base}/v1/messages）。

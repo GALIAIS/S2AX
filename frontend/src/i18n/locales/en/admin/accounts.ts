@@ -729,12 +729,12 @@ export default {
       },
       devin: {
         acpEndpointHint:
-          'Devin forwards to the cloud ACP endpoint (wss://app.devin.ai/api/acp/live); no base URL is required.',
+          'Devin forwards directly to the Codeium local model tier (server.codeium.com GetChatMessage); no cloud ACP and no Devin credit usage.',
         sessionTokenHint:
           'Paste a Devin session token (devin-session-token$...) or a Cognition API key (exchanged for a session token automatically).',
-        orgId: 'Organization ID (optional)',
-        orgIdHint:
-          'Only needed when the account belongs to multiple Devin organizations; the default org is used when empty.',
+        apiServerUrl: 'API Server (optional)',
+        apiServerUrlHint:
+          'Defaults to https://server.codeium.com; change only for private deployments or relays.',
       },
       grok: {
         baseUrlHint: 'Grok OAuth accounts forward to the official xAI API base URL.',

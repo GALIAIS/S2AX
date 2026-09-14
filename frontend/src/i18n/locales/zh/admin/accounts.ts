@@ -809,11 +809,11 @@ export default {
       },
       devin: {
         acpEndpointHint:
-          'Devin 转发至云端 ACP 端点（wss://app.devin.ai/api/acp/live），无需填写 Base URL。',
+          'Devin 直连 Codeium 本地模型档（server.codeium.com GetChatMessage），不经云端 ACP，不消耗 Devin 额度。',
         sessionTokenHint:
           '粘贴 Devin session token（devin-session-token$...）或 Cognition API Key（将自动换取 session token）。',
-        orgId: '组织 ID（可选）',
-        orgIdHint: '仅当账号隶属多个 Devin 组织时填写；留空使用默认组织。',
+        apiServerUrl: 'API Server（可选）',
+        apiServerUrlHint: '默认 https://server.codeium.com；仅在使用私有部署/转发时修改。',
       },
       grok: {
         baseUrlHint: 'Grok OAuth 账号会转发到官方 xAI API Base URL。',
