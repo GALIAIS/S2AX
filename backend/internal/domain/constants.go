@@ -28,9 +28,9 @@ const (
 	PlatformZhipu    = "zhipu"    // 智谱 GLM (bigmodel)
 	PlatformDeepseek = "deepseek" // DeepSeek
 	PlatformMiniMax  = "minimax"  // MiniMax (M 系列)
-	// PlatformDevin 是 Cognition Devin 平台：上游为 Devin Cloud ACP
-	// （Agent Client Protocol over WebSocket, wss://app.devin.ai/api/acp/live），
-	// 模型即 session/new configOptions 中的 devin_version 档位。
+	// PlatformDevin 是 Cognition Devin 平台：上游为 server.codeium.com 的
+	// ApiServerService/GetChatMessage（Connect-RPC proto streaming，
+	// 本地免费模型档），模型即 chat_model_uid（glm-5-2 / swe-2-* / adaptive 等）。
 	PlatformDevin     = "devin"
 	PlatformComposite = "composite"
 )
