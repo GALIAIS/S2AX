@@ -30,7 +30,7 @@ const (
 	PlatformMiniMax  = "minimax"  // MiniMax (M 系列)
 	// PlatformDevin 是 Cognition Devin 平台：上游为 server.codeium.com 的
 	// ApiServerService/GetChatMessage（Connect-RPC proto streaming，
-	// 本地免费模型档），模型即 chat_model_uid（glm-5-2 / swe-2-* / adaptive 等）。
+	// 本地免费模型档），模型即 chat_model_uid（glm-5-2 / swe-2-* 等）。
 	PlatformDevin     = "devin"
 	PlatformComposite = "composite"
 )
@@ -196,7 +196,6 @@ var DefaultBedrockModelMapping = map[string]string{
 // 这里列出常用免费档。devin- 前缀的旧 cloud 档位名会被自动剥离。
 var DefaultDevinModelMapping = map[string]string{
 	// 主推免费档
-	"adaptive":                 "adaptive", // Fusion 自动路由
 	"swe-2-max":                "swe-2-max",
 	"swe-2-high":               "swe-2-high",
 	"swe-2-medium":             "swe-2-medium",
@@ -212,6 +211,4 @@ var DefaultDevinModelMapping = map[string]string{
 	// 旧 cloud 档位名兼容（normalize 剥 devin- 前缀后落回本地 uid）
 	"devin-swe-2-max":  "swe-2-max",
 	"devin-swe-2-high": "swe-2-high",
-	"devin-auto":       "adaptive",
-	"devin-2-5":        "adaptive",
 }

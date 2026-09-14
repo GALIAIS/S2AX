@@ -222,7 +222,6 @@ const minimaxModels = [
 // Devin（Cognition）本地模型档——Codeium GetChatMessage 的 chat_model_uid，
 // 免费档不消耗云端额度。完整枚举见 devin session/new configOptions。
 const devinModels = [
-  'adaptive',
   'swe-2-max',
   'swe-2-high',
   'swe-2-medium',
@@ -409,8 +408,7 @@ const antigravityPresetMappings = [
 const devinPresetMappings = [
   { label: 'SWE-2 Max', from: 'swe-2-max', to: 'swe-2-max', color: 'bg-violet-100 text-violet-700 hover:bg-violet-200 dark:bg-violet-900/30 dark:text-violet-400' },
   { label: 'SWE-2 High', from: 'swe-2-high', to: 'swe-2-high', color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400' },
-  { label: 'GLM-5.2', from: 'glm-5-2', to: 'glm-5-2', color: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400' },
-  { label: 'Adaptive', from: 'adaptive', to: 'adaptive', color: 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400' }
+  { label: 'GLM-5.2', from: 'glm-5-2', to: 'glm-5-2', color: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400' }
 ]
 
 // Bedrock 预设映射（与后端 DefaultBedrockModelMapping 保持一致）

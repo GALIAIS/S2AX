@@ -7,7 +7,7 @@ package service
 // devin.exe：devin.exe 的 agent loop（session DB、本地工具执行、~19k 系统
 // 提示注入）对 OpenAI 兼容网关没有意义——调用方客户端自己驱动 agent loop，
 // 这里只做纯推理 + tools 协议透传。经 server.codeium.com 的本地模型档
-// （glm-5-2 / swe-1-7 / swe-2-* / adaptive 等）不消耗 Devin 云端额度。
+// （glm-5-2 / swe-1-7 / swe-2-* 等）不消耗 Devin 云端额度。
 
 import (
 	"context"
