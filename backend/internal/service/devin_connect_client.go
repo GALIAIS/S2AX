@@ -248,6 +248,10 @@ func devinBuildChatRequestBody(token string, req *devinConnectRequest) []byte {
 	if req.Temperature != nil {
 		temp = *req.Temperature
 	}
+	// 上游拒绝 temperature<=0（采样器除零）；钳到最小正值近似贪婪解码。
+	if temp <= 0 {
+		temp = 0.001
+	}
 	devinPVF64(&cfg, 5, temp)
 	devinPVF64(&cfg, 6, temp) // first_temperature
 	devinPVVar(&cfg, 7, 50)   // top_k
