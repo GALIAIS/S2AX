@@ -26,9 +26,9 @@ import (
 // devinUpstreamEndpoint 记录在 OpenAIForwardResult.UpstreamEndpoint，标识 Connect-RPC 通道。
 const devinUpstreamEndpoint = "connect+proto://server.codeium.com/ApiServerService/GetChatMessage"
 
-// forwardAsDevinACP 处理 devin 平台账号的 chat completions 请求。
+// forwardAsDevinDirect 处理 devin 平台账号的 chat completions 请求。
 // 入站与调度语义与 OpenAI 兼容平台一致；出站为 GetChatMessage 流。
-func (s *OpenAIGatewayService) forwardAsDevinACP(
+func (s *OpenAIGatewayService) forwardAsDevinDirect(
 	ctx context.Context,
 	c *gin.Context,
 	account *Account,
@@ -504,7 +504,7 @@ func devinWriteUsageChunk(w http.ResponseWriter, id string, created int64, model
 	return err
 }
 
-// devinWrapUpstreamError 统一包装 ACP 链路错误：
+// devinWrapUpstreamError 统一包装 direct 链路错误：
 //   - 已是 *UpstreamFailoverError 的原样返回
 //   - preWrite 且未写响应头时，给客户端补一个 JSON 错误体
 //   - 其余视为可转移的上游错误（failover 到下一账号）

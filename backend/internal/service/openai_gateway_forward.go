@@ -157,7 +157,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return s.forwardGrokResponses(ctx, c, account, body, originalModel, reqStream, startTime)
 	}
 
-	// Devin：无 Responses 端点；Responses 入站先转成 Chat Completions 再走 ACP 转发器。
+	// Devin：无 Responses 端点；Responses 入站先转成 Chat Completions 再走 direct 转发器。
 	if account.Platform == PlatformDevin {
 		var responsesReq apicompat.ResponsesRequest
 		if err := json.Unmarshal(body, &responsesReq); err != nil {
@@ -173,7 +173,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if err != nil {
 			return nil, fmt.Errorf("marshal converted chat completions for devin: %w", err)
 		}
-		return s.forwardAsDevinACP(ctx, c, account, chatBody, "")
+		return s.forwardAsDevinDirect(ctx, c, account, chatBody, "")
 	}
 
 	// CN 供应商 anthropic 协议账号：/v1/responses 入站是交叉协议组合
