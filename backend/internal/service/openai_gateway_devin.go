@@ -23,8 +23,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// devinUpstreamEndpoint 记录在 OpenAIForwardResult.UpstreamEndpoint，标识 Connect-RPC 通道。
-const devinUpstreamEndpoint = "connect+proto://server.codeium.com/ApiServerService/GetChatMessage"
+// devinUpstreamEndpoint 记录在 OpenAIForwardResult.UpstreamEndpoint，与其他
+// 平台一致只记上游 path（实际请求走 Connect-RPC application/connect+proto）。
+const devinUpstreamEndpoint = "/exa.api_server_pb.ApiServerService/GetChatMessage"
 
 // forwardAsDevinDirect 处理 devin 平台账号的 chat completions 请求。
 // 入站与调度语义与 OpenAI 兼容平台一致；出站为 GetChatMessage 流。
