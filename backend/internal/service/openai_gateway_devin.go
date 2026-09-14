@@ -94,7 +94,9 @@ func (s *OpenAIGatewayService) forwardAsDevinDirect(
 			TopK:         chatReq.TopK,
 			Seed:         chatReq.Seed,
 			Stop:         devinParseStop(chatReq.Stop),
-			TrajectoryID: trajectoryID,
+			// OpenAI parallel_tool_calls=false -> 上游 disable_parallel_tool_calls
+			DisableParallelToolCalls: chatReq.ParallelToolCalls != nil && !*chatReq.ParallelToolCalls,
+			TrajectoryID:             trajectoryID,
 			StepIndex:    devinNextStepIndex(trajectoryID),
 			CascadeID:    cascadeID,
 		}

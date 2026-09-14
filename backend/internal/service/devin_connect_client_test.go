@@ -5,9 +5,11 @@ import (
 	"compress/gzip"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 )
@@ -493,5 +495,158 @@ func TestDevinToolChoiceOption(t *testing.T) {
 	opt, tn = devinToolChoiceOption(json.RawMessage(`{"type":"function","function":{"name":"my_tool"}}`))
 	if opt != "" || tn != "my_tool" {
 		t.Fatalf("named: opt=%q tn=%q", opt, tn)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 静默看门狗
+// ---------------------------------------------------------------------------
+
+// devinHungBody 发完 frames 后永久挂起（半开连接模拟）。
+type devinHungBody struct {
+	frames []byte
+	sent   bool
+	done   chan struct{}
+}
+
+func (b *devinHungBody) Read(p []byte) (int, error) {
+	if !b.sent {
+		b.sent = true
+		copy(p, b.frames)
+		return len(b.frames), nil
+	}
+	<-b.done
+	return 0, io.EOF
+}
+
+func (b *devinHungBody) Close() error {
+	select {
+	case <-b.done:
+	default:
+		close(b.done)
+	}
+	return nil
+}
+
+func devinWatchdogTest(t *testing.T, stall, tail, progress time.Duration) {
+	t.Helper()
+	oldStall, oldTail, oldProg := devinStallTimeout, devinTailGrace, devinNoProgressTimeout
+	devinStallTimeout, devinTailGrace, devinNoProgressTimeout = stall, tail, progress
+	t.Cleanup(func() {
+		devinStallTimeout, devinTailGrace, devinNoProgressTimeout = oldStall, oldTail, oldProg
+	})
+}
+
+// 帧间静默超时：一帧后连接挂死，stall 看门狗必须判死并报错。
+func TestDevinStallBody_InterFrameTimeout(t *testing.T) {
+	devinWatchdogTest(t, 60*time.Millisecond, 30*time.Millisecond, time.Minute)
+	msg := devinTestChatMsg(func(b *bytes.Buffer) { devinPVStr(b, 3, "hi") })
+	body := &devinHungBody{frames: devinTestFrame(0, msg), done: make(chan struct{})}
+	events := make(chan devinChatEvent, 64)
+	go devinReadConnectStream(newDevinStallBody(body), events)
+	var sawStall bool
+	for ev := range events {
+		if ev.Kind == "error" && errors.Is(ev.Err, devinErrStalled) {
+			sawStall = true
+		}
+	}
+	if !sawStall {
+		t.Fatal("expected stall watchdog error")
+	}
+}
+
+// stop_reason 后尾帧窗口缩到宽限值：tailGrace << stall，判死原因仍是 stall。
+func TestDevinStallBody_TailGraceAfterStop(t *testing.T) {
+	devinWatchdogTest(t, 10*time.Second, 50*time.Millisecond, time.Minute)
+	msg := devinTestChatMsg(func(b *bytes.Buffer) {
+		devinPVStr(b, 3, "hi")
+		devinPVVar(b, 5, 1)
+	})
+	body := &devinHungBody{frames: devinTestFrame(0, msg), done: make(chan struct{})}
+	events := make(chan devinChatEvent, 64)
+	start := time.Now()
+	go devinReadConnectStream(newDevinStallBody(body), events)
+	var sawStall, sawStop bool
+	for ev := range events {
+		if ev.Kind == "stop" {
+			sawStop = true
+		}
+		if ev.Kind == "error" && errors.Is(ev.Err, devinErrStalled) {
+			sawStall = true
+		}
+	}
+	if !sawStop || !sawStall {
+		t.Fatalf("stop=%v stall=%v", sawStop, sawStall)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("tail grace did not shorten wait: %v", elapsed)
+	}
+}
+
+// 零事件帧续命 stall 但 progress 看门狗切断：空帧流不能无限拖住连接。
+func TestDevinStallBody_NoProgressTimeout(t *testing.T) {
+	devinWatchdogTest(t, time.Hour, time.Minute, 60*time.Millisecond)
+	msg := devinTestChatMsg(func(b *bytes.Buffer) {
+		devinPVStr(b, 1, "msg-id-only") // 只带 message_id，无内容事件
+	})
+	body := &devinHungBody{frames: devinTestFrame(0, msg), done: make(chan struct{})}
+	events := make(chan devinChatEvent, 64)
+	go devinReadConnectStream(newDevinStallBody(body), events)
+	var sawNoProgress bool
+	for ev := range events {
+		if ev.Kind == "error" && errors.Is(ev.Err, devinErrNoProgress) {
+			sawNoProgress = true
+		}
+	}
+	if !sawNoProgress {
+		t.Fatal("expected no-progress watchdog error")
+	}
+}
+
+// parallel_tool_calls=false 时请求体应带 field 11；未设置/显式 true 不发送。
+func TestDevinBuildChatRequestBody_DisableParallelToolCalls(t *testing.T) {
+	hasField11 := func(disable bool) bool {
+		body := devinBuildChatRequestBody("tok", &devinConnectRequest{
+			Model: "swe-2-max", DisableParallelToolCalls: disable,
+		})
+		r := &devinPVReader{buf: body}
+		for {
+			f, w, ok := r.next()
+			if !ok {
+				return false
+			}
+			if f == 11 && w == 0 {
+				return r.varint() == 1
+			}
+			r.skip(w)
+		}
+	}
+	if !hasField11(true) {
+		t.Fatal("disable_parallel_tool_calls=true should emit field 11")
+	}
+	if hasField11(false) {
+		t.Fatal("unset/parallel-allowed must not emit field 11")
+	}
+}
+
+// metadata.f 是安装级指纹：同 token 恒定（缓存前缀稳定），跨 token 不同，
+// 长度对齐真实 CLI 的 366 字节 hex。
+func TestDevinHexFingerprint_Deterministic(t *testing.T) {
+	a1 := devinHexFingerprint("token-a", 366)
+	a2 := devinHexFingerprint("token-a", 366)
+	b := devinHexFingerprint("token-b", 366)
+	if a1 != a2 {
+		t.Fatal("same token must produce stable fingerprint")
+	}
+	if a1 == b {
+		t.Fatal("different tokens must differ")
+	}
+	if len(a1) != 732 {
+		t.Fatalf("fingerprint len=%d want 732 hex chars", len(a1))
+	}
+	for _, c := range a1 {
+		if !strings.ContainsRune("0123456789abcdef", c) {
+			t.Fatalf("non-hex char %q", c)
+		}
 	}
 }

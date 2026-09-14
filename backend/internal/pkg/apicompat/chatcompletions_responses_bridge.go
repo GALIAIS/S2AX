@@ -342,6 +342,37 @@ func responsesInputToChatMessagesWithOptions(instructions string, inputRaw json.
 	return normalizeChatMessagesWithToolOutputMedia(built, mediaByCallID), nil
 }
 
+// classifyDevinSignature 识别回放进 input 的 encrypted_content 属于哪种上游
+// 签名体制：sealed.* 与序列化 reasoning item 数组（openai 型）都是网关自己
+// 下发过的形态，原样回放；其余外来不透明载荷不可解，丢弃。
+func classifyDevinSignature(encrypted string) (signature, signatureType string, keep bool) {
+	switch {
+	case strings.HasPrefix(encrypted, "sealed."):
+		return encrypted, "sealed", true
+	case devinOpenAIReasoningItemID(encrypted) != "":
+		return encrypted, "openai", true
+	default:
+		return "", "", false
+	}
+}
+
+// devinOpenAIReasoningItemID 从 openai 型签名（序列化 reasoning item 数组）
+// 取出上游分配的真实 rs_* item id；解析失败返回空串。
+func devinOpenAIReasoningItemID(blob string) string {
+	trimmed := strings.TrimSpace(blob)
+	if !strings.HasPrefix(trimmed, "[") {
+		return ""
+	}
+	var items []struct {
+		ID   string `json:"id"`
+		Type string `json:"type"`
+	}
+	if json.Unmarshal([]byte(trimmed), &items) != nil || len(items) == 0 || items[0].Type != "reasoning" {
+		return ""
+	}
+	return items[0].ID
+}
+
 // buildChatMessagesFromItems walks the Responses input items and appends the
 // corresponding Chat messages.
 func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessage, opts *ResponsesToChatOptions) ([]ChatMessage, toolOutputMediaByCallID, error) {
@@ -352,6 +383,10 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 	// across an assistant message (so a following tool call in the same turn
 	// still receives it); any other role ends the thinking span.
 	var pendingReasoning string
+	// pendingSignature/pendingSignatureType 携带 reasoning.encrypted_content
+	// 到它所属的下一条 assistant 消息（Devin 上游签名回传通道）。
+	var pendingSignature string
+	var pendingSignatureType string
 	// lastTurnReasoning is the most recent reasoning text of the current turn,
 	// surviving tool outputs. DeepSeek emits reasoning only once per turn, so
 	// chained tool calls (reasoning → call A → output A → call B) leave call B's
@@ -369,6 +404,16 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 		}
 		return lastTurnReasoning
 	}
+	// clearPending 结束当前签名/思考跨度（非 assistant 产出到达）；
+	// clearTurn 在 user 侧 item 到达时额外清掉回合级 reasoning 回放。
+	clearPending := func() {
+		pendingReasoning = ""
+		pendingSignature, pendingSignatureType = "", ""
+	}
+	clearTurn := func() {
+		clearPending()
+		lastTurnReasoning = ""
+	}
 
 	for _, raw := range rawItems {
 		raw = bytesTrimSpace(raw)
@@ -382,8 +427,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 			if textErr := json.Unmarshal(raw, &text); textErr == nil {
 				content, _ := json.Marshal(text)
 				messages = append(messages, ChatMessage{Role: "user", Content: content})
-				pendingReasoning = ""
-				lastTurnReasoning = ""
+				clearTurn()
 				continue
 			}
 			return nil, nil, fmt.Errorf("parse responses input item: %w", err)
@@ -408,6 +452,13 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 			if pendingReasoning != "" {
 				lastTurnReasoning = pendingReasoning
 			}
+			// encrypted_content 是上游签名 blob 的回放通道：识别得出形态才
+			// 透传，外来不透明载荷丢弃。
+			if ec := rawString(item["encrypted_content"]); ec != "" {
+				if sig, sigType, keep := classifyDevinSignature(ec); keep {
+					pendingSignature, pendingSignatureType = sig, sigType
+				}
+			}
 			continue
 		case "function_call":
 			arguments := rawString(item["arguments"])
@@ -427,7 +478,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 				} else {
 					invalidEmptyFunctionCallOutputs++
 				}
-				pendingReasoning = ""
+				clearPending()
 				continue
 			}
 			name := rawString(item["name"])
@@ -444,8 +495,8 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 					Arguments: arguments,
 				},
 			}
-			messages = appendAssistantToolCall(messages, toolCall, reasoningForAssistant())
-			pendingReasoning = ""
+			messages = appendAssistantToolCall(messages, toolCall, reasoningForAssistant(), pendingSignature, pendingSignatureType)
+			clearPending()
 			continue
 		case "tool_search_call":
 			// tool_search 调用的 arguments 是 JSON 对象（如 {"query": ...}），
@@ -465,8 +516,8 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 					Arguments: arguments,
 				},
 			}
-			messages = appendAssistantToolCall(messages, toolCall, reasoningForAssistant())
-			pendingReasoning = ""
+			messages = appendAssistantToolCall(messages, toolCall, reasoningForAssistant(), pendingSignature, pendingSignatureType)
+			clearPending()
 			continue
 		case "custom_tool_call":
 			// custom/freeform 工具的历史调用：input 自由文本包进降级 function 工具
@@ -481,8 +532,8 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 					Arguments: string(arguments),
 				},
 			}
-			messages = appendAssistantToolCall(messages, toolCall, reasoningForAssistant())
-			pendingReasoning = ""
+			messages = appendAssistantToolCall(messages, toolCall, reasoningForAssistant(), pendingSignature, pendingSignatureType)
+			clearPending()
 			continue
 		case "function_call_output", "custom_tool_call_output", "tool_search_output":
 			outputRaw := bytesTrimSpace(item["output"])
@@ -494,11 +545,11 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 			callID := rawString(item["call_id"])
 			if callID == "" && invalidEmptyFunctionCallOutputs > 0 {
 				invalidEmptyFunctionCallOutputs--
-				pendingReasoning = ""
+				clearPending()
 				continue
 			}
 			if _, skipped := invalidFunctionCallIDs[callID]; skipped {
-				pendingReasoning = ""
+				clearPending()
 				continue
 			}
 			delete(mediaByCallID, callID)
@@ -521,13 +572,12 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 				ToolCallID: callID,
 				Content:    content,
 			})
-			pendingReasoning = ""
+			clearPending()
 			continue
 		case "input_text", "text":
 			content, _ := json.Marshal(rawString(item["text"]))
 			messages = append(messages, ChatMessage{Role: "user", Content: content})
-			pendingReasoning = ""
-			lastTurnReasoning = ""
+			clearTurn()
 			continue
 		case "input_image":
 			content, err := chatContentFromSingleResponsesPart(itemType, item)
@@ -535,8 +585,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 				return nil, nil, err
 			}
 			messages = append(messages, ChatMessage{Role: "user", Content: content})
-			pendingReasoning = ""
-			lastTurnReasoning = ""
+			clearTurn()
 			continue
 		}
 
@@ -547,7 +596,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 		// tool_calls message and its tool reply, which DeepSeek rejects
 		// ("insufficient tool messages following tool_calls message"). Skip them.
 		if itemType != "" && itemType != "message" {
-			pendingReasoning = ""
+			clearPending()
 			continue
 		}
 
@@ -571,10 +620,14 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 		// ReasoningContent when it is still empty.
 		if role == "assistant" {
 			msg.ReasoningContent = reasoningForAssistant()
-			pendingReasoning = ""
+			msg.Signature = pendingSignature
+			msg.SignatureType = pendingSignatureType
+			// message 项 id 是上游 output_id 的回放通道（下行时以 output_id
+			// 作 item id 下发）。
+			msg.OutputID = rawString(item["id"])
+			clearPending()
 		} else {
-			pendingReasoning = ""
-			lastTurnReasoning = ""
+			clearTurn()
 		}
 		messages = append(messages, msg)
 	}
@@ -720,11 +773,14 @@ func toolOutputImagePart(imageURL string) ChatContentPart {
 // Parallel tool calls arrive as consecutive *_call items and must share one
 // assistant message; the matching tool replies then follow it. Merge into the
 // immediately preceding assistant message.
-func appendAssistantToolCall(messages []ChatMessage, toolCall ChatToolCall, pendingReasoning string) []ChatMessage {
+func appendAssistantToolCall(messages []ChatMessage, toolCall ChatToolCall, pendingReasoning, pendingSignature, pendingSignatureType string) []ChatMessage {
 	if n := len(messages); n > 0 && messages[n-1].Role == "assistant" {
 		messages[n-1].ToolCalls = append(messages[n-1].ToolCalls, toolCall)
 		if messages[n-1].ReasoningContent == "" {
 			messages[n-1].ReasoningContent = pendingReasoning
+		}
+		if messages[n-1].Signature == "" {
+			messages[n-1].Signature, messages[n-1].SignatureType = pendingSignature, pendingSignatureType
 		}
 		return messages
 	}
@@ -732,6 +788,8 @@ func appendAssistantToolCall(messages []ChatMessage, toolCall ChatToolCall, pend
 		Role:             "assistant",
 		ToolCalls:        []ChatToolCall{toolCall},
 		ReasoningContent: pendingReasoning,
+		Signature:        pendingSignature,
+		SignatureType:    pendingSignatureType,
 	})
 }
 
@@ -1299,14 +1357,22 @@ func chatServiceTier(resp *ChatCompletionsResponse) string {
 func chatMessageToResponsesOutput(message ChatMessage, customTools, functionTools map[string]bool, toolSearch bool, namespaceTools map[string]NamespacedToolName) []ResponsesOutput {
 	var outputs []ResponsesOutput
 	reasoning := message.reasoningText()
-	if reasoning != "" {
+	if reasoning != "" || message.Signature != "" {
+		reasoningID := generateItemID()
+		// openai 型签名内层携带上游真实 rs_* item id，与下行回放对齐。
+		if message.SignatureType == "openai" {
+			if id := devinOpenAIReasoningItemID(message.Signature); id != "" {
+				reasoningID = id
+			}
+		}
 		outputs = append(outputs, ResponsesOutput{
 			Type: "reasoning",
-			ID:   generateItemID(),
+			ID:   reasoningID,
 			Summary: []ResponsesSummary{{
 				Type: "summary_text",
 				Text: reasoning,
 			}},
+			EncryptedContent: message.Signature,
 		})
 	}
 
@@ -1315,9 +1381,14 @@ func chatMessageToResponsesOutput(message ChatMessage, customTools, functionTool
 		text = reasoning
 	}
 	if text != "" || len(message.ToolCalls) == 0 {
+		// OutputID 是上游分配的 message item 真实标识，回放时按同一下发。
+		messageID := message.OutputID
+		if messageID == "" {
+			messageID = generateItemID()
+		}
 		outputs = append(outputs, ResponsesOutput{
 			Type: "message",
-			ID:   generateItemID(),
+			ID:   messageID,
 			Role: "assistant",
 			Content: []ResponsesContentPart{{
 				Type: "output_text",
@@ -1487,6 +1558,19 @@ type ChatCompletionsToResponsesStreamState struct {
 	ReasoningOpen   bool
 	ReasoningDone   bool
 
+	// ReasoningSignature/ReasoningSignatureType 捕获上游随 reasoning 下发的
+	// 签名 blob（Devin thinking_signature / delta_signature_type）。reasoning
+	// item 收尾时随 encrypted_content 透出，客户端回放进下一轮 input。
+	ReasoningSignature     string
+	ReasoningSignatureType string
+	// ReasoningPendingDone 表示 reasoning 内容已齐但签名未到，收尾事件
+	// 挂起等迟到签名（Devin 实测序：thinking → text → signature → stop）。
+	ReasoningPendingDone bool
+	// OutputID 是上游分配的 message item 标识（Devin output_id 随首帧
+	// metadata 到达，早于任何 content delta）。message item 用它作 id，
+	// 客户端回放时上游才能对齐自己的记录。
+	OutputID string
+
 	// Message item + output_text content-part lifecycle.
 	MessageItemID string
 	MessageIndex  int
@@ -1611,6 +1695,29 @@ func ChatCompletionsChunkToResponsesEvents(
 	events = append(events, ensureChatToResponsesCreated(state)...)
 
 	for _, choice := range chunk.Choices {
+		// 上游签名/输出标识随 delta 到达：signature 属于 reasoning 阶段
+		// （thinking_signature 在 thinking deltas 之后、content 之前），
+		// output_id 是 message item 的真实标识（首帧 metadata 即携带）。
+		if choice.Delta.Signature != "" {
+			// delta_signature 可分片，追加聚合。
+			state.ReasoningSignature += choice.Delta.Signature
+			switch {
+			case state.ReasoningPendingDone:
+				// 签名是 reasoning 的尾随帧：挂起的收尾此刻补发。
+				events = append(events, emitChatReasoningDone(state)...)
+			case !state.ReasoningOpen && !state.ReasoningDone:
+				// redacted thinking 轮次只有签名没有文本 delta：签名本身就是
+				// reasoning 产出的证据，打开 item 让收尾事件能透出
+				// encrypted_content 供客户端回放。
+				events = append(events, ensureChatReasoningItem(state)...)
+			}
+		}
+		if choice.Delta.SignatureType != "" {
+			state.ReasoningSignatureType = choice.Delta.SignatureType
+		}
+		if choice.Delta.OutputID != "" {
+			state.OutputID = choice.Delta.OutputID
+		}
 		// Reasoning is emitted as its own output item and must be opened
 		// (output_item.added + reasoning_summary_part.added) before the first
 		// delta, otherwise a strict client discards the delta. The leading
@@ -1708,8 +1815,8 @@ func FinalizeChatCompletionsResponsesStream(state *ChatCompletionsToResponsesStr
 	events = append(events, ensureChatToResponsesCreated(state)...)
 
 	// Close a reasoning item that never transitioned to content (reasoning-only
-	// or empty completion).
-	events = append(events, closeChatReasoningItem(state)...)
+	// or empty completion), and flush any signature-deferred close.
+	events = append(events, flushChatReasoningItem(state)...)
 	events = append(events, synthesizeChatReasoningFallbackMessage(state)...)
 
 	if state.MessageItemID != "" {
@@ -1796,11 +1903,22 @@ func ensureChatReasoningItem(state *ChatCompletionsToResponsesStreamState) []Res
 	}
 	state.ReasoningOpen = true
 	state.ReasoningItemID = generateItemID()
+	// openai 型签名的内层 rs_* 是上游真实 item id：若 signature delta 已先
+	// 到（thinking_signature 在 thinking deltas 之后下发），用它对齐上游记录。
+	if state.ReasoningSignatureType == "openai" {
+		if id := devinOpenAIReasoningItemID(state.ReasoningSignature); id != "" {
+			state.ReasoningItemID = id
+		}
+	}
 	state.ReasoningIndex = state.allocOutputIndex()
+	addedItem := &ResponsesOutput{Type: "reasoning", ID: state.ReasoningItemID, Status: "in_progress"}
+	if state.ReasoningSignature != "" {
+		addedItem.EncryptedContent = state.ReasoningSignature
+	}
 	return []ResponsesStreamEvent{
 		chatToResponsesEvent(state, "response.output_item.added", &ResponsesStreamEvent{
 			OutputIndex: state.ReasoningIndex,
-			Item:        &ResponsesOutput{Type: "reasoning", ID: state.ReasoningItemID, Status: "in_progress"},
+			Item:        addedItem,
 		}),
 		chatToResponsesEvent(state, "response.reasoning_summary_part.added", &ResponsesStreamEvent{
 			OutputIndex:  state.ReasoningIndex,
@@ -1811,13 +1929,33 @@ func ensureChatReasoningItem(state *ChatCompletionsToResponsesStreamState) []Res
 	}
 }
 
-// closeChatReasoningItem emits the reasoning item's terminal events
-// (reasoning_summary_text.done + reasoning_summary_part.done + output_item.done).
+// closeChatReasoningItem 请求关闭 reasoning item：上游把签名作为正文后的
+// 尾随帧下发，尚无签名时挂起收尾等迟到帧（signature delta 到达时补发）；
+// 上游不发签名的模型由 finalize 的 flush 兜底，不会泄漏打开的 item。
 func closeChatReasoningItem(state *ChatCompletionsToResponsesStreamState) []ResponsesStreamEvent {
 	if !state.ReasoningOpen {
 		return nil
 	}
+	if state.ReasoningSignature == "" {
+		state.ReasoningPendingDone = true
+		return nil
+	}
+	return emitChatReasoningDone(state)
+}
+
+// flushChatReasoningItem 无条件发出 reasoning 收尾事件（流终止兜底）。
+func flushChatReasoningItem(state *ChatCompletionsToResponsesStreamState) []ResponsesStreamEvent {
+	if !state.ReasoningOpen {
+		return nil
+	}
+	return emitChatReasoningDone(state)
+}
+
+// emitChatReasoningItem emits the reasoning item's terminal events
+// (reasoning_summary_text.done + reasoning_summary_part.done + output_item.done).
+func emitChatReasoningDone(state *ChatCompletionsToResponsesStreamState) []ResponsesStreamEvent {
 	state.ReasoningOpen = false
+	state.ReasoningPendingDone = false
 	state.ReasoningDone = true
 	reasoning := state.Reasoning.String()
 	return []ResponsesStreamEvent{
@@ -1836,10 +1974,11 @@ func closeChatReasoningItem(state *ChatCompletionsToResponsesStreamState) []Resp
 		chatToResponsesEvent(state, "response.output_item.done", &ResponsesStreamEvent{
 			OutputIndex: state.ReasoningIndex,
 			Item: &ResponsesOutput{
-				Type:    "reasoning",
-				ID:      state.ReasoningItemID,
-				Status:  "completed",
-				Summary: []ResponsesSummary{{Type: "summary_text", Text: reasoning}},
+				Type:             "reasoning",
+				ID:               state.ReasoningItemID,
+				Status:           "completed",
+				Summary:          []ResponsesSummary{{Type: "summary_text", Text: reasoning}},
+				EncryptedContent: state.ReasoningSignature,
 			},
 		}),
 	}
@@ -1876,7 +2015,12 @@ func ensureChatToResponsesMessageItem(state *ChatCompletionsToResponsesStreamSta
 	if state.MessageItemID != "" {
 		return nil
 	}
-	state.MessageItemID = generateItemID()
+	// output_id 是上游分配的 message item 真实标识（随首帧 metadata 到达，
+	// 早于 content delta），下发同一个 id 让客户端回放的 item 与上游对齐。
+	state.MessageItemID = state.OutputID
+	if state.MessageItemID == "" {
+		state.MessageItemID = generateItemID()
+	}
 	state.MessageIndex = state.allocOutputIndex()
 	return []ResponsesStreamEvent{chatToResponsesEvent(state, "response.output_item.added", &ResponsesStreamEvent{
 		OutputIndex: state.MessageIndex,
@@ -2069,20 +2213,30 @@ func closeChatToolItems(state *ChatCompletionsToResponsesStreamState) []Response
 
 func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutput {
 	var outputs []ResponsesOutput
-	if state.Reasoning.Len() > 0 {
+	if state.Reasoning.Len() > 0 || state.ReasoningSignature != "" {
+		reasoningID := state.ReasoningItemID
+		if reasoningID == "" {
+			reasoningID = generateItemID()
+			if state.ReasoningSignatureType == "openai" {
+				if id := devinOpenAIReasoningItemID(state.ReasoningSignature); id != "" {
+					reasoningID = id
+				}
+			}
+		}
 		outputs = append(outputs, ResponsesOutput{
 			Type: "reasoning",
-			ID:   generateItemID(),
+			ID:   reasoningID,
 			Summary: []ResponsesSummary{{
 				Type: "summary_text",
 				Text: state.Reasoning.String(),
 			}},
+			EncryptedContent: state.ReasoningSignature,
 		})
 	}
 	if state.MessageItemID != "" || len(state.ToolCalls) == 0 {
 		outputs = append(outputs, ResponsesOutput{
 			Type: "message",
-			ID:   nonEmpty(state.MessageItemID, generateItemID()),
+			ID:   nonEmpty(state.MessageItemID, nonEmpty(state.OutputID, generateItemID())),
 			Role: "assistant",
 			Content: []ResponsesContentPart{{
 				Type: "output_text",

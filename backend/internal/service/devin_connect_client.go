@@ -230,6 +230,8 @@ type devinConnectRequest struct {
 	TopK         *int
 	Seed         *int64
 	Stop         []string
+	// DisableParallelToolCalls 对应 OpenAI parallel_tool_calls=false。
+	DisableParallelToolCalls bool
 	TrajectoryID string // cortex 轨迹标识，会话内稳定
 	StepIndex    int32  // 会话内单调步数（真实 CLI 每请求发送）
 	CascadeID    string
@@ -237,7 +239,7 @@ type devinConnectRequest struct {
 
 // devinBuildMetadata 编码 codeium_common_pb.Metadata。
 // 字段对应：1=ide_name, 7=ide_version, 12=extension_name, 2=extension_version,
-// 3=api_key, 4=locale, 5=os。
+// 3=api_key, 4=locale, 5=os, 31=f（设备指纹 hex，真实 CLI 每请求发送）。
 func devinBuildMetadata(token string) []byte {
 	var m bytes.Buffer
 	devinPVStr(&m, 1, "windsurf-next")
@@ -248,7 +250,27 @@ func devinBuildMetadata(token string) []byte {
 	devinPVStr(&m, 3, token)
 	devinPVStr(&m, 4, "en")
 	devinPVStr(&m, 5, runtime.GOOS)
+	devinPVStr(&m, 31, devinHexFingerprint(token, 366))
 	return m.Bytes()
+}
+
+// devinHexFingerprint 生成 n 字节的 hex 设备指纹（2n 字符）：真实 CLI 的
+// Metadata.f 实测为 366 字节 / 732 字符，安装级持久而非每请求随机。
+// 无状态网关从 session token 确定性派生——同账号指纹恒定，既保持请求体
+// 字节前缀稳定（上游缓存匹配要求），又对齐真实 CLI 的持久指纹形态。
+func devinHexFingerprint(token string, n int) string {
+	const hexdig = "0123456789abcdef"
+	b := make([]byte, n*2)
+	seed := sha256.Sum256([]byte("devin-meta-f\x00" + token))
+	round := seed
+	for i := 0; i < n*2; i++ {
+		j := i % 64 // 一轮 32 字节 = 64 个 hex nibble，用尽后再哈希一轮
+		if i > 0 && j == 0 {
+			round = sha256.Sum256(round[:])
+		}
+		b[i] = hexdig[round[j/2]>>uint(4*(1-j%2))&0x0f]
+	}
+	return string(b)
 }
 
 // devinBuildChatRequestBody 编码完整 GetChatMessageRequest。
@@ -320,8 +342,11 @@ func devinBuildChatRequestBody(token string, req *devinConnectRequest) []byte {
 		}
 		devinPVBytes(&b, 10, td.Bytes())
 	}
-	// 11: disable_parallel_tool_calls
-	devinPVVar(&b, 11, 1)
+	// 11: disable_parallel_tool_calls——仅在客户端显式关闭时发送；
+	// 上游接受但实测不执行该约束（并行调用照常发出），仅形状对齐。
+	if req.DisableParallelToolCalls {
+		devinPVVar(&b, 11, 1)
+	}
 	// 12: tool_choice oneof {1:option_name, 2:tool_name}
 	if oc, tn := devinToolChoiceOption(req.ToolChoice); oc != "" || tn != "" {
 		var tc bytes.Buffer
@@ -473,6 +498,9 @@ func devinIsTransientStreamError(err error) bool {
 	if err == nil {
 		return false
 	}
+	if errors.Is(err, devinErrStalled) || errors.Is(err, devinErrNoProgress) {
+		return true
+	}
 	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return true
 	}
@@ -534,20 +562,137 @@ func devinChatStreamOnce(ctx context.Context, apiBase, token, proxyURL string, r
 	}
 
 	events := make(chan devinChatEvent, 64)
-	go devinReadConnectStream(resp.Body, events)
+	go devinReadConnectStream(newDevinStallBody(resp.Body), events)
 	return events, nil
 }
 
+// ---------------------------------------------------------------------------
+// 静默看门狗（对齐 devin2api 的三层超时实测）
+// ---------------------------------------------------------------------------
+
+var (
+	// devinStallTimeout 是相邻上游帧之间允许的最长静默；超时判定传输层已死
+	// （半开连接/上游挂死），按传输错误收尾。取值高于上游首批帧实测延迟
+	// （长思考可达 45s+）。
+	devinStallTimeout = 120 * time.Second
+	// devinTailGrace 是收到 stop_reason 后等待尾帧的宽限：健康流的
+	// usage/trailer 在 stop 后毫秒级到达，上游不关 body 时不能让它拖成
+	// stall。
+	devinTailGrace = 15 * time.Second
+	// devinNoProgressTimeout 是「无内容进度」兜底：活性帧/元数据帧不喂，
+	// 只有产出事件的帧重置它——退化上游的零事件帧无限续命会被它切断。
+	devinNoProgressTimeout = 10 * time.Minute
+)
+
+var (
+	devinErrStalled    = errors.New("devin stream stalled: no frame within deadline")
+	devinErrNoProgress = errors.New("devin stream stalled: no content progress")
+)
+
+// devinStallBody 给响应体加静默看门狗：Read 到数据重置 stall 计时器，
+// 产事件的帧重置 progress 计时器；任一超时即关闭底层 body，让阻塞的
+// ReadFull 以错误返回。stop_reason 后 stall 窗口缩到尾帧宽限。
+type devinStallBody struct {
+	body      io.ReadCloser
+	mu        sync.Mutex
+	stall     *time.Timer
+	progress  *time.Timer
+	stallFor  time.Duration
+	reason    error
+	firedTime time.Time
+}
+
+func newDevinStallBody(body io.ReadCloser) *devinStallBody {
+	g := &devinStallBody{body: body, stallFor: devinStallTimeout}
+	g.stall = time.AfterFunc(devinStallTimeout, func() { g.kill(devinErrStalled) })
+	g.progress = time.AfterFunc(devinNoProgressTimeout, func() { g.kill(devinErrNoProgress) })
+	return g
+}
+
+func (g *devinStallBody) kill(reason error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.reason != nil {
+		return
+	}
+	g.reason = reason
+	g.firedTime = time.Now()
+	_ = g.body.Close()
+}
+
+// Read 透传底层读取并按到达字节喂 stall 看门狗。
+func (g *devinStallBody) Read(p []byte) (int, error) {
+	n, err := g.body.Read(p)
+	if n > 0 {
+		g.mu.Lock()
+		if g.reason == nil {
+			g.stall.Reset(g.stallFor)
+		}
+		g.mu.Unlock()
+	}
+	return n, err
+}
+
+func (g *devinStallBody) Close() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.stall != nil {
+		g.stall.Stop()
+	}
+	if g.progress != nil {
+		g.progress.Stop()
+	}
+	return g.body.Close()
+}
+
+// NotifyEventful 在帧产出至少一个事件时喂 progress 看门狗。
+func (g *devinStallBody) NotifyEventful() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.reason == nil && g.progress != nil {
+		g.progress.Reset(devinNoProgressTimeout)
+	}
+}
+
+// ShortenTail 在收到 stop_reason 后把帧间窗口缩到尾帧宽限。
+func (g *devinStallBody) ShortenTail() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.reason == nil && g.stall != nil {
+		g.stallFor = devinTailGrace
+		g.stall.Reset(devinTailGrace)
+	}
+}
+
+// Reason 返回看门狗判死原因；非看门狗触发的关闭返回 nil。
+func (g *devinStallBody) Reason() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.reason
+}
+
 // devinReadConnectStream 逐帧解析 connect 流并产出事件。
+// body 若为 *devinStallBody 则由看门狗托管：帧产事件喂 progress，
+// stop_reason 缩短尾帧窗口，判死时以看门狗原因替代原始关闭错误。
 func devinReadConnectStream(body io.ReadCloser, events chan<- devinChatEvent) {
 	defer close(events)
 	defer func() { _ = body.Close() }()
+
+	guard, _ := body.(*devinStallBody)
+	readErr := func(err error) error {
+		if guard != nil {
+			if r := guard.Reason(); r != nil {
+				return r
+			}
+		}
+		return err
+	}
 
 	br := bufio.NewReaderSize(body, 64<<10)
 	for {
 		hdr := make([]byte, 5)
 		if _, err := io.ReadFull(br, hdr); err != nil {
-			if !errors.Is(err, io.EOF) {
+			if err = readErr(err); !errors.Is(err, io.EOF) {
 				events <- devinChatEvent{Kind: "error", Err: err}
 			}
 			return
@@ -560,7 +705,7 @@ func devinReadConnectStream(body io.ReadCloser, events chan<- devinChatEvent) {
 		}
 		payload := make([]byte, ln)
 		if _, err := io.ReadFull(br, payload); err != nil {
-			events <- devinChatEvent{Kind: "error", Err: err}
+			events <- devinChatEvent{Kind: "error", Err: readErr(err)}
 			return
 		}
 		if flag&devinConnectCompressed != 0 {
@@ -585,7 +730,15 @@ func devinReadConnectStream(body io.ReadCloser, events chan<- devinChatEvent) {
 			events <- devinChatEvent{Kind: "done"}
 			return
 		}
-		devinParseChatMessage(payload, events)
+		produced, sawStop := devinParseChatMessage(payload, events)
+		if guard != nil {
+			if produced > 0 {
+				guard.NotifyEventful()
+			}
+			if sawStop {
+				guard.ShortenTail()
+			}
+		}
 	}
 }
 
@@ -607,32 +760,39 @@ func devinParseTrailerError(payload []byte) error {
 // 1=message_id 3=delta_text 5=stop_reason 6=delta_tool_calls
 // 7=usage 9=delta_thinking 10=delta_signature 15=output_id
 // 21=delta_signature_type。
-func devinParseChatMessage(payload []byte, events chan<- devinChatEvent) {
+// 返回值：产出的事件数（喂 progress 看门狗）与是否见到 stop_reason
+// （触发尾帧宽限）。
+func devinParseChatMessage(payload []byte, events chan<- devinChatEvent) (produced int, sawStop bool) {
+	emit := func(ev devinChatEvent) {
+		events <- ev
+		produced++
+	}
 	r := &devinPVReader{buf: payload}
 	for {
 		fn, wt, ok := r.next()
 		if !ok {
-			return
+			return produced, sawStop
 		}
 		switch fn {
 		case 3:
 			if wt == 2 {
 				if s := r.str(); s != "" {
-					events <- devinChatEvent{Kind: "text", Text: s}
+					emit(devinChatEvent{Kind: "text", Text: s})
 				}
 			} else {
 				r.skip(wt)
 			}
 		case 5:
 			if wt == 0 {
-				events <- devinChatEvent{Kind: "stop", StopReason: int(r.varint())}
+				sawStop = true
+				emit(devinChatEvent{Kind: "stop", StopReason: int(r.varint())})
 			} else {
 				r.skip(wt)
 			}
 		case 6:
 			if wt == 2 {
 				if tc := devinParseToolCall(r.bytes()); tc != nil {
-					events <- devinChatEvent{Kind: "toolcall", ToolCall: tc}
+					emit(devinChatEvent{Kind: "toolcall", ToolCall: tc})
 				}
 			} else {
 				r.skip(wt)
@@ -640,7 +800,7 @@ func devinParseChatMessage(payload []byte, events chan<- devinChatEvent) {
 		case 7:
 			if wt == 2 {
 				if u := devinParseUsageStats(r.bytes()); u != nil {
-					events <- devinChatEvent{Kind: "usage", Usage: u}
+					emit(devinChatEvent{Kind: "usage", Usage: u})
 				}
 			} else {
 				r.skip(wt)
@@ -648,7 +808,7 @@ func devinParseChatMessage(payload []byte, events chan<- devinChatEvent) {
 		case 9:
 			if wt == 2 {
 				if s := r.str(); s != "" {
-					events <- devinChatEvent{Kind: "thinking", Text: s}
+					emit(devinChatEvent{Kind: "thinking", Text: s})
 				}
 			} else {
 				r.skip(wt)
@@ -656,7 +816,7 @@ func devinParseChatMessage(payload []byte, events chan<- devinChatEvent) {
 		case 10:
 			if wt == 2 {
 				if s := r.str(); s != "" {
-					events <- devinChatEvent{Kind: "signature", Signature: s}
+					emit(devinChatEvent{Kind: "signature", Signature: s})
 				}
 			} else {
 				r.skip(wt)
@@ -664,7 +824,7 @@ func devinParseChatMessage(payload []byte, events chan<- devinChatEvent) {
 		case 15:
 			if wt == 2 {
 				if s := r.str(); s != "" {
-					events <- devinChatEvent{Kind: "output_id", OutputID: s}
+					emit(devinChatEvent{Kind: "output_id", OutputID: s})
 				}
 			} else {
 				r.skip(wt)
@@ -672,7 +832,7 @@ func devinParseChatMessage(payload []byte, events chan<- devinChatEvent) {
 		case 21:
 			if wt == 2 {
 				if s := r.str(); s != "" {
-					events <- devinChatEvent{Kind: "signature_type", SignatureType: s}
+					emit(devinChatEvent{Kind: "signature_type", SignatureType: s})
 				}
 			} else {
 				r.skip(wt)
@@ -799,6 +959,16 @@ func devinConvertMessages(req *apicompat.ChatCompletionsRequest) (system string,
 			}
 			if dm.Prompt == "" {
 				dm.Prompt = "[tool result]" // 上游不接受空工具结果文本
+			}
+			// tool result 可携带图片（桥接客户端的 function_call_output
+			// 媒体重写）；与 user 同样只在当前轮挂图。
+			images := devinMessageImages(m)
+			if i > lastAssistant {
+				dm.Images = images
+			} else {
+				for range images {
+					dm.Prompt += "\n[Image omitted from history]"
+				}
 			}
 			msgs = append(msgs, dm)
 		default: // user 及其他
