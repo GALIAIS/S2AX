@@ -283,6 +283,29 @@ func TestSharedQuotaPoolUsesMemberSubscriptionResetWindows(t *testing.T) {
 	}
 }
 
+// TestSharedQuotaPoolShortWindowIgnoresWeeklySubscriptionReset 验证 5 小时窗口仍
+// 使用自身边界，不会因为成员有周订阅重置点而把短窗扩大成整周。
+func TestSharedQuotaPoolShortWindowIgnoresWeeklySubscriptionReset(t *testing.T) {
+	now := time.Date(2026, 9, 20, 15, 0, 0, 0, time.UTC)
+	weeklyReset := now.Add(-24 * time.Hour)
+	config := sharedQuotaTestConfig()
+	config.Windows[1].Enabled = false
+	repo := &sharedQuotaPoolRepoStub{
+		config:        config,
+		members:       []SharedQuotaPoolMember{{UserID: 1, Weight: 1, Enabled: true, WeeklyWindowStart: &weeklyReset}},
+		totalByWindow: map[string]float64{"short": 1},
+		usageByWindow: map[string]map[int64]float64{"short": {1: 1}},
+	}
+	svc := NewSharedQuotaPoolService(repo)
+	svc.now = func() time.Time { return now }
+	if _, err := svc.GetSnapshot(context.Background(), config.GroupID); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.lastMemberWindows) != 1 || !repo.lastMemberWindows[0].WindowStart.Equal(config.Windows[0].WindowStart) {
+		t.Fatalf("short-window usage start = %#v, want %s", repo.lastMemberWindows, config.Windows[0].WindowStart)
+	}
+}
+
 func TestSharedQuotaPoolStopsBorrowingAtSoftAndAllAtHard(t *testing.T) {
 	repo := &sharedQuotaPoolRepoStub{
 		config: sharedQuotaTestConfig(),

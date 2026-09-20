@@ -770,7 +770,7 @@ func (s *SharedQuotaPoolService) calculateWindowSnapshot(ctx context.Context, gr
 	distributable := baseCapacity * (1 - window.ReserveRatio)
 	softLimit := distributable * window.SoftStopRatio
 	hardLimit := distributable * window.HardStopRatio
-	memberWindows := sharedQuotaMemberUsageWindows(members, window.WindowStart, s.now())
+	memberWindows := sharedQuotaMemberUsageWindows(members, window.WindowStart, s.now(), window.Key == "long")
 	totalUsed, usageByUser, err := s.repo.GetUsage(ctx, sharedQuotaUsageScope(groupID, window), window.WindowStart, window.WindowEnd, memberWindows)
 	if err != nil {
 		return nil, err
@@ -871,7 +871,7 @@ func (s *SharedQuotaPoolService) calculateOfficialWindowSnapshot(ctx context.Con
 		usageEnd = official.ResetAt
 		usageStart = usageEnd.Add(-time.Duration(maxInt64(official.LimitWindowSeconds, int64(window.WindowSeconds))) * time.Second)
 	}
-	memberWindows := sharedQuotaMemberUsageWindows(members, usageStart, now)
+	memberWindows := sharedQuotaMemberUsageWindows(members, usageStart, now, window.Key == "long")
 	localTotal, usageByUser, err := s.repo.GetUsage(ctx, sharedQuotaUsageScope(groupID, window), usageStart, usageEnd, memberWindows)
 	if err != nil {
 		return nil, err
@@ -1380,12 +1380,12 @@ func sharedQuotaUsageScope(groupID int64, window SharedQuotaPoolWindowConfig) Sh
 // sharedQuotaMemberUsageWindows 把每个活跃订阅的周重置点转换为当前窗口。
 // 订阅服务可能尚未把过期的 weekly_window_start 回写数据库，因此这里按同一锚点
 // 推进到当前 7 天周期；这样共享池读取 ADMIN 等入口日志时仍与用户订阅页同口径。
-func sharedQuotaMemberUsageWindows(members []SharedQuotaPoolMember, fallbackStart, now time.Time) []SharedQuotaMemberUsageWindow {
+func sharedQuotaMemberUsageWindows(members []SharedQuotaPoolMember, fallbackStart, now time.Time, useSubscriptionWindow bool) []SharedQuotaMemberUsageWindow {
 	windows := make([]SharedQuotaMemberUsageWindow, 0, len(members))
 	const weeklyWindow = 7 * 24 * time.Hour
 	for _, member := range members {
 		start := fallbackStart
-		if member.WeeklyWindowStart != nil && !member.WeeklyWindowStart.IsZero() {
+		if useSubscriptionWindow && member.WeeklyWindowStart != nil && !member.WeeklyWindowStart.IsZero() {
 			start = *member.WeeklyWindowStart
 			if now.After(start) {
 				periods := now.Sub(start) / weeklyWindow
