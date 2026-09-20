@@ -30,7 +30,11 @@
             <span v-if="analyticsWindow(window)">{{ t('admin.sharedQuota.officialAnalytics') }}</span>
             <span v-else-if="window.official_allocation_mode === 'provider_percent_fallback'">{{ t('admin.sharedQuota.analyticsFallback') }}</span>
             <span v-else>{{ t('admin.sharedQuota.analyticsPending') }}</span>
-            <span v-if="window.official_baseline_credits != null"> · {{ t('admin.sharedQuota.baseline') }} {{ credits(window.official_baseline_credits) }}</span>
+            <!-- 审计信息独立成行；分母使用 Analytics 累计已用量，缺失时不显示为零。 -->
+            <div v-if="window.official_baseline_credits != null" class="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <span>{{ t('admin.sharedQuota.baseline') }}</span>
+              <span class="tabular-nums">{{ credits(window.official_baseline_credits) }} / {{ window.official_analytics_used_credits != null ? credits(window.official_analytics_used_credits) : '—' }}</span>
+            </div>
           </div>
         </div>
       </div>
