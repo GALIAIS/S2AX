@@ -1223,13 +1223,10 @@ func (s *SharedQuotaPoolService) refreshOfficialQuota(ctx context.Context, group
 				snapshot.AnalyticsConfidence = analytics.Confidence
 				snapshot.AnalyticsRecordCount = analytics.RecordCount
 				if !previousSameCycle || previous == nil || previous.AnalyticsStatus != "available" {
-					snapshot.BaselineUsedCredits = snapshot.AnalyticsUsedCredits
-					if previousSameCycle && previous != nil {
-						// Analytics 首次恢复时，provider 基线也必须同步重锚，
-						// 否则会把恢复前的本地日志错误归入新 credit 周期。
-						snapshot.BaselineUsedPercent = clampPercent(providerWindow.UsedPercent)
-						snapshot.BaselineCapturedAt = laterTime(fetchedAt, analytics.FetchedAt)
-						snapshot.BaselineResetAt = snapshot.ResetAt
+					if !carryForwardProviderBaseline(snapshot, previous, providerWindow.UsedPercent, snapshot.AnalyticsUsedCredits) {
+						// 新共享池周期没有可继承的本地基线，只能把当前官方 credit
+						// 视为池启用前用量，避免把历史账号消耗分给当前成员。
+						snapshot.BaselineUsedCredits = snapshot.AnalyticsUsedCredits
 					}
 				}
 			} else if !previousSameCycle {
@@ -1256,18 +1253,39 @@ func analyticsSnapshotFresh(snapshot *SharedQuotaOfficialSnapshot, now time.Time
 	return snapshot != nil && snapshot.AnalyticsStatus == "available" && !snapshot.AnalyticsFetchedAt.IsZero() && now.Sub(snapshot.AnalyticsFetchedAt) <= officialAnalyticsSnapshotTTL
 }
 
+// carryForwardProviderBaseline 将同周期的百分比回退基线换算成 Analytics credit，
+// 保留原共享池统计起点，避免 Analytics 首次可用时成员个人用量突然归零。
+// 官方接口没有逐用户 credit，因此成员归属仍由原窗口内的本地 total_cost 完成。
+func carryForwardProviderBaseline(dst, previous *SharedQuotaOfficialSnapshot, providerUsedPercent, analyticsUsedCredits float64) bool {
+	if dst == nil || previous == nil || previous.BaselineCapturedAt.IsZero() || previous.BaselineCapturedAt.After(dst.FetchedAt) {
+		return false
+	}
+	if !previous.BaselineResetAt.IsZero() && !dst.ResetAt.IsZero() && !resetTimesMatch(previous.BaselineResetAt, dst.ResetAt) {
+		return false
+	}
+	if providerUsedPercent <= 0 || !finiteNonNegative(providerUsedPercent) || !finiteNonNegative(analyticsUsedCredits) {
+		return false
+	}
+	estimatedCapacityCredits := analyticsUsedCredits / (providerUsedPercent / 100)
+	if !finiteNonNegative(estimatedCapacityCredits) {
+		return false
+	}
+	baselinePercent := clampPercent(previous.BaselineUsedPercent)
+	baselineCredits := math.Min(analyticsUsedCredits, estimatedCapacityCredits*baselinePercent/100)
+	if !finiteNonNegative(baselineCredits) {
+		return false
+	}
+	dst.BaselineUsedPercent = baselinePercent
+	dst.BaselineUsedCredits = baselineCredits
+	dst.BaselineCapturedAt = previous.BaselineCapturedAt
+	dst.BaselineResetAt = dst.ResetAt
+	return true
+}
+
 // officialAnalyticsSupportsWindow 只允许日粒度 Analytics 校准不短于一天的官方窗口。
 // 5 小时窗口无法由按天聚合精确还原，必须退回 provider 百分比和本地归属比例。
 func officialAnalyticsSupportsWindow(windowSeconds int) bool {
 	return time.Duration(windowSeconds)*time.Second >= officialAnalyticsMinimumWindow
-}
-
-// laterTime 选择两个观测时间中较新的一个，用于恢复校准时重设基线起点。
-func laterTime(left, right time.Time) time.Time {
-	if right.After(left) {
-		return right
-	}
-	return left
 }
 
 func resetTimesMatch(left, right time.Time) bool {

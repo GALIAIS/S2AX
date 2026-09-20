@@ -403,21 +403,16 @@ function officialSnapshotPresent(window: SharedQuotaUserWindowProgress): boolean
 
 function sharedUsed(window: SharedQuotaUserWindowProgress): number {
   if (!isOfficialWindow(window)) return window.used_usd
-  if (window.official_allocation_mode === 'analytics_credit') return window.used_credits ?? 0
   return sharedQuotaUtilizationPercent(window)
 }
 
 function sharedMaximum(window: SharedQuotaUserWindowProgress): number {
   if (!isOfficialWindow(window)) return window.maximum_usd
-  return window.official_allocation_mode === 'analytics_credit' ? window.maximum_credits ?? 0 : 100
+  return 100
 }
 
 function sharedAmount(window: SharedQuotaUserWindowProgress, kind: 'used' | 'maximum'): string {
   if (isOfficialWindow(window) && !officialSnapshotPresent(window)) return '—'
-  if (isOfficialWindow(window) && window.official_allocation_mode === 'analytics_credit') {
-    const value = kind === 'used' ? window.used_credits : window.maximum_credits
-    return `${Number(value ?? 0).toFixed(2)} credit`
-  }
   if (isOfficialWindow(window)) {
     return kind === 'used'
       ? percent(sharedQuotaUtilizationPercent(window))
@@ -426,7 +421,7 @@ function sharedAmount(window: SharedQuotaUserWindowProgress, kind: 'used' | 'max
   return usd(kind === 'used' ? window.used_usd : window.maximum_usd)
 }
 
-// 用户只看到自己的分配进度；官方账号百分比仅用于后台池状态和准入判断。
+// 用户只看到自己的分配进度；账号级官方事实仅用于后台池状态和准入判断。
 function sharedQuotaUtilizationPercent(window: SharedQuotaUserWindowProgress): number {
   if (typeof window.quota_utilization_percent === 'number' && Number.isFinite(window.quota_utilization_percent)) {
     return Math.min(Math.max(window.quota_utilization_percent, 0), 100)

@@ -1543,9 +1543,6 @@ const isAnalyticsSharedQuota = (subscription: UserSubscription): boolean => {
   return isOfficialSharedQuota(subscription) && view?.window.official_allocation_mode === 'analytics_credit'
 }
 
-const formatCredits = (value: number | undefined): string =>
-  `${(typeof value === 'number' && Number.isFinite(value) ? value : 0).toFixed(2)} credit`
-
 // 把成员快照统一转换为成员自己的额度利用率，官方池全局百分比只作为旁路状态展示。
 const memberQuotaUtilizationPercent = (subscription: UserSubscription): number => {
   const member = sharedQuotaForRow(subscription)?.member
@@ -1564,9 +1561,7 @@ const sharedUsageDisplay = (subscription: UserSubscription): string => {
   if (!view?.member) return '—'
   if (isOfficialSharedQuota(subscription)) {
     return sharedOfficialSnapshotPresent(subscription)
-      ? isAnalyticsSharedQuota(subscription)
-        ? formatCredits(view.member.used_credits)
-        : formatPercent(memberQuotaUtilizationPercent(subscription))
+      ? formatPercent(memberQuotaUtilizationPercent(subscription))
       : t('admin.subscriptions.sharedSyncing')
   }
   return `$${(Number.isFinite(view.member.used_usd) ? view.member.used_usd : 0).toFixed(2)}`
@@ -1576,9 +1571,7 @@ const sharedMaximumDisplay = (subscription: UserSubscription): string => {
   const view = sharedQuotaForRow(subscription)
   if (!view?.member) return '—'
   if (isOfficialSharedQuota(subscription)) {
-    return isAnalyticsSharedQuota(subscription)
-      ? formatCredits(view.member.maximum_credits)
-      : formatPercent(100)
+    return formatPercent(100)
   }
   return `$${(Number.isFinite(view.member.maximum_usd) ? view.member.maximum_usd : 0).toFixed(2)}`
 }
@@ -1587,7 +1580,7 @@ const sharedProgressValue = (subscription: UserSubscription): number => {
   const view = sharedQuotaForRow(subscription)
   if (!view?.member || (isOfficialSharedQuota(subscription) && !sharedOfficialSnapshotPresent(subscription))) return 0
 
-  if (isOfficialSharedQuota(subscription) && !isAnalyticsSharedQuota(subscription)) {
+  if (isOfficialSharedQuota(subscription)) {
     return memberQuotaUtilizationPercent(subscription)
   }
 

@@ -263,6 +263,8 @@ V2 采用明确的“双层账本”：
 4. **成员归属层**：官方接口没有按网关用户拆分的 credit，因此成员用量使用本项目同一账号、同一窗口内的 `usage_logs.total_cost` 比例归属，
    并在界面明确标记为“网关本地归属”。它用于公平准入，不伪造官方的逐用户明细。
 
+如果共享池已经在 `provider_percent_fallback` 模式运行，同一官方周期内首次获得有效 Analytics 时，不能把 Analytics 抓取时刻重新当作成员起点。系统会保留原 `BaselineCapturedAt` 和 `BaselineUsedPercent`，按当前 `credits / used_percent` 反推等值 `BaselineUsedCredits`，再继续累计原窗口内的本地 `total_cost`；只有新周期或缺少可继承基线时才从当前官方 credit 重新建立基线。
+
 因此界面和准入口径如下：
 
 - `official_percent` 仍保留为配置兼容名称，但运行时优先使用 `analytics_credit`；

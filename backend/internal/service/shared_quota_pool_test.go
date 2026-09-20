@@ -23,6 +23,20 @@ type sharedQuotaAccountRepoStub struct {
 	accounts map[int64]*Account
 }
 
+// sharedQuotaOfficialSourceStub 同时模拟官方窗口和 Analytics，验证模式切换时的基线继承。
+type sharedQuotaOfficialSourceStub struct {
+	usage     *OpenAIQuotaUsage
+	analytics *OpenAIAnalyticsUsage
+}
+
+func (s *sharedQuotaOfficialSourceStub) QueryUsage(context.Context, int64) (*OpenAIQuotaUsage, error) {
+	return s.usage, nil
+}
+
+func (s *sharedQuotaOfficialSourceStub) QueryAnalytics(context.Context, int64, time.Time, time.Time) (*OpenAIAnalyticsUsage, error) {
+	return s.analytics, nil
+}
+
 func (r *sharedQuotaAccountRepoStub) GetByID(_ context.Context, id int64) (*Account, error) {
 	return r.accounts[id], nil
 }
@@ -387,6 +401,56 @@ func TestSharedQuotaPoolOfficialAnalyticsIsNotUsedForShortWindow(t *testing.T) {
 	}
 	if window.Members[0].UsedPercent != 27 || window.Members[1].UsedPercent != 18 {
 		t.Fatalf("short-window provider-normalized usage = %#v", window.Members)
+	}
+}
+
+func TestRefreshOfficialQuotaCarriesFallbackBaselineIntoAnalytics(t *testing.T) {
+	now := time.Date(2026, 8, 4, 1, 0, 0, 0, time.UTC)
+	resetAt := now.Add(6 * 24 * time.Hour)
+	baselineAt := now.Add(-2 * time.Hour)
+	config := sharedQuotaTestConfig()
+	config.Windows[0].Enabled = false
+	config.Windows[1].CapacityUSD = nil
+	config.Windows[1].CapacityMode = SharedQuotaCapacityModeOfficialPercent
+	config.Windows[1].UpstreamAccountID = func() *int64 { id := int64(42); return &id }()
+	repo := &sharedQuotaPoolRepoStub{
+		config: config,
+		official: map[string]*SharedQuotaOfficialSnapshot{
+			"long": {
+				AccountID: 42, UsedPercent: 24, LimitWindowSeconds: 7 * 24 * 60 * 60,
+				ResetAt: resetAt, FetchedAt: now.Add(-time.Minute), AnalyticsStatus: "unavailable",
+				BaselineUsedPercent: 10, BaselineCapturedAt: baselineAt, BaselineResetAt: resetAt,
+			},
+		},
+	}
+	source := &sharedQuotaOfficialSourceStub{
+		usage: &OpenAIQuotaUsage{RateLimit: &OpenAIRateLimit{PrimaryWindow: &OpenAIRateLimitWindow{
+			UsedPercent: 27, LimitWindowSeconds: 7 * 24 * 60 * 60, ResetAt: resetAt.Unix(),
+		}}},
+		analytics: &OpenAIAnalyticsUsage{
+			Credits: 60134.6, CreditsAvailable: true, Status: "available", FetchedAt: now,
+			StartDate: now.Add(-7 * 24 * time.Hour), EndDate: now, CreditsPerUSD: 25,
+		},
+	}
+	svc := NewSharedQuotaPoolService(repo)
+	svc.now = func() time.Time { return now }
+	svc.SetOfficialQuotaSource(nil, source)
+	if err := svc.refreshOfficialQuota(context.Background(), config.GroupID, config.Windows[1]); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := repo.official["long"]
+	if snapshot == nil || snapshot.AnalyticsStatus != "available" {
+		t.Fatalf("saved analytics snapshot = %#v", snapshot)
+	}
+	if !snapshot.BaselineCapturedAt.Equal(baselineAt) {
+		t.Fatalf("baseline captured at = %s, want original %s", snapshot.BaselineCapturedAt, baselineAt)
+	}
+	if snapshot.BaselineUsedPercent != 10 {
+		t.Fatalf("baseline percent = %v, want 10", snapshot.BaselineUsedPercent)
+	}
+	wantBaselineCredits := 60134.6 / 0.27 * 0.10
+	if math.Abs(snapshot.BaselineUsedCredits-wantBaselineCredits) > 0.0001 {
+		t.Fatalf("baseline credits = %v, want %v", snapshot.BaselineUsedCredits, wantBaselineCredits)
 	}
 }
 

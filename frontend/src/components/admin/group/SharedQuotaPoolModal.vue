@@ -244,20 +244,37 @@ const windowUtilization = (window: SharedQuotaPoolSnapshot['windows'][number]) =
     : `${window.utilization_percent.toFixed(2)}%`
 const analyticsWindow = (window?: SharedQuotaPoolSnapshot['windows'][number]) =>
   window?.official_allocation_mode === 'analytics_credit' && window.official_analytics_available === true
-const displayAmount = (member?: SharedQuotaPoolMember) => analyticsWindow(selectedWindow.value)
-  ? credits(member?.used_credits ?? 0)
-  : selectedWindow.value?.config.capacity_mode === 'official_percent'
-  ? percent(member?.used_percent ?? 0)
+
+// 管理员成员表显示个人利用率；Analytics credit 继续只作为后台准入计算单位。
+const memberUtilizationPercent = (member?: SharedQuotaPoolMember): number => {
+  if (!member) return 0
+  if (typeof member.quota_utilization_percent === 'number' && Number.isFinite(member.quota_utilization_percent)) {
+    return Math.min(Math.max(member.quota_utilization_percent, 0), 100)
+  }
+  const isAnalytics = analyticsWindow(selectedWindow.value)
+  const used = isAnalytics ? member.used_credits ?? 0 : member.used_percent ?? 0
+  const maximum = isAnalytics ? member.maximum_credits ?? 0 : member.maximum_percent ?? 0
+  if (!Number.isFinite(used) || !Number.isFinite(maximum) || maximum <= 0) return 0
+  return Math.min(Math.max((used / maximum) * 100, 0), 100)
+}
+
+const memberBorrowedPercent = (member?: SharedQuotaPoolMember): number => {
+  if (!member) return 0
+  const isAnalytics = analyticsWindow(selectedWindow.value)
+  const borrowed = isAnalytics ? member.borrowed_credits ?? 0 : member.borrowed_percent ?? 0
+  const maximum = isAnalytics ? member.maximum_credits ?? 0 : member.maximum_percent ?? 0
+  if (!Number.isFinite(borrowed) || !Number.isFinite(maximum) || maximum <= 0) return 0
+  return Math.min(Math.max((borrowed / maximum) * 100, 0), 100)
+}
+
+const displayAmount = (member?: SharedQuotaPoolMember) => selectedWindow.value?.config.capacity_mode === 'official_percent'
+  ? percent(memberUtilizationPercent(member))
   : usd(member?.used_usd ?? 0)
-const displayMaximum = (member?: SharedQuotaPoolMember) => analyticsWindow(selectedWindow.value)
-  ? credits(member?.maximum_credits ?? 0)
-  : selectedWindow.value?.config.capacity_mode === 'official_percent'
-  ? percent(member?.maximum_percent ?? 0)
+const displayMaximum = (member?: SharedQuotaPoolMember) => selectedWindow.value?.config.capacity_mode === 'official_percent'
+  ? percent(100)
   : usd(member?.maximum_usd ?? 0)
-const displayBorrowed = (member?: SharedQuotaPoolMember) => analyticsWindow(selectedWindow.value)
-  ? credits(member?.borrowed_credits ?? 0)
-  : selectedWindow.value?.config.capacity_mode === 'official_percent'
-  ? percent(member?.borrowed_percent ?? 0)
+const displayBorrowed = (member?: SharedQuotaPoolMember) => selectedWindow.value?.config.capacity_mode === 'official_percent'
+  ? percent(memberBorrowedPercent(member))
   : usd(member?.borrowed_usd ?? 0)
 
 const load = async () => {

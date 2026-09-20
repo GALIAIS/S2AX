@@ -292,27 +292,23 @@ function officialSnapshotPresent(window: SharedQuotaUserWindowProgress): boolean
 
 function sharedUsed(window: SharedQuotaUserWindowProgress): number {
   if (!isOfficialSharedWindow(window)) return window.used_usd
-  if (window.official_allocation_mode === 'analytics_credit') return window.used_credits || 0
   return sharedQuotaUtilizationPercent(window)
 }
 
 function sharedMaximum(window: SharedQuotaUserWindowProgress): number {
   if (!isOfficialSharedWindow(window)) return window.maximum_usd
-  return window.official_allocation_mode === 'analytics_credit' ? window.maximum_credits || 0 : 100
+  return 100
 }
 
 function sharedUsage(window: SharedQuotaUserWindowProgress): string {
   if (!sharedDataReady(window)) return t('subscriptionProgress.syncing')
   if (isOfficialSharedWindow(window)) {
-    if (window.official_allocation_mode === 'analytics_credit') {
-      return `${(window.used_credits || 0).toFixed(2)} / ${(window.maximum_credits || 0).toFixed(2)} credit`
-    }
     return `${sharedQuotaUtilizationPercent(window).toFixed(2)}%/100.00%`
   }
   return formatUsage(window.used_usd, window.maximum_usd)
 }
 
-// 官方百分比回退只有账号级事实，界面用成员自己的额度利用率避免暴露错误分母。
+// 官方池的账号级百分比或 credit 只用于后台计算，界面统一显示成员自己的额度利用率。
 function sharedQuotaUtilizationPercent(window: SharedQuotaUserWindowProgress): number {
   if (
     typeof window.quota_utilization_percent === 'number' &&
