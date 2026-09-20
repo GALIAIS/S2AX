@@ -257,18 +257,18 @@ OpenAI/Codex OAuth 账号可选用现有 `OpenAIQuotaService` 调用官方 `/bac
 
 V2 采用明确的“双层账本”：
 
-1. **上游事实层**：官方 `/wham/usage` 提供当前滚动窗口百分比、窗口长度和重置时间；
-2. **容量校准层**：官方 `daily-workspace-usage-counts?group_by=day` 提供同一时段的 credit/token 聚合；
-3. **共享池层**：启用或新周期第一次同步时保存 `baseline`，baseline 以前的上游用量不归属于任何共享池成员；
-4. **成员归属层**：官方接口没有按网关用户拆分的 credit，因此成员用量使用本项目同一账号、同一窗口内的 `usage_logs.total_cost` 比例归属，
-   并在界面明确标记为“网关本地归属”。它用于公平准入，不伪造官方的逐用户明细。
+1. **上游事实层**：官方 `/wham/usage` 提供当前滚动窗口百分比、窗口长度和重置时间，只负责共享池总容量和全局停止线；
+2. **容量校准层**：官方 `daily-workspace-usage-counts?group_by=day` 提供同一时段的 credit/token 聚合，用于估算上游总容量；
+3. **成员订阅层**：每个成员使用自己的 `user_subscriptions.weekly_window_start` 作为已用量起点；旧起点已跨过 7 天时，按原锚点自动推进到当前订阅周期；
+4. **成员归属层**：官方接口没有按网关用户拆分的 credit，因此成员用量使用该用户订阅窗口内、本项目同一账号跨分组的 `usage_logs.total_cost` 归属，
+   其中 ADMIN 等入口也会计入同一用户。它用于公平准入，不伪造官方的逐用户明细。
 
-如果共享池已经在 `provider_percent_fallback` 模式运行，同一官方周期内首次获得有效 Analytics 时，不能把 Analytics 抓取时刻重新当作成员起点。系统会保留原 `BaselineCapturedAt` 和 `BaselineUsedPercent`，按当前 `credits / used_percent` 反推等值 `BaselineUsedCredits`，再继续累计原窗口内的本地 `total_cost`；只有新周期或缺少可继承基线时才从当前官方 credit 重新建立基线。
+账号 Analytics 的 `baseline` 只保留为官方快照审计和总池使用量诊断，不能替代成员订阅重置点，也不能把 Analytics 抓取时刻当作成员已用量起点。Analytics 切换前后，成员仍连续读取自己的订阅窗口日志。
 
 因此界面和准入口径如下：
 
 - `official_percent` 仍保留为配置兼容名称，但运行时优先使用 `analytics_credit`；
-- Analytics 可用时，**credit 是计算主单位，百分比是上游事实和进度辅助显示，USD 仅是按当前换算率的展示值**；
+- Analytics 可用时，**credit 是容量校准主单位，成员已用 credit 由自己的订阅窗口 `total_cost × credits/USD` 得到**；
 - Analytics 不可用时，退回 `provider_percent_fallback`，只能按官方百分比减去安全线进行保守准入，管理员看到明确的“未校准”状态，
   不再显示看似精确的 `$600` 额度；
 - 当前实现默认 `25 credits = 1 USD`（即 1000 credits = 40 USD），该换算率随每个快照保存，便于官方价格规则变化时审计和迁移。
@@ -291,44 +291,43 @@ Analytics 不是网关热路径：首次同步和刷新均在后台 singleflight
 
 ### 13.3 容量与成员分配公式
 
-令 `P` 为 `/wham/usage` 的当前使用百分比，`C` 为同窗口 Analytics 累计 credits，`B` 为共享池 baseline credits：
+令 `P` 为 `/wham/usage` 的当前使用百分比，`C` 为同窗口 Analytics 累计 credits，`B` 为官方快照审计用 baseline credits：
 
 ```text
 estimated_total_credits = C / (P / 100)                    (P > 0)
 distributable_credits    = estimated_total_credits × (1 - reserve)
 hard_limit_credits       = distributable_credits × hard_stop
 available_pool_credits   = max(0, hard_limit_credits - C)
-pool_used_credits        = max(0, C - B)
-allocation_capacity      = max(0, hard_limit_credits - B)
+pool_used_credits        = max(0, C - B)       （仅用于总池诊断）
+allocation_capacity      = hard_limit_credits
 member_base_credits      = allocate(quota_usd, weight, allocation_capacity)
 member_max_credits       = member_base_credits × borrow_multiplier
 ```
 
-这里 `C` 是账号当前的绝对上游使用量，`B` 是共享池建立时的账号基线。`available_pool_credits` 只表示账号此刻距离硬线的剩余空间，
-不能拿它反复重算每个成员的基础份额；`allocation_capacity` 才是本周期成员份额的固定锚点。显式 `quota_usd` 先按当前 credits/USD 转为 credit，
-剩余容量按未配置成员的权重分配；如果显式金额总和超过锚点，则按统一比例缩小。`local_used_credits` 由同一账号、同一窗口内的跨分组
-`usage_logs.total_cost` 乘以快照中的 credits/USD 换算率得到，因此 ADMIN 等入口的同用户用量也会减少目标共享订阅的个人剩余量。
+这里 `C` 是账号当前的绝对上游使用量，`B` 不参与成员起算。显式 `quota_usd` 先按当前 credits/USD 转为 credit，
+剩余容量按未配置成员的权重分配；如果显式金额总和超过锚点，则按统一比例缩小。`local_used_credits` 由该用户自己的
+`weekly_window_start` 到当前时间内的跨分组 `usage_logs.total_cost` 乘以快照中的 credits/USD 换算率得到，因此 ADMIN 等入口的同用户用量也会减少目标共享订阅的个人剩余量。
 账号中无法归属到成员的其它用量只减少池的剩余空间，不会被伪造分摊给某个用户。
 
 如果 `P=0` 或 `C` 缺失，不能推导总容量，系统使用百分比回退模式：
 
 ```text
 available_pool_percent = max(0, hard_limit_percent - P)
-pool_used_percent       = max(0, P - baseline_percent)
+member_used_percent     = P × member_local_cost / total_member_local_cost
 ```
 
-这是一种保守近似，必须在 API 和 UI 上标注，禁止伪装成精确金额。周期 reset_at 变化时，baseline、Analytics 范围和成员本地起点一起切换，
-旧周期只留在快照审计字段中，不参与新周期准入。
+这是一种保守近似，必须在 API 和 UI 上标注，禁止伪装成精确金额。周期 `reset_at` 只影响官方容量校准；成员本地起点始终由各自订阅重置点决定。
+账号 baseline 只留在快照审计字段中，不参与成员已用量和个人准入。
 
 ### 13.4 快照、迁移和失败语义
 
 现有 `shared_quota_pool_official_snapshots` 保留一行当前投影；新增 Analytics 统计列和 baseline 列，不新增请求热路径表：
 
 - Analytics：credits、输入/缓存输入/输出 token、日期范围、抓取时间、来源、状态、置信度、换算率；
-- baseline：抓取时的上游 credits/percent、捕获时间、对应 reset_at；
+- baseline：抓取时的上游 credits/percent、捕获时间、对应 reset_at，仅用于官方快照审计和总池诊断；
 - derived：估算总容量和当前池剩余容量只在服务层计算，不重复持久化。
 
-写快照时保留已有 baseline，只有首次捕获、reset_at 进入新周期或管理员重新启用窗口才建立新 baseline。
+写快照时保留已有 baseline，只有首次捕获、`reset_at` 进入新周期或管理员重新启用窗口才建立新 baseline；成员已用量不依赖该 baseline。
 上游刷新失败不覆盖最后一份有效 Analytics；超过最大陈旧时间则关闭“精确校准”标志，但维持现有官方百分比的 fail-open 兼容行为。
 
 ### 13.5 管理员界面验收口径
@@ -343,12 +342,12 @@ pool_used_percent       = max(0, P - baseline_percent)
 ### 13.6 V2 验收用例
 
 - 账号已有 29%、Analytics 为 290 credits、三名等权、reserve=0、hard=95%：估算总容量 1000 credits，
-  新池硬线为 950，当前可用硬线空间 660 credits，若基线为 100 credits，成员基础分配锚点为 850 credits，历史基线不计入成员；
+  新池硬线为 950，当前可用硬线空间 660 credits，成员基础分配锚点仍为完整的 950 credits；成员已用量另按各自订阅重置点归集；
 - 首次启用后用户 A/B/C 产生本地费用 2/1/0 USD，Analytics 增加但未返回逐用户明细时，成员归属按 2:1:0 的本地比例，
   总池硬线仍按官方绝对 credits 判定；
 - Analytics 返回 0 credits 且官方 P=0：状态为未校准，不显示估算容量，不因除零产生无限额度；
 - Analytics 返回错误或超 15 分钟：保留上次快照，标记 stale；没有历史快照时不阻塞网关；
-- reset_at 改变：新 baseline 建立，旧周期用量不会污染新周期；
-- 同一分组连续刷新不会重复建立 baseline，也不会把旧成员历史费用重新归属；
+- reset_at 改变：官方容量校准进入新周期，成员仍按各自订阅窗口归集，不把账号 baseline 当作成员起点；
+- 同一分组连续刷新不会重复建立 baseline，也不会把订阅重置前的成员历史费用重新归属；
 - 私有接口返回未知字段、空 data、字符串数字或部分 token 字段时，解析不崩溃，状态和可用字段准确降级；
 - 现有 manual USD、日/月限额、余额扣费和官方百分比兼容测试全部保持通过。

@@ -8,14 +8,15 @@ import (
 )
 
 type sharedQuotaPoolRepoStub struct {
-	config        *SharedQuotaPoolConfig
-	members       []SharedQuotaPoolMember
-	total         float64
-	usage         map[int64]float64
-	totalByWindow map[string]float64
-	usageByWindow map[string]map[int64]float64
-	official      map[string]*SharedQuotaOfficialSnapshot
-	lastScope     SharedQuotaUsageScope
+	config            *SharedQuotaPoolConfig
+	members           []SharedQuotaPoolMember
+	total             float64
+	usage             map[int64]float64
+	totalByWindow     map[string]float64
+	usageByWindow     map[string]map[int64]float64
+	official          map[string]*SharedQuotaOfficialSnapshot
+	lastScope         SharedQuotaUsageScope
+	lastMemberWindows []SharedQuotaMemberUsageWindow
 }
 
 type sharedQuotaAccountRepoStub struct {
@@ -80,8 +81,11 @@ func (r *sharedQuotaPoolRepoStub) ListActiveMembers(context.Context, int64, time
 	return append([]SharedQuotaPoolMember(nil), r.members...), nil
 }
 
-func (r *sharedQuotaPoolRepoStub) GetUsage(_ context.Context, scope SharedQuotaUsageScope, windowStart, windowEnd time.Time) (float64, map[int64]float64, error) {
+func (r *sharedQuotaPoolRepoStub) GetUsage(_ context.Context, scope SharedQuotaUsageScope, windowStart, windowEnd time.Time, memberWindows ...[]SharedQuotaMemberUsageWindow) (float64, map[int64]float64, error) {
 	r.lastScope = scope
+	if len(memberWindows) > 0 {
+		r.lastMemberWindows = append([]SharedQuotaMemberUsageWindow(nil), memberWindows[0]...)
+	}
 	windowKey := "long"
 	if windowEnd.Sub(windowStart) <= 6*time.Hour {
 		windowKey = "short"
@@ -242,6 +246,43 @@ func TestSharedQuotaPoolUsesAccountScopeAndIndividualAmounts(t *testing.T) {
 	}
 }
 
+// TestSharedQuotaPoolUsesMemberSubscriptionResetWindows 验证成员用量按订阅自己的
+// weekly_window_start 归集，并自动推进已经过期但尚未回写的旧重置点。
+func TestSharedQuotaPoolUsesMemberSubscriptionResetWindows(t *testing.T) {
+	now := time.Date(2026, 9, 20, 15, 0, 0, 0, time.UTC)
+	legacyReset := now.Add(-8 * 24 * time.Hour)
+	memberReset := now.Add(-2 * time.Hour)
+	config := sharedQuotaTestConfig()
+	config.Windows[0].Enabled = false
+	repo := &sharedQuotaPoolRepoStub{
+		config: config,
+		members: []SharedQuotaPoolMember{
+			{UserID: 1, Weight: 1, Enabled: true, WeeklyWindowStart: &legacyReset},
+			{UserID: 2, Weight: 1, Enabled: true, WeeklyWindowStart: &memberReset},
+		},
+		totalByWindow: map[string]float64{"long": 10},
+		usageByWindow: map[string]map[int64]float64{"long": {1: 6, 2: 4}},
+	}
+	svc := NewSharedQuotaPoolService(repo)
+	svc.now = func() time.Time { return now }
+	if _, err := svc.GetSnapshot(context.Background(), config.GroupID); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.lastMemberWindows) != 2 {
+		t.Fatalf("member usage windows = %#v", repo.lastMemberWindows)
+	}
+	windows := make(map[int64]time.Time, len(repo.lastMemberWindows))
+	for _, window := range repo.lastMemberWindows {
+		windows[window.UserID] = window.WindowStart
+	}
+	if got, want := windows[1], legacyReset.Add(7*24*time.Hour); !got.Equal(want) {
+		t.Fatalf("user 1 usage start = %s, want %s", got, want)
+	}
+	if got, want := windows[2], memberReset; !got.Equal(want) {
+		t.Fatalf("user 2 usage start = %s, want %s", got, want)
+	}
+}
+
 func TestSharedQuotaPoolStopsBorrowingAtSoftAndAllAtHard(t *testing.T) {
 	repo := &sharedQuotaPoolRepoStub{
 		config: sharedQuotaTestConfig(),
@@ -360,6 +401,58 @@ func TestSharedQuotaPoolOfficialPercentUsesProviderWindowAndLocalFairness(t *tes
 	}
 	if math.Abs(window.Members[1].QuotaUtilizationPercent-24) > 0.0001 {
 		t.Fatalf("user 2 quota utilization = %v, want 24", window.Members[1].QuotaUtilizationPercent)
+	}
+}
+
+// TestSharedQuotaPoolOfficialUsageUsesSubscriptionWindows 验证官方百分比只用于
+// 容量校准；成员已用量必须来自各自订阅重置后的本地日志，不能被账号 Analytics 基线截断。
+func TestSharedQuotaPoolOfficialUsageUsesSubscriptionWindows(t *testing.T) {
+	now := time.Date(2026, 9, 20, 15, 0, 0, 0, time.UTC)
+	resetAt := now.Add(6 * 24 * time.Hour)
+	legacyReset := now.Add(-8 * 24 * time.Hour)
+	memberReset := now.Add(-24 * time.Hour)
+	config := sharedQuotaTestConfig()
+	config.Windows[0].Enabled = false
+	config.Windows[1].CapacityUSD = nil
+	config.Windows[1].CapacityMode = SharedQuotaCapacityModeOfficialPercent
+	config.Windows[1].ReserveRatio = 0
+	config.Windows[1].HardStopRatio = 0.95
+	config.BorrowEnabled = false
+	config.Windows[1].UpstreamAccountID = func() *int64 { id := int64(42); return &id }()
+	repo := &sharedQuotaPoolRepoStub{
+		config: config,
+		members: []SharedQuotaPoolMember{
+			{UserID: 1, Weight: 1, Enabled: true, WeeklyWindowStart: &legacyReset},
+			{UserID: 2, Weight: 1, Enabled: true, WeeklyWindowStart: &memberReset},
+		},
+		totalByWindow: map[string]float64{"long": 100},
+		usageByWindow: map[string]map[int64]float64{"long": {1: 61, 2: 39}},
+		official: map[string]*SharedQuotaOfficialSnapshot{
+			"long": {
+				AccountID: 42, UsedPercent: 29, LimitWindowSeconds: 7 * 24 * 60 * 60,
+				ResetAt: resetAt, FetchedAt: now, BaselineUsedPercent: 27,
+				BaselineCapturedAt: now.Add(-time.Hour), BaselineResetAt: resetAt,
+			},
+		},
+	}
+	svc := NewSharedQuotaPoolService(repo)
+	svc.now = func() time.Time { return now }
+	snapshot, err := svc.GetSnapshot(context.Background(), config.GroupID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	window := snapshot.Windows[1]
+	if got := window.Members[0].UsedPercent; math.Abs(got-17.69) > 0.0001 {
+		t.Fatalf("user 1 provider-normalized usage = %v, want 17.69", got)
+	}
+	if got := window.Members[1].UsedPercent; math.Abs(got-11.31) > 0.0001 {
+		t.Fatalf("user 2 provider-normalized usage = %v, want 11.31", got)
+	}
+	if math.Abs(window.Members[0].QuotaUtilizationPercent-(17.69/47.5*100)) > 0.0001 {
+		t.Fatalf("user 1 quota utilization = %v", window.Members[0].QuotaUtilizationPercent)
+	}
+	if len(repo.lastMemberWindows) != 2 || !repo.lastMemberWindows[0].WindowStart.Equal(legacyReset.Add(7*24*time.Hour)) {
+		t.Fatalf("member usage windows = %#v", repo.lastMemberWindows)
 	}
 }
 
@@ -494,7 +587,7 @@ func TestSharedQuotaPoolOfficialPercentPrefersFreshAccountSnapshotOverStalePoolR
 	}
 }
 
-func TestSharedQuotaPoolOfficialAnalyticsSubtractsPrePoolBaseline(t *testing.T) {
+func TestSharedQuotaPoolOfficialAnalyticsUsesMemberUsageAndGlobalBaseline(t *testing.T) {
 	now := time.Date(2026, 8, 4, 1, 0, 0, 0, time.UTC)
 	config := sharedQuotaTestConfig()
 	config.Windows[0].Enabled = false
@@ -537,14 +630,14 @@ func TestSharedQuotaPoolOfficialAnalyticsSubtractsPrePoolBaseline(t *testing.T) 
 	if math.Abs(window.OfficialAvailablePoolCredits-660) > 0.0001 {
 		t.Fatalf("available pool credits = %v, want 660", window.OfficialAvailablePoolCredits)
 	}
-	if math.Abs(window.Members[0].BaseShareCredits-425) > 0.0001 || math.Abs(window.Members[1].BaseShareCredits-425) > 0.0001 {
+	if math.Abs(window.Members[0].BaseShareCredits-475) > 0.0001 || math.Abs(window.Members[1].BaseShareCredits-475) > 0.0001 {
 		t.Fatalf("base shares = %#v", window.Members)
 	}
 	if math.Abs(window.Members[0].UsedCredits-50) > 0.0001 || math.Abs(window.Members[1].UsedCredits-25) > 0.0001 {
 		t.Fatalf("member credits = %#v", window.Members)
 	}
-	if math.Abs(window.Members[0].QuotaUtilizationPercent-(50.0/637.5*100)) > 0.0001 ||
-		math.Abs(window.Members[1].QuotaUtilizationPercent-(25.0/637.5*100)) > 0.0001 {
+	if math.Abs(window.Members[0].QuotaUtilizationPercent-(50.0/712.5*100)) > 0.0001 ||
+		math.Abs(window.Members[1].QuotaUtilizationPercent-(25.0/712.5*100)) > 0.0001 {
 		t.Fatalf("member quota utilization = %#v", window.Members)
 	}
 }

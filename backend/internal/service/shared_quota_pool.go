@@ -48,7 +48,7 @@ type SharedQuotaPoolRepository interface {
 	UpsertMember(ctx context.Context, groupID, userID int64, weight float64, quotaUSD *float64, enabled bool) error
 	DeleteMember(ctx context.Context, groupID, userID int64) error
 	ListActiveMembers(ctx context.Context, groupID int64, now time.Time) ([]SharedQuotaPoolMember, error)
-	GetUsage(ctx context.Context, scope SharedQuotaUsageScope, windowStart, windowEnd time.Time) (float64, map[int64]float64, error)
+	GetUsage(ctx context.Context, scope SharedQuotaUsageScope, windowStart, windowEnd time.Time, memberWindows ...[]SharedQuotaMemberUsageWindow) (float64, map[int64]float64, error)
 	GetOfficialQuotaSnapshot(ctx context.Context, groupID int64, windowKey string) (*SharedQuotaOfficialSnapshot, error)
 	SaveOfficialQuotaSnapshot(ctx context.Context, groupID int64, windowKey string, snapshot *SharedQuotaOfficialSnapshot) error
 }
@@ -59,6 +59,13 @@ type SharedQuotaPoolRepository interface {
 type SharedQuotaUsageScope struct {
 	GroupID   int64
 	AccountID *int64
+}
+
+// SharedQuotaMemberUsageWindow 记录成员自己的订阅额度窗口起点。
+// 共享池可以绑定同一个上游账号，但成员的已用量必须按各自订阅重置点归集。
+type SharedQuotaMemberUsageWindow struct {
+	UserID      int64
+	WindowStart time.Time
 }
 
 type SharedQuotaOfficialSnapshot struct {
@@ -140,11 +147,13 @@ type SharedQuotaPoolMemberInput struct {
 }
 
 type SharedQuotaPoolMember struct {
-	UserID         int64   `json:"user_id"`
-	SubscriptionID int64   `json:"subscription_id"`
-	Email          string  `json:"email"`
-	Username       string  `json:"username"`
-	Weight         float64 `json:"weight"`
+	UserID         int64 `json:"user_id"`
+	SubscriptionID int64 `json:"subscription_id"`
+	// WeeklyWindowStart 仅供共享池内部归集使用，不把订阅重置细节暴露给管理端成员 DTO。
+	WeeklyWindowStart *time.Time `json:"-"`
+	Email             string     `json:"email"`
+	Username          string     `json:"username"`
+	Weight            float64    `json:"weight"`
 	// QuotaUSD 返回管理员配置的独立金额，便于前端区分显式额度和权重回退。
 	QuotaUSD   *float64 `json:"quota_usd,omitempty"`
 	Enabled    bool     `json:"enabled"`
@@ -761,7 +770,8 @@ func (s *SharedQuotaPoolService) calculateWindowSnapshot(ctx context.Context, gr
 	distributable := baseCapacity * (1 - window.ReserveRatio)
 	softLimit := distributable * window.SoftStopRatio
 	hardLimit := distributable * window.HardStopRatio
-	totalUsed, usageByUser, err := s.repo.GetUsage(ctx, sharedQuotaUsageScope(groupID, window), window.WindowStart, window.WindowEnd)
+	memberWindows := sharedQuotaMemberUsageWindows(members, window.WindowStart, s.now())
+	totalUsed, usageByUser, err := s.repo.GetUsage(ctx, sharedQuotaUsageScope(groupID, window), window.WindowStart, window.WindowEnd, memberWindows)
 	if err != nil {
 		return nil, err
 	}
@@ -861,10 +871,8 @@ func (s *SharedQuotaPoolService) calculateOfficialWindowSnapshot(ctx context.Con
 		usageEnd = official.ResetAt
 		usageStart = usageEnd.Add(-time.Duration(maxInt64(official.LimitWindowSeconds, int64(window.WindowSeconds))) * time.Second)
 	}
-	if official != nil && baselineMatchesCycle(official) && official.BaselineCapturedAt.After(usageStart) && official.BaselineCapturedAt.Before(now) && !official.BaselineCapturedAt.After(usageEnd) {
-		usageStart = official.BaselineCapturedAt
-	}
-	localTotal, usageByUser, err := s.repo.GetUsage(ctx, sharedQuotaUsageScope(groupID, window), usageStart, usageEnd)
+	memberWindows := sharedQuotaMemberUsageWindows(members, usageStart, now)
+	localTotal, usageByUser, err := s.repo.GetUsage(ctx, sharedQuotaUsageScope(groupID, window), usageStart, usageEnd, memberWindows)
 	if err != nil {
 		return nil, err
 	}
@@ -915,9 +923,9 @@ func (s *SharedQuotaPoolService) calculateOfficialWindowSnapshot(ctx context.Con
 		baselineCredits := math.Max(0, official.BaselineUsedCredits)
 		availablePoolCredits = math.Max(0, hardLimitCredits-official.AnalyticsUsedCredits)
 		poolUsedCredits = math.Max(0, official.AnalyticsUsedCredits-baselineCredits)
-		// 基础份额在官方周期或共享池基线建立时确定，不能随着全账号当前用量
-		// 每次刷新而重新缩小，否则一个用户的请求会同步降低其他人的份额。
-		baseShareCapacity = math.Max(0, hardLimitCredits-baselineCredits)
+		// 成员基础份额按完整共享池容量分配；成员已用量另按各自订阅重置点归集，
+		// 不能用账号 Analytics 基线替代用户订阅基线。
+		baseShareCapacity = hardLimitCredits
 		allocationMode = "analytics_credit"
 		windowSnapshot.BaseCapacityCredits = estimatedCapacityCredits
 		windowSnapshot.DistributableCredits = distributableCredits
@@ -933,15 +941,13 @@ func (s *SharedQuotaPoolService) calculateOfficialWindowSnapshot(ctx context.Con
 		windowSnapshot.EstimatedCapacityUSD = windowSnapshot.BaseCapacityUSD
 		memberUsageScale = creditsPerUSD
 	} else if providerAvailable {
-		// 没有 Analytics 时只能使用官方百分比；份额仍以周期基线为锚点，
-		// 避免当前账号用量变化反复改写成员的基础额度。
+		// 没有 Analytics 时只能使用官方百分比；它只负责把成员订阅窗口内的
+		// 本地费用映射到官方总容量，不改变成员各自的订阅起算点。
 		allocationMode = "provider_percent_fallback"
-		baselinePercent := clampPercent(official.BaselineUsedPercent)
-		if official.BaselineCapturedAt.IsZero() {
-			baselinePercent = 0
-		}
-		baseShareCapacity = math.Max(0, hardLimitPercent-baselinePercent)
-		memberUsageScale = math.Max(0, usedPercent-baselinePercent)
+		// 百分比只负责把成员订阅窗口内的本地费用映射到官方总容量，
+		// 不再扣除 Analytics 抓取时刻的账号累计基线。
+		baseShareCapacity = hardLimitPercent
+		memberUsageScale = usedPercent
 		windowSnapshot.OfficialAvailablePoolCredits = 0
 		windowSnapshot.OfficialPoolUsedCredits = 0
 	} else {
@@ -1069,16 +1075,6 @@ func copyOfficialCalibration(dst, src *SharedQuotaOfficialSnapshot) {
 	dst.BaselineUsedPercent = src.BaselineUsedPercent
 	dst.BaselineCapturedAt = src.BaselineCapturedAt
 	dst.BaselineResetAt = src.BaselineResetAt
-}
-
-func baselineMatchesCycle(snapshot *SharedQuotaOfficialSnapshot) bool {
-	if snapshot == nil || snapshot.BaselineCapturedAt.IsZero() {
-		return false
-	}
-	if snapshot.BaselineResetAt.IsZero() || snapshot.ResetAt.IsZero() {
-		return true
-	}
-	return math.Abs(snapshot.BaselineResetAt.Sub(snapshot.ResetAt).Seconds()) <= 5*60
 }
 
 func analyticsCreditsPerUSD(snapshot *SharedQuotaOfficialSnapshot) float64 {
@@ -1379,6 +1375,28 @@ func sharedQuotaUsageScope(groupID int64, window SharedQuotaPoolWindowConfig) Sh
 		scope.AccountID = window.UpstreamAccountID
 	}
 	return scope
+}
+
+// sharedQuotaMemberUsageWindows 把每个活跃订阅的周重置点转换为当前窗口。
+// 订阅服务可能尚未把过期的 weekly_window_start 回写数据库，因此这里按同一锚点
+// 推进到当前 7 天周期；这样共享池读取 ADMIN 等入口日志时仍与用户订阅页同口径。
+func sharedQuotaMemberUsageWindows(members []SharedQuotaPoolMember, fallbackStart, now time.Time) []SharedQuotaMemberUsageWindow {
+	windows := make([]SharedQuotaMemberUsageWindow, 0, len(members))
+	const weeklyWindow = 7 * 24 * time.Hour
+	for _, member := range members {
+		start := fallbackStart
+		if member.WeeklyWindowStart != nil && !member.WeeklyWindowStart.IsZero() {
+			start = *member.WeeklyWindowStart
+			if now.After(start) {
+				periods := now.Sub(start) / weeklyWindow
+				if periods > 0 {
+					start = start.Add(time.Duration(periods) * weeklyWindow)
+				}
+			}
+		}
+		windows = append(windows, SharedQuotaMemberUsageWindow{UserID: member.UserID, WindowStart: start})
+	}
+	return windows
 }
 
 // allocateMemberBaseShares 计算手动 USD 或 Analytics 等值美元下的基础份额。

@@ -18,7 +18,7 @@ export default {
     analyticsFallback: '百分比回退（未校准）',
     analyticsPending: '等待同步',
     analyticsStale: 'Analytics 数据已过期',
-    baseline: '启用前基线',
+    baseline: '官方审计基线（不计入成员已用）',
     windowSeconds: '窗口长度（秒）',
     reserve: '安全预留（%）',
     softStop: '借用停止线（%）',

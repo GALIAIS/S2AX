@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -255,7 +257,7 @@ func (r *sharedQuotaPoolRepository) ListActiveMembers(ctx context.Context, group
 	}
 	const query = `
 		SELECT DISTINCT ON (us.user_id)
-			us.user_id, us.id, COALESCE(u.email, ''), COALESCE(u.username, ''),
+			us.user_id, us.id, us.weekly_window_start, COALESCE(u.email, ''), COALESCE(u.username, ''),
 			COALESCE(m.weight, 1), m.quota_usd, COALESCE(m.enabled, TRUE), (m.user_id IS NOT NULL)
 		FROM user_subscriptions us
 		JOIN users u ON u.id = us.user_id AND u.deleted_at IS NULL
@@ -276,8 +278,12 @@ func (r *sharedQuotaPoolRepository) ListActiveMembers(ctx context.Context, group
 	for rows.Next() {
 		var member service.SharedQuotaPoolMember
 		var quotaUSD sql.NullFloat64
-		if err := rows.Scan(&member.UserID, &member.SubscriptionID, &member.Email, &member.Username, &member.Weight, &quotaUSD, &member.Enabled, &member.Configured); err != nil {
+		var weeklyWindowStart sql.NullTime
+		if err := rows.Scan(&member.UserID, &member.SubscriptionID, &weeklyWindowStart, &member.Email, &member.Username, &member.Weight, &quotaUSD, &member.Enabled, &member.Configured); err != nil {
 			return nil, err
+		}
+		if weeklyWindowStart.Valid {
+			member.WeeklyWindowStart = &weeklyWindowStart.Time
 		}
 		if quotaUSD.Valid {
 			member.QuotaUSD = &quotaUSD.Float64
@@ -287,33 +293,75 @@ func (r *sharedQuotaPoolRepository) ListActiveMembers(ctx context.Context, group
 	return members, rows.Err()
 }
 
-func (r *sharedQuotaPoolRepository) GetUsage(ctx context.Context, scope service.SharedQuotaUsageScope, windowStart, windowEnd time.Time) (float64, map[int64]float64, error) {
+func (r *sharedQuotaPoolRepository) GetUsage(ctx context.Context, scope service.SharedQuotaUsageScope, windowStart, windowEnd time.Time, memberWindows ...[]service.SharedQuotaMemberUsageWindow) (float64, map[int64]float64, error) {
 	if r == nil || r.db == nil {
 		return 0, map[int64]float64{}, nil
+	}
+	var scopedMemberWindows []service.SharedQuotaMemberUsageWindow
+	if len(memberWindows) > 0 {
+		scopedMemberWindows = memberWindows[0]
 	}
 	// 绑定上游账号时必须跨分组读取，才能把 ADMIN 等入口的同账号消耗
 	// 归属于同一个用户；未绑定账号时继续使用旧的目标分组范围。
 	var query string
 	var args []any
-	if scope.AccountID != nil && *scope.AccountID > 0 {
-		query = `
-			SELECT user_id, COALESCE(SUM(total_cost), 0)
-			FROM usage_logs
-			WHERE account_id = $1
-			  AND created_at >= $2
-			  AND created_at < $3
-			GROUP BY user_id`
-		args = []any{*scope.AccountID, windowStart, windowEnd}
+	if len(scopedMemberWindows) == 0 {
+		if scope.AccountID != nil && *scope.AccountID > 0 {
+			query = `
+				SELECT user_id, COALESCE(SUM(total_cost), 0)
+				FROM usage_logs
+				WHERE account_id = $1
+				  AND created_at >= $2
+				  AND created_at < $3
+				GROUP BY user_id`
+			args = []any{*scope.AccountID, windowStart, windowEnd}
+		} else {
+			query = `
+				SELECT user_id, COALESCE(SUM(actual_cost), 0)
+				FROM usage_logs
+				WHERE group_id = $1
+				  AND subscription_id IS NOT NULL
+				  AND created_at >= $2
+				  AND created_at < $3
+				GROUP BY user_id`
+			args = []any{scope.GroupID, windowStart, windowEnd}
+		}
 	} else {
-		query = `
-			SELECT user_id, COALESCE(SUM(actual_cost), 0)
-			FROM usage_logs
-			WHERE group_id = $1
-			  AND subscription_id IS NOT NULL
-			  AND created_at >= $2
-			  AND created_at < $3
-			GROUP BY user_id`
-		args = []any{scope.GroupID, windowStart, windowEnd}
+		values := make([]string, 0, len(scopedMemberWindows))
+		if scope.AccountID != nil && *scope.AccountID > 0 {
+			args = []any{*scope.AccountID, windowEnd}
+		} else {
+			args = []any{scope.GroupID, windowEnd}
+		}
+		for _, memberWindow := range scopedMemberWindows {
+			userPlaceholder := len(args) + 1
+			startPlaceholder := len(args) + 2
+			values = append(values, fmt.Sprintf("($%d,$%d)", userPlaceholder, startPlaceholder))
+			args = append(args, memberWindow.UserID, memberWindow.WindowStart)
+		}
+		memberValues := strings.Join(values, ",")
+		if scope.AccountID != nil && *scope.AccountID > 0 {
+			query = fmt.Sprintf(`
+				SELECT l.user_id, COALESCE(SUM(l.total_cost), 0)
+				FROM usage_logs l
+				JOIN (VALUES %s) AS member_windows(user_id, window_start)
+				  ON member_windows.user_id = l.user_id
+				WHERE l.account_id = $1
+				  AND l.created_at >= member_windows.window_start
+				  AND l.created_at < $2
+				GROUP BY l.user_id`, memberValues)
+		} else {
+			query = fmt.Sprintf(`
+				SELECT l.user_id, COALESCE(SUM(l.actual_cost), 0)
+				FROM usage_logs l
+				JOIN (VALUES %s) AS member_windows(user_id, window_start)
+				  ON member_windows.user_id = l.user_id
+				WHERE l.group_id = $1
+				  AND l.subscription_id IS NOT NULL
+				  AND l.created_at >= member_windows.window_start
+				  AND l.created_at < $2
+				GROUP BY l.user_id`, memberValues)
+		}
 	}
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {

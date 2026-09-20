@@ -18,7 +18,7 @@ export default {
     analyticsFallback: 'Percent fallback (uncalibrated)',
     analyticsPending: 'Waiting for sync',
     analyticsStale: 'Analytics data is stale',
-    baseline: 'Pre-pool baseline',
+    baseline: 'Official audit baseline (not member usage)',
     windowSeconds: 'Window length (seconds)',
     reserve: 'Safety reserve (%)',
     softStop: 'Borrow stop line (%)',
