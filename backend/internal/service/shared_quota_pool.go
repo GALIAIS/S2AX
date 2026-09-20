@@ -883,6 +883,8 @@ func (s *SharedQuotaPoolService) calculateOfficialWindowSnapshot(ctx context.Con
 	hardLimitPercent := distributablePercent * window.HardStopRatio
 	windowSnapshot := &SharedQuotaPoolWindowSnapshot{
 		Config: window, CapacityMode: SharedQuotaCapacityModeOfficialPercent,
+		// 保留各订阅窗口累计的本地费用，便于核对历史用量；不把估算百分比伪装成美元。
+		TotalUsedUSD:        localTotal,
 		BaseCapacityPercent: baseCapacityPercent, DistributablePercent: distributablePercent,
 		SoftLimitPercent: softLimitPercent, HardLimitPercent: hardLimitPercent,
 		OfficialDataAvailable: providerAvailable, OfficialDataStale: official != nil && providerStale,
@@ -910,39 +912,11 @@ func (s *SharedQuotaPoolService) calculateOfficialWindowSnapshot(ctx context.Con
 	analyticsAvailable := official != nil && official.AnalyticsStatus == "available" && finiteNonNegative(official.AnalyticsUsedCredits) && analyticsCreditsPerUSD(official) > 0 && !official.AnalyticsFetchedAt.IsZero() && now.Sub(official.AnalyticsFetchedAt) <= officialQuotaMaxStale && officialAnalyticsSupportsWindow(window.WindowSeconds)
 	analyticsStale := official != nil && official.AnalyticsStatus != "" && (official.AnalyticsFetchedAt.IsZero() || now.Sub(official.AnalyticsFetchedAt) > officialAnalyticsSnapshotTTL)
 	var allocationMode string
-	estimatedCapacityCredits := 0.0
-	availablePoolCredits := 0.0
-	poolUsedCredits := 0.0
 	baseShareCapacity := 0.0
 	memberUsageScale := 0.0
-	creditsPerUSD := analyticsCreditsPerUSD(official)
-	if analyticsAvailable && usedPercent > 0 && official.AnalyticsUsedCredits > 0 {
-		estimatedCapacityCredits = official.AnalyticsUsedCredits / (usedPercent / 100)
-		distributableCredits := estimatedCapacityCredits * (1 - window.ReserveRatio)
-		hardLimitCredits := distributableCredits * window.HardStopRatio
-		baselineCredits := math.Max(0, official.BaselineUsedCredits)
-		availablePoolCredits = math.Max(0, hardLimitCredits-official.AnalyticsUsedCredits)
-		poolUsedCredits = math.Max(0, official.AnalyticsUsedCredits-baselineCredits)
-		// 成员基础份额按完整共享池容量分配；成员已用量另按各自订阅重置点归集，
-		// 不能用账号 Analytics 基线替代用户订阅基线。
-		baseShareCapacity = hardLimitCredits
-		allocationMode = "analytics_credit"
-		windowSnapshot.BaseCapacityCredits = estimatedCapacityCredits
-		windowSnapshot.DistributableCredits = distributableCredits
-		windowSnapshot.TotalUsedCredits = official.AnalyticsUsedCredits
-		windowSnapshot.RemainingCredits = availablePoolCredits
-		windowSnapshot.OfficialEstimatedCapacityCredits = estimatedCapacityCredits
-		windowSnapshot.OfficialAvailablePoolCredits = availablePoolCredits
-		windowSnapshot.OfficialPoolUsedCredits = poolUsedCredits
-		windowSnapshot.BaseCapacityUSD = estimatedCapacityCredits / creditsPerUSD
-		windowSnapshot.DistributableUSD = distributableCredits / creditsPerUSD
-		windowSnapshot.TotalUsedUSD = official.AnalyticsUsedCredits / creditsPerUSD
-		windowSnapshot.RemainingUSD = availablePoolCredits / creditsPerUSD
-		windowSnapshot.EstimatedCapacityUSD = windowSnapshot.BaseCapacityUSD
-		memberUsageScale = creditsPerUSD
-	} else if providerAvailable {
-		// 没有 Analytics 时只能使用官方百分比；它只负责把成员订阅窗口内的
-		// 本地费用映射到官方总容量，不改变成员各自的订阅起算点。
+	// 日粒度 Analytics 与官方重置周期不一致，不能用于反推容量或切换成员账本。
+	// 始终使用同一百分比口径；Analytics 仅保留为观测数据，恢复时不重算额度分母。
+	if providerAvailable {
 		allocationMode = "provider_percent_fallback"
 		// 百分比只负责把成员订阅窗口内的本地费用映射到官方总容量，
 		// 不再扣除 Analytics 抓取时刻的账号累计基线。
@@ -954,27 +928,15 @@ func (s *SharedQuotaPoolService) calculateOfficialWindowSnapshot(ctx context.Con
 		allocationMode = "pending"
 		baseShareCapacity = distributablePercent
 	}
-	var baseShares map[int64]float64
-	if allocationMode == "analytics_credit" {
-		baseShares = scaleMemberSharesToCredits(members, baseShareCapacity, creditsPerUSD)
-	} else {
-		// 百分比回退没有可靠的美元容量；独立金额在这里保留相对比例，
-		// 待 Analytics 恢复后再按真实美元等值重新计算。
-		baseShares = allocateRelativeMemberShares(members, baseShareCapacity)
-	}
+	// 官方模式下独立金额仅作为相对份额；手动美元模式仍按金额分配。
+	baseShares := allocateRelativeMemberShares(members, baseShareCapacity)
 	if baseShares == nil {
 		return nil, fmt.Errorf("%w: member quotas cannot be allocated", ErrSharedQuotaPoolInvalid)
 	}
 	windowSnapshot.OfficialAllocationMode = allocationMode
 	windowSnapshot.OfficialAnalyticsAvailable = analyticsAvailable
 	windowSnapshot.OfficialAnalyticsStale = analyticsStale
-	if analyticsAvailable {
-		windowSnapshot.OfficialAccountingStatus = "analytics_credit"
-	} else if providerAvailable {
-		windowSnapshot.OfficialAccountingStatus = "provider_percent_fallback"
-	} else {
-		windowSnapshot.OfficialAccountingStatus = "pending"
-	}
+	windowSnapshot.OfficialAccountingStatus = allocationMode
 	if providerAvailable {
 		windowSnapshot.TotalUsedPercent = usedPercent
 		windowSnapshot.RemainingPercent = math.Max(0, distributablePercent-usedPercent)
@@ -989,13 +951,10 @@ func (s *SharedQuotaPoolService) calculateOfficialWindowSnapshot(ctx context.Con
 			maximum *= pool.BorrowMultiplier
 		}
 		localUsedUSD := math.Max(0, usageByUser[member.UserID])
-		localUsedCredits := localUsedUSD * creditsPerUSD
 		memberUsed := 0.0
 		memberBase := baseShare
 		memberMaximum := maximum
-		if allocationMode == "analytics_credit" {
-			memberUsed = localUsedCredits
-		} else if providerAvailable && localTotal > 0 {
+		if providerAvailable && localTotal > 0 {
 			memberUsed = memberUsageScale * localUsedUSD / localTotal
 		}
 		allowed := member.Enabled
@@ -1015,40 +974,19 @@ func (s *SharedQuotaPoolService) calculateOfficialWindowSnapshot(ctx context.Con
 			}
 		}
 		sharePercent := 0.0
-		if allocationMode == "analytics_credit" && estimatedCapacityCredits > 0 {
-			sharePercent = baseShare / estimatedCapacityCredits * 100
-		} else if baseShareCapacity > 0 {
+		if baseShareCapacity > 0 {
 			sharePercent = baseShare / baseShareCapacity * 100
 		}
 		memberSnapshot := SharedQuotaPoolMemberSnapshot{
 			SharedQuotaPoolMember: member, Allowed: allowed, DecisionReason: reason,
+			UsedUSD:      localUsedUSD,
 			SharePercent: sharePercent, QuotaUtilizationPercent: quotaUtilizationPercent(memberUsed, memberMaximum),
 		}
-		if allocationMode == "analytics_credit" {
-			memberSnapshot.UsedUSD = memberUsed / creditsPerUSD
-			memberSnapshot.BaseShareUSD = memberBase / creditsPerUSD
-			memberSnapshot.MaximumUSD = memberMaximum / creditsPerUSD
-			memberSnapshot.RemainingUSD = math.Max(0, memberMaximum-memberUsed) / creditsPerUSD
-			memberSnapshot.BorrowedUSD = math.Max(0, memberUsed-memberBase) / creditsPerUSD
-			memberSnapshot.UsedCredits = memberUsed
-			memberSnapshot.BaseShareCredits = memberBase
-			memberSnapshot.MaximumCredits = memberMaximum
-			memberSnapshot.RemainingCredits = math.Max(0, memberMaximum-memberUsed)
-			memberSnapshot.BorrowedCredits = math.Max(0, memberUsed-memberBase)
-			if estimatedCapacityCredits > 0 {
-				memberSnapshot.UsedPercent = memberUsed / estimatedCapacityCredits * 100
-				memberSnapshot.BaseSharePercent = memberBase / estimatedCapacityCredits * 100
-				memberSnapshot.MaximumPercent = memberMaximum / estimatedCapacityCredits * 100
-				memberSnapshot.RemainingPercent = math.Max(0, memberMaximum-memberUsed) / estimatedCapacityCredits * 100
-				memberSnapshot.BorrowedPercent = math.Max(0, memberUsed-memberBase) / estimatedCapacityCredits * 100
-			}
-		} else {
-			memberSnapshot.UsedPercent = memberUsed
-			memberSnapshot.BaseSharePercent = memberBase
-			memberSnapshot.MaximumPercent = memberMaximum
-			memberSnapshot.RemainingPercent = math.Max(0, memberMaximum-memberUsed)
-			memberSnapshot.BorrowedPercent = math.Max(0, memberUsed-memberBase)
-		}
+		memberSnapshot.UsedPercent = memberUsed
+		memberSnapshot.BaseSharePercent = memberBase
+		memberSnapshot.MaximumPercent = memberMaximum
+		memberSnapshot.RemainingPercent = math.Max(0, memberMaximum-memberUsed)
+		memberSnapshot.BorrowedPercent = math.Max(0, memberUsed-memberBase)
 		windowSnapshot.Members = append(windowSnapshot.Members, memberSnapshot)
 	}
 	return windowSnapshot, nil
@@ -1399,7 +1337,7 @@ func sharedQuotaMemberUsageWindows(members []SharedQuotaPoolMember, fallbackStar
 	return windows
 }
 
-// allocateMemberBaseShares 计算手动 USD 或 Analytics 等值美元下的基础份额。
+// allocateMemberBaseShares 计算手动 USD 模式下的基础份额。
 // 显式 quota_usd 优先获得独立金额；剩余容量再按未显式设置成员的权重分配。
 // 显式金额超过可分配容量时按同一比例缩放，避免官方容量波动导致全池失控。
 func allocateMemberBaseShares(members []SharedQuotaPoolMember, capacity float64) map[int64]float64 {
@@ -1447,27 +1385,8 @@ func allocateMemberBaseShares(members []SharedQuotaPoolMember, capacity float64)
 	return shares
 }
 
-// scaleMemberSharesToCredits 将成员金额配置转换为官方 Analytics credit。
-// 只有 Analytics 可用时金额才有可靠的官方等值；换算失败时返回空结果，让调用方
-// 进入明确的错误路径而不是把 credit 和美元混用。
-func scaleMemberSharesToCredits(members []SharedQuotaPoolMember, capacityCredits, creditsPerUSD float64) map[int64]float64 {
-	if creditsPerUSD <= 0 || math.IsNaN(creditsPerUSD) || math.IsInf(creditsPerUSD, 0) {
-		return nil
-	}
-	sharesUSD := allocateMemberBaseShares(members, capacityCredits/creditsPerUSD)
-	if sharesUSD == nil {
-		return nil
-	}
-	shares := make(map[int64]float64, len(sharesUSD))
-	for userID, shareUSD := range sharesUSD {
-		shares[userID] = shareUSD * creditsPerUSD
-	}
-	return shares
-}
-
-// allocateRelativeMemberShares 为官方百分比回退提供稳定的相对分配。
-// 回退状态没有可靠的美元容量，quota_usd 在此只作为比例权重；Analytics 恢复后
-// 同一配置会自动切换回真实的美元等值分配。
+// allocateRelativeMemberShares 为官方百分比模式提供稳定的相对分配。
+// 没有可靠的美元容量，quota_usd 在此仅作为比例权重，不随 Analytics 状态切换语义。
 func allocateRelativeMemberShares(members []SharedQuotaPoolMember, capacity float64) map[int64]float64 {
 	shares := make(map[int64]float64, len(members))
 	if capacity <= 0 || math.IsNaN(capacity) || math.IsInf(capacity, 0) {

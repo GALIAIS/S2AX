@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"math"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -610,7 +611,8 @@ func TestSharedQuotaPoolOfficialPercentPrefersFreshAccountSnapshotOverStalePoolR
 	}
 }
 
-func TestSharedQuotaPoolOfficialAnalyticsUsesMemberUsageAndGlobalBaseline(t *testing.T) {
+// Analytics 仅供观测，不能改变已归集的个人用量、份额或准入判断。
+func TestSharedQuotaPoolOfficialAnalyticsDoesNotChangeAccounting(t *testing.T) {
 	now := time.Date(2026, 8, 4, 1, 0, 0, 0, time.UTC)
 	config := sharedQuotaTestConfig()
 	config.Windows[0].Enabled = false
@@ -644,23 +646,99 @@ func TestSharedQuotaPoolOfficialAnalyticsUsesMemberUsageAndGlobalBaseline(t *tes
 		t.Fatal(err)
 	}
 	window := snapshot.Windows[1]
-	if window.OfficialAllocationMode != "analytics_credit" {
+	if window.OfficialAllocationMode != "provider_percent_fallback" {
 		t.Fatalf("allocation mode = %q", window.OfficialAllocationMode)
 	}
-	if math.Abs(window.OfficialEstimatedCapacityCredits-1000) > 0.0001 {
-		t.Fatalf("estimated capacity = %v, want 1000", window.OfficialEstimatedCapacityCredits)
+	if window.OfficialEstimatedCapacityCredits != 0 {
+		t.Fatalf("unexpected credit capacity = %v", window.OfficialEstimatedCapacityCredits)
 	}
-	if math.Abs(window.OfficialAvailablePoolCredits-660) > 0.0001 {
-		t.Fatalf("available pool credits = %v, want 660", window.OfficialAvailablePoolCredits)
+	if window.OfficialAvailablePoolCredits != 0 {
+		t.Fatalf("unexpected credit allowance = %v", window.OfficialAvailablePoolCredits)
 	}
-	if math.Abs(window.Members[0].BaseShareCredits-475) > 0.0001 || math.Abs(window.Members[1].BaseShareCredits-475) > 0.0001 {
+	if window.Members[0].BaseSharePercent != 47.5 || window.Members[1].BaseSharePercent != 47.5 {
 		t.Fatalf("base shares = %#v", window.Members)
 	}
-	if math.Abs(window.Members[0].UsedCredits-50) > 0.0001 || math.Abs(window.Members[1].UsedCredits-25) > 0.0001 {
+	if math.Abs(window.Members[0].UsedPercent-29.0*2/3) > 0.0001 || math.Abs(window.Members[1].UsedPercent-29.0/3) > 0.0001 {
 		t.Fatalf("member credits = %#v", window.Members)
 	}
-	if math.Abs(window.Members[0].QuotaUtilizationPercent-(50.0/712.5*100)) > 0.0001 ||
-		math.Abs(window.Members[1].QuotaUtilizationPercent-(25.0/712.5*100)) > 0.0001 {
+	if math.Abs(window.Members[0].QuotaUtilizationPercent-(29.0*2/3/71.25*100)) > 0.0001 ||
+		math.Abs(window.Members[1].QuotaUtilizationPercent-(29.0/3/71.25*100)) > 0.0001 {
 		t.Fatalf("member quota utilization = %#v", window.Members)
+	}
+}
+
+// 覆盖 Analytics 从缺失到恢复、过期再恢复的完整过程，确保不会重置或放宽个人额度。
+func TestSharedQuotaPoolAnalyticsTransitionsPreserveSubscriptionUsage(t *testing.T) {
+	for _, providerUsage := range []float64{0, 49, 99} {
+		for _, explicitAmount := range []bool{false, true} {
+			config := sharedQuotaTestConfig()
+			config.BorrowEnabled = false
+			config.Windows[0].Enabled = false
+			config.Windows[1].CapacityMode = SharedQuotaCapacityModeOfficialPercent
+			config.Windows[1].CapacityUSD = nil
+			config.Windows[1].ReserveRatio = 0.01
+			config.Windows[1].HardStopRatio = 0.99
+			now := time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC)
+			start := now.Add(-32 * time.Hour)
+			accountID := int64(42)
+			config.Windows[1].UpstreamAccountID = &accountID
+			members := []SharedQuotaPoolMember{
+				{UserID: 1, Weight: 1, Enabled: true, WeeklyWindowStart: &start},
+				{UserID: 5, Weight: 0.9, Enabled: true, WeeklyWindowStart: &start},
+				{UserID: 9, Weight: 1, Enabled: true, WeeklyWindowStart: &start},
+			}
+			if explicitAmount {
+				amount := 500.0
+				members[1].QuotaUSD = &amount
+			}
+			official := &SharedQuotaOfficialSnapshot{AccountID: accountID, UsedPercent: providerUsage,
+				LimitWindowSeconds: 604800, ResetAt: now.Add(5 * 24 * time.Hour), FetchedAt: now}
+			repo := &sharedQuotaPoolRepoStub{config: config, members: members,
+				totalByWindow: map[string]float64{"long": 771},
+				usageByWindow: map[string]map[int64]float64{"long": {1: 352, 5: 418, 9: 1}},
+				official:      map[string]*SharedQuotaOfficialSnapshot{"long": official}}
+			svc := NewSharedQuotaPoolService(repo)
+			svc.now = func() time.Time { return now }
+			baseline, err := svc.RefreshSnapshot(context.Background(), config.GroupID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, state := range []struct {
+				status  string
+				age     time.Duration
+				credits float64
+			}{
+				{"available", 0, 60134.6},
+				{"available", 20 * time.Minute, 60134.6},
+				{"unavailable", 0, 0},
+				{"available", 0, 0},
+				{"available", 0, 120269.2},
+			} {
+				official.AnalyticsStatus = state.status
+				official.AnalyticsFetchedAt = now.Add(-state.age)
+				official.AnalyticsUsedCredits = state.credits
+				official.AnalyticsCreditsPerUSD = 25
+				official.BaselineUsedCredits = state.credits
+				official.BaselineCapturedAt = now
+				got, err := svc.RefreshSnapshot(context.Background(), config.GroupID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(baseline.Members, got.Members) {
+					t.Fatalf("provider=%v explicit=%v state=%+v changed member accounting", providerUsage, explicitAmount, state)
+				}
+				window := got.Windows[1]
+				// 即使 Analytics 数据恢复，原始订阅累计费用也必须完整保留。
+				if window.TotalUsedUSD != 771 || got.Members[0].UsedUSD != 352 || got.Members[1].UsedUSD != 418 || got.Members[2].UsedUSD != 1 {
+					t.Fatal("subscription costs were reset or replaced by Analytics")
+				}
+				if window.OfficialAccountingStatus != "provider_percent_fallback" || window.OfficialAllocationMode != "provider_percent_fallback" || window.BaseCapacityCredits != 0 {
+					t.Fatalf("unexpected accounting mode: %+v", window)
+				}
+				if len(repo.lastMemberWindows) != 3 || !repo.lastMemberWindows[0].WindowStart.Equal(start) || repo.lastScope.AccountID == nil || *repo.lastScope.AccountID != accountID {
+					t.Fatal("Analytics changed subscription window or cross-group account scope")
+				}
+			}
+		}
 	}
 }
