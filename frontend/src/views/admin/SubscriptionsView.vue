@@ -1546,6 +1546,19 @@ const isAnalyticsSharedQuota = (subscription: UserSubscription): boolean => {
 const formatCredits = (value: number | undefined): string =>
   `${(typeof value === 'number' && Number.isFinite(value) ? value : 0).toFixed(2)} credit`
 
+// 把成员快照统一转换为成员自己的额度利用率，官方池全局百分比只作为旁路状态展示。
+const memberQuotaUtilizationPercent = (subscription: UserSubscription): number => {
+  const member = sharedQuotaForRow(subscription)?.member
+  if (!member) return 0
+  if (typeof member.quota_utilization_percent === 'number' && Number.isFinite(member.quota_utilization_percent)) {
+    return Math.min(Math.max(member.quota_utilization_percent, 0), 100)
+  }
+  const used = isAnalyticsSharedQuota(subscription) ? member.used_credits ?? 0 : member.used_percent ?? 0
+  const maximum = isAnalyticsSharedQuota(subscription) ? member.maximum_credits ?? 0 : member.maximum_percent ?? 0
+  if (!Number.isFinite(used) || !Number.isFinite(maximum) || maximum <= 0) return 0
+  return Math.min(Math.max((used / maximum) * 100, 0), 100)
+}
+
 const sharedUsageDisplay = (subscription: UserSubscription): string => {
   const view = sharedQuotaForRow(subscription)
   if (!view?.member) return '—'
@@ -1553,7 +1566,7 @@ const sharedUsageDisplay = (subscription: UserSubscription): string => {
     return sharedOfficialSnapshotPresent(subscription)
       ? isAnalyticsSharedQuota(subscription)
         ? formatCredits(view.member.used_credits)
-        : formatPercent(view.member.used_percent)
+        : formatPercent(memberQuotaUtilizationPercent(subscription))
       : t('admin.subscriptions.sharedSyncing')
   }
   return `$${(Number.isFinite(view.member.used_usd) ? view.member.used_usd : 0).toFixed(2)}`
@@ -1565,7 +1578,7 @@ const sharedMaximumDisplay = (subscription: UserSubscription): string => {
   if (isOfficialSharedQuota(subscription)) {
     return isAnalyticsSharedQuota(subscription)
       ? formatCredits(view.member.maximum_credits)
-      : formatPercent(view.member.maximum_percent)
+      : formatPercent(100)
   }
   return `$${(Number.isFinite(view.member.maximum_usd) ? view.member.maximum_usd : 0).toFixed(2)}`
 }
@@ -1573,6 +1586,10 @@ const sharedMaximumDisplay = (subscription: UserSubscription): string => {
 const sharedProgressValue = (subscription: UserSubscription): number => {
   const view = sharedQuotaForRow(subscription)
   if (!view?.member || (isOfficialSharedQuota(subscription) && !sharedOfficialSnapshotPresent(subscription))) return 0
+
+  if (isOfficialSharedQuota(subscription) && !isAnalyticsSharedQuota(subscription)) {
+    return memberQuotaUtilizationPercent(subscription)
+  }
 
   const used = isOfficialSharedQuota(subscription)
     ? isAnalyticsSharedQuota(subscription) ? view.member.used_credits ?? 0 : view.member.used_percent ?? 0

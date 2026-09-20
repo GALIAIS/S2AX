@@ -2139,6 +2139,7 @@ export interface SharedQuotaUserProgress {
   maximum_percent?: number
   remaining_percent?: number
   borrowed_percent?: number
+  quota_utilization_percent?: number
   soft_stop_reached: boolean
   hard_stop_reached: boolean
   allowed: boolean
@@ -2195,6 +2196,7 @@ export interface SharedQuotaUserWindowProgress {
   used_percent?: number
   remaining_percent?: number
   borrowed_percent?: number
+  quota_utilization_percent?: number
   soft_stop_reached: boolean
   hard_stop_reached: boolean
   allowed: boolean
@@ -2267,6 +2269,7 @@ export interface SharedQuotaPoolMember {
   maximum_percent?: number
   remaining_percent?: number
   borrowed_percent?: number
+  quota_utilization_percent?: number
 }
 
 export interface SharedQuotaPoolSnapshot {

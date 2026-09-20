@@ -217,6 +217,12 @@ func TestSharedQuotaPoolUsesAccountScopeAndIndividualAmounts(t *testing.T) {
 	if got := window.Members[2].BaseShareUSD; got != 20 {
 		t.Fatalf("weight fallback base share = %v, want 20", got)
 	}
+	if math.Abs(window.Members[0].QuotaUtilizationPercent-(65.0/90.0*100)) > 0.0001 {
+		t.Fatalf("user 1 quota utilization = %v, want %v", window.Members[0].QuotaUtilizationPercent, 65.0/90.0*100)
+	}
+	if math.Abs(window.Members[1].QuotaUtilizationPercent-(10.0/30.0*100)) > 0.0001 {
+		t.Fatalf("user 2 quota utilization = %v, want %v", window.Members[1].QuotaUtilizationPercent, 10.0/30.0*100)
+	}
 	if window.Members[0].Allowed {
 		t.Fatal("user 1 should be denied after cross-group usage exhausted the explicit amount")
 	}
@@ -335,6 +341,53 @@ func TestSharedQuotaPoolOfficialPercentUsesProviderWindowAndLocalFairness(t *tes
 	if got := window.Members[1].UsedPercent; got != 18 {
 		t.Fatalf("user 2 provider-normalized usage = %v, want 18", got)
 	}
+	if math.Abs(window.Members[0].QuotaUtilizationPercent-36) > 0.0001 {
+		t.Fatalf("user 1 quota utilization = %v, want 36", window.Members[0].QuotaUtilizationPercent)
+	}
+	if math.Abs(window.Members[1].QuotaUtilizationPercent-24) > 0.0001 {
+		t.Fatalf("user 2 quota utilization = %v, want 24", window.Members[1].QuotaUtilizationPercent)
+	}
+}
+
+func TestSharedQuotaPoolOfficialAnalyticsIsNotUsedForShortWindow(t *testing.T) {
+	now := time.Date(2026, 8, 3, 4, 0, 0, 0, time.UTC)
+	config := sharedQuotaTestConfig()
+	config.Windows[1].Enabled = false
+	config.Windows[0].CapacityUSD = nil
+	config.Windows[0].CapacityMode = SharedQuotaCapacityModeOfficialPercent
+	config.Windows[0].UpstreamAccountID = func() *int64 { id := int64(42); return &id }()
+	repo := &sharedQuotaPoolRepoStub{
+		config: config,
+		members: []SharedQuotaPoolMember{
+			{UserID: 1, Weight: 1, Enabled: true},
+			{UserID: 2, Weight: 1, Enabled: true},
+		},
+		totalByWindow: map[string]float64{"short": 100},
+		usageByWindow: map[string]map[int64]float64{"short": {1: 60, 2: 40}},
+		official: map[string]*SharedQuotaOfficialSnapshot{
+			"short": {
+				AccountID: 42, UsedPercent: 45, LimitWindowSeconds: 5 * 60 * 60,
+				FetchedAt: now, AnalyticsUsedCredits: 450, AnalyticsStatus: "available",
+				AnalyticsFetchedAt: now, AnalyticsCreditsPerUSD: 25,
+			},
+		},
+	}
+	svc := NewSharedQuotaPoolService(repo)
+	svc.now = func() time.Time { return now }
+	snapshot, err := svc.GetSnapshot(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	window := snapshot.Windows[0]
+	if window.OfficialAllocationMode != "provider_percent_fallback" {
+		t.Fatalf("short-window allocation mode = %q, want provider_percent_fallback", window.OfficialAllocationMode)
+	}
+	if window.OfficialAnalyticsAvailable {
+		t.Fatal("short official window must not use daily analytics calibration")
+	}
+	if window.Members[0].UsedPercent != 27 || window.Members[1].UsedPercent != 18 {
+		t.Fatalf("short-window provider-normalized usage = %#v", window.Members)
+	}
 }
 
 func TestSharedQuotaPoolOfficialPercentPrefersFreshAccountSnapshotOverStalePoolRow(t *testing.T) {
@@ -425,5 +478,9 @@ func TestSharedQuotaPoolOfficialAnalyticsSubtractsPrePoolBaseline(t *testing.T) 
 	}
 	if math.Abs(window.Members[0].UsedCredits-50) > 0.0001 || math.Abs(window.Members[1].UsedCredits-25) > 0.0001 {
 		t.Fatalf("member credits = %#v", window.Members)
+	}
+	if math.Abs(window.Members[0].QuotaUtilizationPercent-(50.0/637.5*100)) > 0.0001 ||
+		math.Abs(window.Members[1].QuotaUtilizationPercent-(25.0/637.5*100)) > 0.0001 {
+		t.Fatalf("member quota utilization = %#v", window.Members)
 	}
 }

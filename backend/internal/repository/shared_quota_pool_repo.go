@@ -297,7 +297,7 @@ func (r *sharedQuotaPoolRepository) GetUsage(ctx context.Context, scope service.
 	var args []any
 	if scope.AccountID != nil && *scope.AccountID > 0 {
 		query = `
-			SELECT user_id, COALESCE(SUM(actual_cost), 0)
+			SELECT user_id, COALESCE(SUM(total_cost), 0)
 			FROM usage_logs
 			WHERE account_id = $1
 			  AND created_at >= $2

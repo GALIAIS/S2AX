@@ -34,10 +34,10 @@ V1 不做以下事情：
 
 ### 3.1 计量口径
 
-- 计费单位：手动模式使用美元等价的 `actual_cost`，与现有订阅扣费一致；官方百分比模式使用上游滚动窗口的 `used_percent`；
-- 统计来源：`usage_logs.actual_cost`。窗口绑定 `upstream_account_id` 时按账号跨所有分组归集，并按 `user_id` 归属；未绑定账号时保留指定分组且 `subscription_id IS NOT NULL` 的兼容口径；
+- 计费单位：传统分组模式使用美元等价的 `actual_cost`，与现有订阅扣费一致；绑定上游账号的资源模式使用未叠加用户/分组倍率的 `total_cost`；官方百分比模式使用上游滚动窗口的 `used_percent`；
+- 统计来源：绑定 `upstream_account_id` 时按账号跨所有分组归集 `usage_logs.total_cost`，并按 `user_id` 归属；未绑定账号时保留指定分组且 `subscription_id IS NOT NULL` 的 `actual_cost` 兼容口径；
 - token：仅用于分析展示，不能作为 V1 的强制额度单位；
-- 金额账与资源账共用 `actual_cost` 作为网关侧可审计的资源近似；模型和官方 Analytics 的差异只影响官方模式换算，不修改用户原有计费；
+- 资源账使用 `total_cost`，金额账仍使用 `actual_cost`；这样不同用户的售价倍率、折扣或赠送策略不会改变其实际占用的上游资源；模型和官方 Analytics 的差异只影响官方模式换算，不修改用户原有计费；
 - 窗口：共享池自己维护多个固定长度滚动窗口，不依赖某一个用户的首次请求时间。默认模板包含 5 小时短窗和 7 天长窗；是否启用、容量和安全线都由管理员分别配置。
 
 ### 3.2 容量与安全线
@@ -163,7 +163,7 @@ API key 鉴权
   -> 目标订阅分组的共享池 admission check（每个启用窗口都必须通过）
   -> 上游转发
   -> 统一计费 Apply
-  -> 写入 usage_logs.actual_cost 与订阅用量
+  -> 写入 usage_logs.total_cost / actual_cost 与订阅用量
 ```
 
 共享池绑定账号时，快照的资源账读取该账号跨分组的全部请求，因此同一用户通过 ADMIN 等其它入口使用该账号，会减少他在目标共享订阅中的剩余额度。ADMIN 和其它分组不会因为目标共享池配置而新增拦截或改写额度；它们只贡献账号级资源账。
@@ -207,7 +207,7 @@ OpenAI/Codex OAuth 账号可选用现有 `OpenAIQuotaService` 调用官方 `/bac
 实现规则：
 
 1. 只保存账号、窗口长度、已用百分比、重置时间和抓取时间，不保存 access token；
-2. V1 兼容模式下，官方百分比只决定总池使用率和 soft/hard 线，成员分摊仍以本地真实 `usage_logs.actual_cost` 按比例计算；V2 Analytics 可用时改用第 13 节的 credit 校准公式；
+2. V1 兼容模式下，官方百分比只决定总池使用率和 soft/hard 线，成员分摊按同一账号窗口内本地真实 `usage_logs.total_cost` 按比例计算；V2 Analytics 可用时改用第 13 节的 credit 校准公式；
 3. 默认 60 秒刷新，15 分钟内的旧快照可继续用于限制并标记为 stale；超过 15 分钟或首次没有快照时，不阻塞网关请求，后台继续刷新；
 4. 配置了账号 ID 时严格使用该账号；未配置时只有分组内恰好一个活跃 OpenAI OAuth 账号才自动选择，多账号直接标记刷新失败，避免误用其它账号；
 5. V2 会将同一官方窗口内的 Analytics credit 与 `/wham/usage` 百分比配对，按第 13 节估算容量；该估算只对同窗口、同周期快照有效，换算率 `1000 credit = 40 USD` 随快照保存，不能跨供应商、跨窗口或跨价格规则复用。
@@ -260,7 +260,7 @@ V2 采用明确的“双层账本”：
 1. **上游事实层**：官方 `/wham/usage` 提供当前滚动窗口百分比、窗口长度和重置时间；
 2. **容量校准层**：官方 `daily-workspace-usage-counts?group_by=day` 提供同一时段的 credit/token 聚合；
 3. **共享池层**：启用或新周期第一次同步时保存 `baseline`，baseline 以前的上游用量不归属于任何共享池成员；
-4. **成员归属层**：官方接口没有按网关用户拆分的 credit，因此成员用量使用本项目同一窗口内的 `usage_logs.actual_cost` 比例归属，
+4. **成员归属层**：官方接口没有按网关用户拆分的 credit，因此成员用量使用本项目同一账号、同一窗口内的 `usage_logs.total_cost` 比例归属，
    并在界面明确标记为“网关本地归属”。它用于公平准入，不伪造官方的逐用户明细。
 
 因此界面和准入口径如下：
@@ -305,7 +305,7 @@ member_max_credits       = member_base_credits × borrow_multiplier
 这里 `C` 是账号当前的绝对上游使用量，`B` 是共享池建立时的账号基线。`available_pool_credits` 只表示账号此刻距离硬线的剩余空间，
 不能拿它反复重算每个成员的基础份额；`allocation_capacity` 才是本周期成员份额的固定锚点。显式 `quota_usd` 先按当前 credits/USD 转为 credit，
 剩余容量按未配置成员的权重分配；如果显式金额总和超过锚点，则按统一比例缩小。`local_used_credits` 由同一账号、同一窗口内的跨分组
-`usage_logs.actual_cost` 乘以快照中的 credits/USD 换算率得到，因此 ADMIN 等入口的同用户用量也会减少目标共享订阅的个人剩余量。
+`usage_logs.total_cost` 乘以快照中的 credits/USD 换算率得到，因此 ADMIN 等入口的同用户用量也会减少目标共享订阅的个人剩余量。
 账号中无法归属到成员的其它用量只减少池的剩余空间，不会被伪造分摊给某个用户。
 
 如果 `P=0` 或 `C` 缺失，不能推导总容量，系统使用百分比回退模式：

@@ -22,6 +22,7 @@ const (
 	officialQuotaSnapshotTTL         = 60 * time.Second
 	officialQuotaMaxStale            = 15 * time.Minute
 	officialAnalyticsSnapshotTTL     = 5 * time.Minute
+	officialAnalyticsMinimumWindow   = 24 * time.Hour
 	sharedQuotaCreditsPerUSD         = openAIAnalyticsCreditsPerUSD
 )
 
@@ -152,24 +153,25 @@ type SharedQuotaPoolMember struct {
 
 type SharedQuotaPoolMemberSnapshot struct {
 	SharedQuotaPoolMember
-	UsedUSD          float64 `json:"used_usd"`
-	BaseShareUSD     float64 `json:"base_share_usd"`
-	MaximumUSD       float64 `json:"maximum_usd"`
-	RemainingUSD     float64 `json:"remaining_usd"`
-	BorrowedUSD      float64 `json:"borrowed_usd"`
-	UsedCredits      float64 `json:"used_credits,omitempty"`
-	BaseShareCredits float64 `json:"base_share_credits,omitempty"`
-	MaximumCredits   float64 `json:"maximum_credits,omitempty"`
-	RemainingCredits float64 `json:"remaining_credits,omitempty"`
-	BorrowedCredits  float64 `json:"borrowed_credits,omitempty"`
-	SharePercent     float64 `json:"share_percent"`
-	Allowed          bool    `json:"allowed"`
-	DecisionReason   string  `json:"decision_reason,omitempty"`
-	UsedPercent      float64 `json:"used_percent,omitempty"`
-	BaseSharePercent float64 `json:"base_share_percent,omitempty"`
-	MaximumPercent   float64 `json:"maximum_percent,omitempty"`
-	RemainingPercent float64 `json:"remaining_percent,omitempty"`
-	BorrowedPercent  float64 `json:"borrowed_percent,omitempty"`
+	UsedUSD                 float64 `json:"used_usd"`
+	BaseShareUSD            float64 `json:"base_share_usd"`
+	MaximumUSD              float64 `json:"maximum_usd"`
+	RemainingUSD            float64 `json:"remaining_usd"`
+	BorrowedUSD             float64 `json:"borrowed_usd"`
+	UsedCredits             float64 `json:"used_credits,omitempty"`
+	BaseShareCredits        float64 `json:"base_share_credits,omitempty"`
+	MaximumCredits          float64 `json:"maximum_credits,omitempty"`
+	RemainingCredits        float64 `json:"remaining_credits,omitempty"`
+	BorrowedCredits         float64 `json:"borrowed_credits,omitempty"`
+	SharePercent            float64 `json:"share_percent"`
+	Allowed                 bool    `json:"allowed"`
+	DecisionReason          string  `json:"decision_reason,omitempty"`
+	UsedPercent             float64 `json:"used_percent,omitempty"`
+	BaseSharePercent        float64 `json:"base_share_percent,omitempty"`
+	MaximumPercent          float64 `json:"maximum_percent,omitempty"`
+	RemainingPercent        float64 `json:"remaining_percent,omitempty"`
+	BorrowedPercent         float64 `json:"borrowed_percent,omitempty"`
+	QuotaUtilizationPercent float64 `json:"quota_utilization_percent"`
 }
 
 type SharedQuotaPoolSnapshot struct {
@@ -293,6 +295,7 @@ type SharedQuotaUserProgress struct {
 	MaximumPercent                   float64                         `json:"maximum_percent,omitempty"`
 	RemainingPercent                 float64                         `json:"remaining_percent,omitempty"`
 	BorrowedPercent                  float64                         `json:"borrowed_percent,omitempty"`
+	QuotaUtilizationPercent          float64                         `json:"quota_utilization_percent"`
 	SoftStopReached                  bool                            `json:"soft_stop_reached"`
 	HardStopReached                  bool                            `json:"hard_stop_reached"`
 	Allowed                          bool                            `json:"allowed"`
@@ -343,6 +346,7 @@ type SharedQuotaUserWindowProgress struct {
 	UsedPercent                      float64   `json:"used_percent,omitempty"`
 	RemainingPercent                 float64   `json:"remaining_percent,omitempty"`
 	BorrowedPercent                  float64   `json:"borrowed_percent,omitempty"`
+	QuotaUtilizationPercent          float64   `json:"quota_utilization_percent"`
 }
 
 type sharedQuotaSnapshotCacheEntry struct {
@@ -495,6 +499,7 @@ func (s *SharedQuotaPoolService) UserProgress(ctx context.Context, groupID, user
 			item.MaximumPercent = member.MaximumPercent
 			item.RemainingPercent = member.RemainingPercent
 			item.BorrowedPercent = member.BorrowedPercent
+			item.QuotaUtilizationPercent = member.QuotaUtilizationPercent
 			item.BaseShareCredits = member.BaseShareCredits
 			item.MaximumCredits = member.MaximumCredits
 			item.UsedCredits = member.UsedCredits
@@ -525,6 +530,7 @@ func (s *SharedQuotaPoolService) UserProgress(ctx context.Context, groupID, user
 		progress.MaximumPercent = item.MaximumPercent
 		progress.RemainingPercent = item.RemainingPercent
 		progress.BorrowedPercent = item.BorrowedPercent
+		progress.QuotaUtilizationPercent = item.QuotaUtilizationPercent
 		progress.OfficialAllocationMode = item.OfficialAllocationMode
 		progress.OfficialAnalyticsAvailable = item.OfficialAnalyticsAvailable
 		progress.OfficialAnalyticsStale = item.OfficialAnalyticsStale
@@ -803,7 +809,8 @@ func (s *SharedQuotaPoolService) calculateWindowSnapshot(ctx context.Context, gr
 			SharedQuotaPoolMember: member, UsedUSD: used, BaseShareUSD: baseShare,
 			MaximumUSD: maximum, RemainingUSD: math.Max(0, maximum-used),
 			BorrowedUSD: math.Max(0, used-baseShare), SharePercent: sharePercent,
-			Allowed: allowed, DecisionReason: reason,
+			QuotaUtilizationPercent: quotaUtilizationPercent(used, maximum),
+			Allowed:                 allowed, DecisionReason: reason,
 		})
 	}
 	return windowSnapshot, nil
@@ -892,7 +899,7 @@ func (s *SharedQuotaPoolService) calculateOfficialWindowSnapshot(ctx context.Con
 		windowSnapshot.OfficialBaselineCapturedAt = official.BaselineCapturedAt
 	}
 
-	analyticsAvailable := official != nil && official.AnalyticsStatus == "available" && !official.AnalyticsFetchedAt.IsZero() && now.Sub(official.AnalyticsFetchedAt) <= officialQuotaMaxStale
+	analyticsAvailable := official != nil && official.AnalyticsStatus == "available" && finiteNonNegative(official.AnalyticsUsedCredits) && analyticsCreditsPerUSD(official) > 0 && !official.AnalyticsFetchedAt.IsZero() && now.Sub(official.AnalyticsFetchedAt) <= officialQuotaMaxStale && officialAnalyticsSupportsWindow(window.WindowSeconds)
 	analyticsStale := official != nil && official.AnalyticsStatus != "" && (official.AnalyticsFetchedAt.IsZero() || now.Sub(official.AnalyticsFetchedAt) > officialAnalyticsSnapshotTTL)
 	var allocationMode string
 	estimatedCapacityCredits := 0.0
@@ -1009,7 +1016,7 @@ func (s *SharedQuotaPoolService) calculateOfficialWindowSnapshot(ctx context.Con
 		}
 		memberSnapshot := SharedQuotaPoolMemberSnapshot{
 			SharedQuotaPoolMember: member, Allowed: allowed, DecisionReason: reason,
-			SharePercent: sharePercent,
+			SharePercent: sharePercent, QuotaUtilizationPercent: quotaUtilizationPercent(memberUsed, memberMaximum),
 		}
 		if allocationMode == "analytics_credit" {
 			memberSnapshot.UsedUSD = memberUsed / creditsPerUSD
@@ -1075,10 +1082,15 @@ func baselineMatchesCycle(snapshot *SharedQuotaOfficialSnapshot) bool {
 }
 
 func analyticsCreditsPerUSD(snapshot *SharedQuotaOfficialSnapshot) float64 {
-	if snapshot != nil && snapshot.AnalyticsCreditsPerUSD > 0 {
+	if snapshot != nil && snapshot.AnalyticsCreditsPerUSD > 0 && !math.IsInf(snapshot.AnalyticsCreditsPerUSD, 0) && !math.IsNaN(snapshot.AnalyticsCreditsPerUSD) {
 		return snapshot.AnalyticsCreditsPerUSD
 	}
 	return sharedQuotaCreditsPerUSD
+}
+
+// finiteNonNegative 拒绝 NaN、无穷大和负数，避免异常上游数值污染份额计算。
+func finiteNonNegative(value float64) bool {
+	return value >= 0 && !math.IsNaN(value) && !math.IsInf(value, 0)
 }
 
 func (s *SharedQuotaPoolService) scheduleOfficialQuotaRefresh(groupID int64, window SharedQuotaPoolWindowConfig) {
@@ -1177,7 +1189,7 @@ func (s *SharedQuotaPoolService) refreshOfficialQuota(ctx context.Context, group
 		snapshot.BaselineCapturedAt = fetchedAt
 		snapshot.BaselineResetAt = snapshot.ResetAt
 	}
-	if s.officialAnalyticsSource != nil && (!previousSameCycle || previous == nil || !analyticsSnapshotFresh(previous, s.now())) {
+	if s.officialAnalyticsSource != nil && officialAnalyticsSupportsWindow(window.WindowSeconds) && (!previousSameCycle || previous == nil || !analyticsSnapshotFresh(previous, s.now())) {
 		analyticsEnd := s.now()
 		analyticsSeconds := providerWindow.LimitWindowSeconds
 		if analyticsSeconds <= 0 {
@@ -1191,24 +1203,37 @@ func (s *SharedQuotaPoolService) refreshOfficialQuota(ctx context.Context, group
 			}
 			log.Printf("official quota analytics refresh failed group=%d window=%s account=%d: %v", groupID, window.Key, accountID, analyticsErr)
 		} else if analytics != nil {
-			snapshot.AnalyticsUsedCredits = math.Max(0, analytics.Credits)
-			snapshot.AnalyticsInputTokens = analytics.InputTokens
-			snapshot.AnalyticsCachedInputTokens = analytics.CachedInputTokens
-			snapshot.AnalyticsOutputTokens = analytics.OutputTokens
-			snapshot.AnalyticsTotalTokens = analytics.TotalTokens
-			snapshot.AnalyticsStartAt = analytics.StartDate
-			snapshot.AnalyticsEndAt = analytics.EndDate
-			snapshot.AnalyticsFetchedAt = analytics.FetchedAt
-			snapshot.AnalyticsCreditsPerUSD = analytics.CreditsPerUSD
-			if snapshot.AnalyticsCreditsPerUSD <= 0 {
-				snapshot.AnalyticsCreditsPerUSD = sharedQuotaCreditsPerUSD
-			}
-			snapshot.AnalyticsSource = analytics.Source
-			snapshot.AnalyticsStatus = analytics.Status
-			snapshot.AnalyticsConfidence = analytics.Confidence
-			snapshot.AnalyticsRecordCount = analytics.RecordCount
-			if !previousSameCycle || previous == nil || previous.AnalyticsStatus != "available" {
-				snapshot.BaselineUsedCredits = snapshot.AnalyticsUsedCredits
+			// 只有带 credit 的完整结果才可以替换当前校准；空结果、token-only
+			// 或未知格式不能覆盖同周期仍可用的旧校准，避免瞬时上游异常放大误差。
+			if analytics.Status == "available" && analytics.CreditsAvailable {
+				snapshot.AnalyticsUsedCredits = math.Max(0, analytics.Credits)
+				snapshot.AnalyticsInputTokens = analytics.InputTokens
+				snapshot.AnalyticsCachedInputTokens = analytics.CachedInputTokens
+				snapshot.AnalyticsOutputTokens = analytics.OutputTokens
+				snapshot.AnalyticsTotalTokens = analytics.TotalTokens
+				snapshot.AnalyticsStartAt = analytics.StartDate
+				snapshot.AnalyticsEndAt = analytics.EndDate
+				snapshot.AnalyticsFetchedAt = analytics.FetchedAt
+				snapshot.AnalyticsCreditsPerUSD = analytics.CreditsPerUSD
+				if snapshot.AnalyticsCreditsPerUSD <= 0 {
+					snapshot.AnalyticsCreditsPerUSD = sharedQuotaCreditsPerUSD
+				}
+				snapshot.AnalyticsSource = analytics.Source
+				snapshot.AnalyticsStatus = analytics.Status
+				snapshot.AnalyticsConfidence = analytics.Confidence
+				snapshot.AnalyticsRecordCount = analytics.RecordCount
+				if !previousSameCycle || previous == nil || previous.AnalyticsStatus != "available" {
+					snapshot.BaselineUsedCredits = snapshot.AnalyticsUsedCredits
+					if previousSameCycle && previous != nil {
+						// Analytics 首次恢复时，provider 基线也必须同步重锚，
+						// 否则会把恢复前的本地日志错误归入新 credit 周期。
+						snapshot.BaselineUsedPercent = clampPercent(providerWindow.UsedPercent)
+						snapshot.BaselineCapturedAt = laterTime(fetchedAt, analytics.FetchedAt)
+						snapshot.BaselineResetAt = snapshot.ResetAt
+					}
+				}
+			} else if !previousSameCycle {
+				snapshot.AnalyticsStatus = analytics.Status
 			}
 		}
 	}
@@ -1229,6 +1254,20 @@ func (s *SharedQuotaPoolService) refreshOfficialQuota(ctx context.Context, group
 
 func analyticsSnapshotFresh(snapshot *SharedQuotaOfficialSnapshot, now time.Time) bool {
 	return snapshot != nil && snapshot.AnalyticsStatus == "available" && !snapshot.AnalyticsFetchedAt.IsZero() && now.Sub(snapshot.AnalyticsFetchedAt) <= officialAnalyticsSnapshotTTL
+}
+
+// officialAnalyticsSupportsWindow 只允许日粒度 Analytics 校准不短于一天的官方窗口。
+// 5 小时窗口无法由按天聚合精确还原，必须退回 provider 百分比和本地归属比例。
+func officialAnalyticsSupportsWindow(windowSeconds int) bool {
+	return time.Duration(windowSeconds)*time.Second >= officialAnalyticsMinimumWindow
+}
+
+// laterTime 选择两个观测时间中较新的一个，用于恢复校准时重设基线起点。
+func laterTime(left, right time.Time) time.Time {
+	if right.After(left) {
+		return right
+	}
+	return left
 }
 
 func resetTimesMatch(left, right time.Time) bool {
@@ -1430,6 +1469,15 @@ func clampPercent(value float64) float64 {
 		return 0
 	}
 	return math.Max(0, math.Min(100, value))
+}
+
+// quotaUtilizationPercent 把内部金额、credit 或官方百分比统一换算成成员自己的
+// 额度使用率。对外展示只应使用这个比例，避免把账号全局百分比误当成用户额度进度。
+func quotaUtilizationPercent(used, maximum float64) float64 {
+	if maximum <= 0 || math.IsNaN(used) || math.IsInf(used, 0) || math.IsNaN(maximum) || math.IsInf(maximum, 0) {
+		return 0
+	}
+	return clampPercent(used / maximum * 100)
 }
 
 func maxInt64(left, right int64) int64 {

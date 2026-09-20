@@ -292,12 +292,13 @@ function officialSnapshotPresent(window: SharedQuotaUserWindowProgress): boolean
 
 function sharedUsed(window: SharedQuotaUserWindowProgress): number {
   if (!isOfficialSharedWindow(window)) return window.used_usd
-  return window.official_allocation_mode === 'analytics_credit' ? window.used_credits || 0 : window.used_percent || 0
+  if (window.official_allocation_mode === 'analytics_credit') return window.used_credits || 0
+  return sharedQuotaUtilizationPercent(window)
 }
 
 function sharedMaximum(window: SharedQuotaUserWindowProgress): number {
   if (!isOfficialSharedWindow(window)) return window.maximum_usd
-  return window.official_allocation_mode === 'analytics_credit' ? window.maximum_credits || 0 : window.maximum_percent || 0
+  return window.official_allocation_mode === 'analytics_credit' ? window.maximum_credits || 0 : 100
 }
 
 function sharedUsage(window: SharedQuotaUserWindowProgress): string {
@@ -306,9 +307,27 @@ function sharedUsage(window: SharedQuotaUserWindowProgress): string {
     if (window.official_allocation_mode === 'analytics_credit') {
       return `${(window.used_credits || 0).toFixed(2)} / ${(window.maximum_credits || 0).toFixed(2)} credit`
     }
-    return `${(window.used_percent || 0).toFixed(2)}%/${(window.maximum_percent || 0).toFixed(2)}%`
+    return `${sharedQuotaUtilizationPercent(window).toFixed(2)}%/100.00%`
   }
   return formatUsage(window.used_usd, window.maximum_usd)
+}
+
+// 官方百分比回退只有账号级事实，界面用成员自己的额度利用率避免暴露错误分母。
+function sharedQuotaUtilizationPercent(window: SharedQuotaUserWindowProgress): number {
+  if (
+    typeof window.quota_utilization_percent === 'number' &&
+    Number.isFinite(window.quota_utilization_percent)
+  ) {
+    return Math.min(Math.max(window.quota_utilization_percent, 0), 100)
+  }
+  const maximum = window.official_allocation_mode === 'analytics_credit'
+    ? window.maximum_credits || 0
+    : window.maximum_percent || 0
+  const used = window.official_allocation_mode === 'analytics_credit'
+    ? window.used_credits || 0
+    : window.used_percent || 0
+  if (maximum <= 0) return 0
+  return Math.min(Math.max((used / maximum) * 100, 0), 100)
 }
 
 function getSharedProgressBarClass(sub: UserSubscription): string {

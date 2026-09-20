@@ -22,7 +22,7 @@ func TestSharedQuotaPoolRepositoryUsesAccountScopeAcrossGroups(t *testing.T) {
 	end := start.Add(7 * 24 * time.Hour)
 	accountID := int64(50680)
 	mock.ExpectQuery(regexp.QuoteMeta(`
-			SELECT user_id, COALESCE(SUM(actual_cost), 0)
+			SELECT user_id, COALESCE(SUM(total_cost), 0)
 			FROM usage_logs
 			WHERE account_id = $1
 			  AND created_at >= $2
