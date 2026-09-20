@@ -16,7 +16,7 @@ import (
 func TestSharedQuotaPoolRepositoryUsesAccountScopeAcrossGroups(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	start := time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC)
 	end := start.Add(7 * 24 * time.Hour)
@@ -50,7 +50,7 @@ func TestSharedQuotaPoolRepositoryUsesAccountScopeAcrossGroups(t *testing.T) {
 func TestSharedQuotaPoolRepositoryUsesMemberSubscriptionWindows(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	end := time.Date(2026, 9, 26, 23, 15, 0, 0, time.UTC)
 	userOneStart := end.Add(-7 * 24 * time.Hour)
