@@ -59,7 +59,7 @@ func TestSharedQuotaPoolRepositoryUsesMemberSubscriptionWindows(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`
 			SELECT l.user_id, COALESCE(SUM(l.total_cost), 0)
 			FROM usage_logs l
-			JOIN (VALUES ($3,$4),($5,$6)) AS member_windows(user_id, window_start)
+			JOIN (VALUES ($3::bigint,$4::timestamptz),($5::bigint,$6::timestamptz)) AS member_windows(user_id, window_start)
 			  ON member_windows.user_id = l.user_id
 			WHERE l.account_id = $1
 			  AND l.created_at >= member_windows.window_start

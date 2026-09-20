@@ -336,7 +336,8 @@ func (r *sharedQuotaPoolRepository) GetUsage(ctx context.Context, scope service.
 		for _, memberWindow := range scopedMemberWindows {
 			userPlaceholder := len(args) + 1
 			startPlaceholder := len(args) + 2
-			values = append(values, fmt.Sprintf("($%d,$%d)", userPlaceholder, startPlaceholder))
+			// 独立 VALUES 参数无法从列定义推断类型，显式声明类型以避免 PostgreSQL 将用户 ID 推断为 text。
+			values = append(values, fmt.Sprintf("($%d::bigint,$%d::timestamptz)", userPlaceholder, startPlaceholder))
 			args = append(args, memberWindow.UserID, memberWindow.WindowStart)
 		}
 		memberValues := strings.Join(values, ",")
