@@ -118,11 +118,12 @@
             {{ t('admin.sharedQuota.noMembers') }}
           </div>
           <div v-else class="max-h-[360px] overflow-auto">
-            <table class="w-full min-w-[760px] text-sm">
+            <table class="w-full min-w-[880px] text-sm">
               <thead class="sticky top-0 z-[1] bg-gray-50 dark:bg-dark-700">
                 <tr class="border-b border-gray-200 dark:border-dark-600">
                   <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.sharedQuota.member') }}</th>
                   <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.sharedQuota.weight') }}</th>
+                  <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.sharedQuota.quota') }}</th>
                   <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.sharedQuota.share') }}</th>
                   <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.sharedQuota.used') }}</th>
                   <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.sharedQuota.maximum') }}</th>
@@ -138,6 +139,9 @@
                   </td>
                   <td class="px-3 py-2 text-right">
                     <input v-model.number="member.weight" type="number" min="0.0001" max="100000" step="0.1" class="hide-spinner input w-24 text-right" />
+                  </td>
+                  <td class="px-3 py-2 text-right">
+                    <input v-model.number="member.quota_usd" type="number" min="0" step="0.01" :placeholder="t('admin.sharedQuota.quotaFallback')" class="hide-spinner input w-28 text-right" />
                   </td>
                   <td class="px-3 py-2 text-right font-mono text-gray-700 dark:text-gray-300">{{ (windowMember(member.user_id)?.share_percent ?? 0).toFixed(2) }}%</td>
                   <td class="px-3 py-2 text-right font-mono text-gray-700 dark:text-gray-300">{{ displayAmount(windowMember(member.user_id)) }}</td>
@@ -326,11 +330,16 @@ const save = async () => {
         soft_stop_ratio: window.softStopPercent / 100,
         hard_stop_ratio: window.hardStopPercent / 100
       })),
-      members: editableMembers.value.map(member => ({
-        user_id: member.user_id,
-        weight: member.weight,
-        enabled: member.enabled
-      }))
+      members: editableMembers.value.map(member => {
+        // 空输入表示恢复按权重分配，避免 number 输入框把空值提交成空字符串。
+        const quotaUSD = Number(member.quota_usd)
+        return {
+          user_id: member.user_id,
+          weight: member.weight,
+          quota_usd: Number.isFinite(quotaUSD) && quotaUSD > 0 ? quotaUSD : null,
+          enabled: member.enabled
+        }
+      })
     })
     appStore.showSuccess(t('admin.sharedQuota.saveSuccess'))
     emit('success')

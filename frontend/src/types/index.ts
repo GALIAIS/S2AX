@@ -2245,6 +2245,8 @@ export interface SharedQuotaPoolMember {
   email: string
   username: string
   weight: number
+  // 空值表示使用权重分配；数字表示成员的显式基础金额。
+  quota_usd?: number | null
   enabled: boolean
   configured: boolean
   used_usd: number

@@ -207,13 +207,14 @@ func (r *sharedQuotaPoolRepository) SaveConfigAndWindowsAndMembers(ctx context.C
 
 	for _, member := range members {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO shared_quota_pool_members (group_id, user_id, weight, enabled)
-			VALUES ($1,$2,$3,$4)
+			INSERT INTO shared_quota_pool_members (group_id, user_id, weight, quota_usd, enabled)
+			VALUES ($1,$2,$3,$4,$5)
 			ON CONFLICT (group_id, user_id) DO UPDATE SET
 				weight = EXCLUDED.weight,
+				quota_usd = EXCLUDED.quota_usd,
 				enabled = EXCLUDED.enabled,
 				updated_at = NOW()`,
-			config.GroupID, member.UserID, member.Weight, member.Enabled); err != nil {
+			config.GroupID, member.UserID, member.Weight, nilFloat(member.QuotaUSD), member.Enabled); err != nil {
 			return err
 		}
 	}
@@ -225,17 +226,18 @@ func (r *sharedQuotaPoolRepository) SaveConfigAndWindowsAndMembers(ctx context.C
 	return tx.Commit()
 }
 
-func (r *sharedQuotaPoolRepository) UpsertMember(ctx context.Context, groupID, userID int64, weight float64, enabled bool) error {
+func (r *sharedQuotaPoolRepository) UpsertMember(ctx context.Context, groupID, userID int64, weight float64, quotaUSD *float64, enabled bool) error {
 	if r == nil || r.db == nil {
 		return nil
 	}
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO shared_quota_pool_members (group_id, user_id, weight, enabled)
-		VALUES ($1,$2,$3,$4)
+		INSERT INTO shared_quota_pool_members (group_id, user_id, weight, quota_usd, enabled)
+		VALUES ($1,$2,$3,$4,$5)
 		ON CONFLICT (group_id, user_id) DO UPDATE SET
 			weight = EXCLUDED.weight,
+			quota_usd = EXCLUDED.quota_usd,
 			enabled = EXCLUDED.enabled,
-			updated_at = NOW()`, groupID, userID, weight, enabled)
+			updated_at = NOW()`, groupID, userID, weight, nilFloat(quotaUSD), enabled)
 	return err
 }
 
@@ -254,7 +256,7 @@ func (r *sharedQuotaPoolRepository) ListActiveMembers(ctx context.Context, group
 	const query = `
 		SELECT DISTINCT ON (us.user_id)
 			us.user_id, us.id, COALESCE(u.email, ''), COALESCE(u.username, ''),
-			COALESCE(m.weight, 1), COALESCE(m.enabled, TRUE), (m.user_id IS NOT NULL)
+			COALESCE(m.weight, 1), m.quota_usd, COALESCE(m.enabled, TRUE), (m.user_id IS NOT NULL)
 		FROM user_subscriptions us
 		JOIN users u ON u.id = us.user_id AND u.deleted_at IS NULL
 		LEFT JOIN shared_quota_pool_members m
@@ -273,27 +275,47 @@ func (r *sharedQuotaPoolRepository) ListActiveMembers(ctx context.Context, group
 	members := make([]service.SharedQuotaPoolMember, 0)
 	for rows.Next() {
 		var member service.SharedQuotaPoolMember
-		if err := rows.Scan(&member.UserID, &member.SubscriptionID, &member.Email, &member.Username, &member.Weight, &member.Enabled, &member.Configured); err != nil {
+		var quotaUSD sql.NullFloat64
+		if err := rows.Scan(&member.UserID, &member.SubscriptionID, &member.Email, &member.Username, &member.Weight, &quotaUSD, &member.Enabled, &member.Configured); err != nil {
 			return nil, err
+		}
+		if quotaUSD.Valid {
+			member.QuotaUSD = &quotaUSD.Float64
 		}
 		members = append(members, member)
 	}
 	return members, rows.Err()
 }
 
-func (r *sharedQuotaPoolRepository) GetUsage(ctx context.Context, groupID int64, windowStart, windowEnd time.Time) (float64, map[int64]float64, error) {
+func (r *sharedQuotaPoolRepository) GetUsage(ctx context.Context, scope service.SharedQuotaUsageScope, windowStart, windowEnd time.Time) (float64, map[int64]float64, error) {
 	if r == nil || r.db == nil {
 		return 0, map[int64]float64{}, nil
 	}
-	const query = `
-		SELECT user_id, COALESCE(SUM(actual_cost), 0)
-		FROM usage_logs
-		WHERE group_id = $1
-		  AND subscription_id IS NOT NULL
-		  AND created_at >= $2
-		  AND created_at < $3
-		GROUP BY user_id`
-	rows, err := r.db.QueryContext(ctx, query, groupID, windowStart, windowEnd)
+	// 绑定上游账号时必须跨分组读取，才能把 ADMIN 等入口的同账号消耗
+	// 归属于同一个用户；未绑定账号时继续使用旧的目标分组范围。
+	var query string
+	var args []any
+	if scope.AccountID != nil && *scope.AccountID > 0 {
+		query = `
+			SELECT user_id, COALESCE(SUM(actual_cost), 0)
+			FROM usage_logs
+			WHERE account_id = $1
+			  AND created_at >= $2
+			  AND created_at < $3
+			GROUP BY user_id`
+		args = []any{*scope.AccountID, windowStart, windowEnd}
+	} else {
+		query = `
+			SELECT user_id, COALESCE(SUM(actual_cost), 0)
+			FROM usage_logs
+			WHERE group_id = $1
+			  AND subscription_id IS NOT NULL
+			  AND created_at >= $2
+			  AND created_at < $3
+			GROUP BY user_id`
+		args = []any{scope.GroupID, windowStart, windowEnd}
+	}
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return 0, nil, err
 	}

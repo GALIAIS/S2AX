@@ -79,9 +79,13 @@ type UpdateSharedQuotaPoolRequest struct {
 	Members                    []service.SharedQuotaPoolMemberInput  `json:"members"`
 }
 
+// UpdateSharedQuotaMemberRequest 支持单成员金额覆盖；未提供金额时保留旧值，
+// 只有显式设置 clear_quota_usd 才恢复按权重分配。
 type UpdateSharedQuotaMemberRequest struct {
-	Weight  float64 `json:"weight"`
-	Enabled bool    `json:"enabled"`
+	Weight        float64  `json:"weight"`
+	QuotaUSD      *float64 `json:"quota_usd"`
+	ClearQuotaUSD bool     `json:"clear_quota_usd"`
+	Enabled       bool     `json:"enabled"`
 }
 
 // List handles listing all subscriptions with pagination and filters
@@ -379,7 +383,7 @@ func (h *SubscriptionHandler) UpdateSharedQuota(c *gin.Context) {
 		members = make([]service.SharedQuotaPoolMemberInput, 0, len(existing.Members))
 		for _, member := range existing.Members {
 			members = append(members, service.SharedQuotaPoolMemberInput{
-				UserID: member.UserID, Weight: member.Weight, Enabled: member.Enabled,
+				UserID: member.UserID, Weight: member.Weight, QuotaUSD: member.QuotaUSD, Enabled: member.Enabled,
 			})
 		}
 	}
@@ -427,7 +431,7 @@ func (h *SubscriptionHandler) UpdateSharedQuota(c *gin.Context) {
 	response.Success(c, snapshot)
 }
 
-// UpdateSharedQuotaMember changes one user's weight or membership state.
+// UpdateSharedQuotaMember changes one user's weight, amount override, or membership state.
 func (h *SubscriptionHandler) UpdateSharedQuotaMember(c *gin.Context) {
 	groupID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || groupID <= 0 {
@@ -444,8 +448,25 @@ func (h *SubscriptionHandler) UpdateSharedQuotaMember(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	quotaUSD := req.QuotaUSD
+	if req.ClearQuotaUSD {
+		quotaUSD = nil
+	} else if quotaUSD == nil {
+		// 兼容旧客户端只提交 weight/enabled 的请求，避免无意清除金额覆盖。
+		existing, existingErr := h.subscriptionService.GetSharedQuotaPool(c.Request.Context(), groupID)
+		if existingErr != nil {
+			response.ErrorFrom(c, existingErr)
+			return
+		}
+		for _, member := range existing.Members {
+			if member.UserID == userID {
+				quotaUSD = member.QuotaUSD
+				break
+			}
+		}
+	}
 	snapshot, err := h.subscriptionService.UpdateSharedQuotaMember(c.Request.Context(), groupID, service.SharedQuotaPoolMemberInput{
-		UserID: userID, Weight: req.Weight, Enabled: req.Enabled,
+		UserID: userID, Weight: req.Weight, QuotaUSD: quotaUSD, Enabled: req.Enabled,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

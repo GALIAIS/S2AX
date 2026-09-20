@@ -15,6 +15,7 @@ type sharedQuotaPoolRepoStub struct {
 	totalByWindow map[string]float64
 	usageByWindow map[string]map[int64]float64
 	official      map[string]*SharedQuotaOfficialSnapshot
+	lastScope     SharedQuotaUsageScope
 }
 
 type sharedQuotaAccountRepoStub struct {
@@ -50,12 +51,12 @@ func (r *sharedQuotaPoolRepoStub) SaveConfigAndWindowsAndMembers(_ context.Conte
 	r.config.Windows = windows
 	r.members = r.members[:0]
 	for _, member := range members {
-		r.members = append(r.members, SharedQuotaPoolMember{UserID: member.UserID, Weight: member.Weight, Enabled: member.Enabled, Configured: true})
+		r.members = append(r.members, SharedQuotaPoolMember{UserID: member.UserID, Weight: member.Weight, QuotaUSD: member.QuotaUSD, Enabled: member.Enabled, Configured: true})
 	}
 	return nil
 }
 
-func (r *sharedQuotaPoolRepoStub) UpsertMember(context.Context, int64, int64, float64, bool) error {
+func (r *sharedQuotaPoolRepoStub) UpsertMember(context.Context, int64, int64, float64, *float64, bool) error {
 	return nil
 }
 
@@ -65,7 +66,8 @@ func (r *sharedQuotaPoolRepoStub) ListActiveMembers(context.Context, int64, time
 	return append([]SharedQuotaPoolMember(nil), r.members...), nil
 }
 
-func (r *sharedQuotaPoolRepoStub) GetUsage(_ context.Context, _ int64, windowStart, windowEnd time.Time) (float64, map[int64]float64, error) {
+func (r *sharedQuotaPoolRepoStub) GetUsage(_ context.Context, scope SharedQuotaUsageScope, windowStart, windowEnd time.Time) (float64, map[int64]float64, error) {
+	r.lastScope = scope
 	windowKey := "long"
 	if windowEnd.Sub(windowStart) <= 6*time.Hour {
 		windowKey = "short"
@@ -176,6 +178,47 @@ func TestSharedQuotaPoolWeightedSharesAndBorrowing(t *testing.T) {
 	}
 	if !decision.Allowed || decision.MaximumUSD != 37.5 {
 		t.Fatalf("borrow decision = %#v, want allowed with 37.5 maximum", decision)
+	}
+}
+
+// TestSharedQuotaPoolUsesAccountScopeAndIndividualAmounts 验证同账号跨分组用量
+// 会进入目标池资源账，同时显式金额优先于成员权重。
+func TestSharedQuotaPoolUsesAccountScopeAndIndividualAmounts(t *testing.T) {
+	config := sharedQuotaTestConfig()
+	config.Windows[0].Enabled = false
+	accountID := int64(42)
+	config.Windows[1].UpstreamAccountID = &accountID
+	quotaA, quotaB := 60.0, 20.0
+	repo := &sharedQuotaPoolRepoStub{
+		config: config,
+		members: []SharedQuotaPoolMember{
+			{UserID: 1, Weight: 1, QuotaUSD: &quotaA, Enabled: true},
+			{UserID: 2, Weight: 1, QuotaUSD: &quotaB, Enabled: true},
+			{UserID: 3, Weight: 1, Enabled: true},
+		},
+		total: 90,
+		usage: map[int64]float64{1: 65, 2: 10},
+	}
+
+	snapshot, err := NewSharedQuotaPoolService(repo).GetSnapshot(context.Background(), config.GroupID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo.lastScope.AccountID == nil || *repo.lastScope.AccountID != accountID || repo.lastScope.GroupID != config.GroupID {
+		t.Fatalf("usage scope = %#v, want account %d with target group %d", repo.lastScope, accountID, config.GroupID)
+	}
+	window := snapshot.Windows[1]
+	if got := window.Members[0].BaseShareUSD; got != quotaA {
+		t.Fatalf("user 1 base share = %v, want %v", got, quotaA)
+	}
+	if got := window.Members[1].BaseShareUSD; got != quotaB {
+		t.Fatalf("user 2 base share = %v, want %v", got, quotaB)
+	}
+	if got := window.Members[2].BaseShareUSD; got != 20 {
+		t.Fatalf("weight fallback base share = %v, want 20", got)
+	}
+	if window.Members[0].Allowed {
+		t.Fatal("user 1 should be denied after cross-group usage exhausted the explicit amount")
 	}
 }
 
@@ -377,7 +420,7 @@ func TestSharedQuotaPoolOfficialAnalyticsSubtractsPrePoolBaseline(t *testing.T) 
 	if math.Abs(window.OfficialAvailablePoolCredits-660) > 0.0001 {
 		t.Fatalf("available pool credits = %v, want 660", window.OfficialAvailablePoolCredits)
 	}
-	if math.Abs(window.Members[0].BaseShareCredits-330) > 0.0001 || math.Abs(window.Members[1].BaseShareCredits-330) > 0.0001 {
+	if math.Abs(window.Members[0].BaseShareCredits-425) > 0.0001 || math.Abs(window.Members[1].BaseShareCredits-425) > 0.0001 {
 		t.Fatalf("base shares = %#v", window.Members)
 	}
 	if math.Abs(window.Members[0].UsedCredits-50) > 0.0001 || math.Abs(window.Members[1].UsedCredits-25) > 0.0001 {

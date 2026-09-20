@@ -486,7 +486,7 @@ export interface UpdateSharedQuotaPoolRequest {
   capacity_mode?: 'manual_usd' | 'official_percent'
   upstream_account_id?: number | null
   windows: Array<Pick<SharedQuotaPoolWindowConfig, 'key' | 'enabled' | 'window_seconds' | 'capacity_usd' | 'reserve_ratio' | 'soft_stop_ratio' | 'hard_stop_ratio' | 'capacity_mode' | 'upstream_account_id'>>
-  members: Array<{ user_id: number; weight: number; enabled: boolean }>
+  members: Array<{ user_id: number; weight: number; quota_usd?: number | null; enabled: boolean }>
 }
 
 export async function getSharedQuota(

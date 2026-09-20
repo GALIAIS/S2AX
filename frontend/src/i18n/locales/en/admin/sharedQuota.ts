@@ -2,7 +2,7 @@ export default {
   sharedQuota: {
     action: 'Shared quota pool',
     title: 'Shared quota pool / dynamic allocation',
-    description: 'Weighted allocation with controlled borrowing before safety lines. Official mode uses Analytics credits as the primary calibration and marks the conservative percent fallback when calibration is unavailable.',
+    description: 'Allocate shared capacity by an individual amount or weight. When an upstream account is bound, usage is aggregated across groups while admission remains limited to this subscription group. Borrowing stays controlled by the safety lines.',
     enabled: 'Enable shared pool',
     capacity: 'Window capacity (USD)',
     mode: 'Capacity source',
@@ -28,6 +28,8 @@ export default {
     members: 'Member allocation',
     member: 'Member',
     weight: 'Weight',
+    quota: 'Individual amount (USD)',
+    quotaFallback: 'By weight',
     share: 'Base share',
     used: 'Used',
     maximum: 'Admission cap',

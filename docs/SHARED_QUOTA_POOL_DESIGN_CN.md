@@ -1,8 +1,8 @@
 # 共享订阅额度池与动态公平分配设计
 
-状态：V2 实现中（多窗口；官方百分比 + Analytics credit 校准）
+状态：V3 实现中（跨分组账号资源账；成员独立金额；官方百分比 + Analytics credit 校准）
 适用版本：SAX 分支
-最后更新：2026-08-04
+最后更新：2026-09-20
 
 ## 1. 背景与目标
 
@@ -35,8 +35,9 @@ V1 不做以下事情：
 ### 3.1 计量口径
 
 - 计费单位：手动模式使用美元等价的 `actual_cost`，与现有订阅扣费一致；官方百分比模式使用上游滚动窗口的 `used_percent`；
-- 统计来源：`usage_logs.actual_cost`，仅统计当前共享池窗口内、指定分组且 `subscription_id IS NOT NULL` 的记录；
+- 统计来源：`usage_logs.actual_cost`。窗口绑定 `upstream_account_id` 时按账号跨所有分组归集，并按 `user_id` 归属；未绑定账号时保留指定分组且 `subscription_id IS NOT NULL` 的兼容口径；
 - token：仅用于分析展示，不能作为 V1 的强制额度单位；
+- 金额账与资源账共用 `actual_cost` 作为网关侧可审计的资源近似；模型和官方 Analytics 的差异只影响官方模式换算，不修改用户原有计费；
 - 窗口：共享池自己维护多个固定长度滚动窗口，不依赖某一个用户的首次请求时间。默认模板包含 5 小时短窗和 7 天长窗；是否启用、容量和安全线都由管理员分别配置。
 
 ### 3.2 容量与安全线
@@ -53,11 +54,16 @@ hard_limit(window)    = distributable(window) × hard_stop_ratio(window)
 
 ### 3.3 多窗口准入与权重份额
 
-对共享池窗口开始时或当前有效的订阅用户，默认权重为 1。用户权重可由管理员调整：
+对共享池窗口开始时或当前有效的订阅用户，默认权重为 1。管理员可以为某个成员填写 `quota_usd` 基础金额；未填写的成员继续使用权重分配。手动 USD 或 Analytics 等值美元可用时：
 
 ```text
-base_share(user, window) = distributable(window) × user_weight / Σ(active_user_weight)
+explicit_total = Σ(quota_usd)
+fallback_capacity = max(0, allocation_capacity - explicit_total)
+base_share(explicit user) = quota_usd
+base_share(weight user) = fallback_capacity × user_weight / Σ(fallback_weight)
 ```
+
+当显式金额超过当前可分配容量时，所有显式金额按同一比例缩小，保留用户之间的比例并保证全池硬线；官方百分比没有可靠美元等值时，`quota_usd` 暂时只作为相对权重，Analytics 恢复后自动切换回金额计算。
 
 显示给用户的“100%”应表示“已用 / 自己当前分配份额”，而不是把三人的用量相加后都显示同一个百分比。
 
@@ -84,7 +90,7 @@ allow(request, user) = allow(short) AND allow(long) AND allow(other_enabled_wind
 - 管理员显式禁用成员时，该用户在共享池中拒绝请求，但订阅记录仍保留；
 - 撤销/过期订阅不再参与新窗口分配；历史 `usage_logs` 只用于原窗口审计；
 - 新增成员不追溯历史用量，加入后按当前窗口剩余容量重新计算；
-- 权重修改立即影响当前窗口的“未使用份额”，不修改已用金额。
+- 权重或 `quota_usd` 修改立即影响当前窗口的“未使用份额”，不修改已用金额；没有显式金额时权重才决定基础份额。
 
 ## 4. 数据模型
 
@@ -142,6 +148,7 @@ allow(request, user) = allow(short) AND allow(long) AND allow(other_enabled_wind
 | --- | --- |
 | `group_id/user_id` | 联合主键 |
 | `weight` | 正数权重，默认 1 |
+| `quota_usd` | 可选的窗口基础金额；填写后优先于权重，超过容量时按比例缩小 |
 | `enabled` | 是否允许该用户使用共享池 |
 | `created_at/updated_at` | 审计时间 |
 
@@ -153,11 +160,13 @@ allow(request, user) = allow(short) AND allow(long) AND allow(other_enabled_wind
 API key 鉴权
   -> 读取订阅缓存
   -> 维护订阅日/月窗口
-  -> 共享池 admission check（每个启用窗口都必须通过）
+  -> 目标订阅分组的共享池 admission check（每个启用窗口都必须通过）
   -> 上游转发
   -> 统一计费 Apply
   -> 写入 usage_logs.actual_cost 与订阅用量
 ```
+
+共享池绑定账号时，快照的资源账读取该账号跨分组的全部请求，因此同一用户通过 ADMIN 等其它入口使用该账号，会减少他在目标共享订阅中的剩余额度。ADMIN 和其它分组不会因为目标共享池配置而新增拦截或改写额度；它们只贡献账号级资源账。
 
 共享池检查位于转发前，不参与 token 首字节计时；默认 2 秒本地快照缓存只对已启用的共享池生效。数据库查询失败时 V1 采用 fail-open 并记录告警，避免可选控制面故障把所有 API 变成 503；现有分组周限额仍然作为兜底。管理员可通过控制台快照判断是否应关闭该池或恢复固定周限额。
 
@@ -178,7 +187,7 @@ API key 鉴权
 - `PUT /api/v1/admin/groups/:id/shared-quota/members/:user_id`：单独更新成员覆盖；
 - `DELETE /api/v1/admin/groups/:id/shared-quota/members/:user_id`：删除覆盖并恢复默认成员。
 
-管理员接口只返回邮箱/用户名、权重、用量和计算份额，不返回 API key、上游账号凭据或请求内容。
+管理员接口只返回邮箱/用户名、权重、独立金额、用量和计算份额，不返回 API key、上游账号凭据或请求内容。单成员更新接口可用 `clear_quota_usd=true` 恢复按权重分配。
 
 ## 8. 用户展示
 
@@ -207,13 +216,13 @@ OpenAI/Codex OAuth 账号可选用现有 `OpenAIQuotaService` 调用官方 `/bac
 
 ## 10. 运维与审计
 
-管理员每次配置修改应进入现有 admin audit log，记录：操作者、分组、旧配置、新配置、窗口增删/启停、成员权重变更和结果。控制台应按窗口显示：剩余时间、共享池使用率、soft/hard 状态、每个成员的 base share 与 borrow amount。
+管理员每次配置修改应进入现有 admin audit log，记录：操作者、分组、旧配置、新配置、窗口增删/启停、成员权重和独立金额变更以及结果。控制台应按窗口显示：剩余时间、共享池使用率、soft/hard 状态、每个成员的 base share、独立金额、已用和 borrow amount。
 
 应监控：共享池查询失败次数、fail-open 次数、窗口推进失败、池达到 soft/hard 的次数、快照年龄和 usage log 对账差异。
 
 ## 11. 部署与回滚
 
-1. 先应用 311 基础快照迁移，再应用 312 Analytics credit 与 baseline 增量迁移；
+1. 先应用 311 基础快照迁移，再应用 312 Analytics credit 与 baseline 增量迁移，最后应用 317 成员独立金额迁移；
 2. 发布后默认所有池关闭，不影响旧用户；
 3. 管理员配置并观察至少一个窗口；
 4. 若策略异常，关闭 `enabled` 即回到原有分组日/周/月限额；也可只关闭异常窗口；
@@ -223,6 +232,8 @@ OpenAI/Codex OAuth 账号可选用现有 `OpenAIQuotaService` 调用官方 `/bac
 
 - 3 人等权时份额为 33.333…%，不能因为显示舍入导致总份额超过 100%；
 - 权重 2:1:1 时份额为 50/25/25；
+- 成员金额配置为 600/600/300 时，基础份额按金额分配，未配置成员继续按剩余容量和权重分配；
+- 绑定账号后，目标分组和 ADMIN 的同账号日志均按用户归集；目标分组执行准入，ADMIN 不被目标池拦截；
 - 用户未超过 base share 时允许；超过 base 且 soft stop 未到时仅在借用开启时允许；
 - soft stop 后借用拒绝但其他用户自己的 base share仍可用；
 - hard stop 后所有成员拒绝；
@@ -286,13 +297,16 @@ distributable_credits    = estimated_total_credits × (1 - reserve)
 hard_limit_credits       = distributable_credits × hard_stop
 available_pool_credits   = max(0, hard_limit_credits - C)
 pool_used_credits        = max(0, C - B)
-member_base_credits      = available_pool_credits × weight / Σ(enabled_weight)
+allocation_capacity      = max(0, hard_limit_credits - B)
+member_base_credits      = allocate(quota_usd, weight, allocation_capacity)
 member_max_credits       = member_base_credits × borrow_multiplier
 ```
 
-这里 `C` 是账号当前的绝对上游使用量，所以已有 29% 会直接减少可分配空间；`B` 只用于判断本共享池成员从何处开始计量，
-不会把历史 29% 塞给某个用户。`local_used_credits` 由本地费用乘以快照中的 credits/USD 换算率得到，
-只有在本地使用记录存在时才参与成员归属；外部或未归属的上游使用只减少池的剩余空间，不会被分摊给用户。
+这里 `C` 是账号当前的绝对上游使用量，`B` 是共享池建立时的账号基线。`available_pool_credits` 只表示账号此刻距离硬线的剩余空间，
+不能拿它反复重算每个成员的基础份额；`allocation_capacity` 才是本周期成员份额的固定锚点。显式 `quota_usd` 先按当前 credits/USD 转为 credit，
+剩余容量按未配置成员的权重分配；如果显式金额总和超过锚点，则按统一比例缩小。`local_used_credits` 由同一账号、同一窗口内的跨分组
+`usage_logs.actual_cost` 乘以快照中的 credits/USD 换算率得到，因此 ADMIN 等入口的同用户用量也会减少目标共享订阅的个人剩余量。
+账号中无法归属到成员的其它用量只减少池的剩余空间，不会被伪造分摊给某个用户。
 
 如果 `P=0` 或 `C` 缺失，不能推导总容量，系统使用百分比回退模式：
 
@@ -327,7 +341,7 @@ pool_used_percent       = max(0, P - baseline_percent)
 ### 13.6 V2 验收用例
 
 - 账号已有 29%、Analytics 为 290 credits、三名等权、reserve=0、hard=95%：估算总容量 1000 credits，
-  新池硬线为 950，当前可分配 660 credits，历史 290 不计入任何成员；
+  新池硬线为 950，当前可用硬线空间 660 credits，若基线为 100 credits，成员基础分配锚点为 850 credits，历史基线不计入成员；
 - 首次启用后用户 A/B/C 产生本地费用 2/1/0 USD，Analytics 增加但未返回逐用户明细时，成员归属按 2:1:0 的本地比例，
   总池硬线仍按官方绝对 credits 判定；
 - Analytics 返回 0 credits 且官方 P=0：状态为未校准，不显示估算容量，不因除零产生无限额度；

@@ -2,7 +2,7 @@ export default {
   sharedQuota: {
     action: '共享额度池',
     title: '共享额度池 / 动态分配',
-    description: '按权重分配订阅分组的共享容量，空闲额度可在安全线前受控借用。官方模式优先使用 Analytics credit 校准，百分比仅作为上游事实；未校准时明确降级为保守百分比。',
+    description: '按成员独立金额或权重分配共享容量；绑定上游账号后会合并该账号跨分组用量，但只限制当前订阅分组。空闲额度可在安全线前受控借用。',
     enabled: '启用共享池',
     capacity: '窗口容量（USD）',
     mode: '容量来源',
@@ -28,6 +28,8 @@ export default {
     members: '成员分配',
     member: '成员',
     weight: '权重',
+    quota: '独立金额（USD）',
+    quotaFallback: '按权重',
     share: '基础份额',
     used: '已用',
     maximum: '最大准入',
