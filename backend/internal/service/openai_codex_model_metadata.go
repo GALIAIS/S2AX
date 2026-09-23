@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"strings"
 )
@@ -405,6 +406,259 @@ func applyUpstreamModelMetadataToCodexDescriptor(
 		descriptor.ContextWindow = metadata.ContextWindow
 		descriptor.MaxContextWindow = metadata.ContextWindow
 	}
+}
+
+// applyOfficialCodexCatalogMetadataToManifest 将官方 OAuth 清单中的实时能力用于本地生成的模型项。
+func applyOfficialCodexCatalogMetadataToManifest(
+	body []byte,
+	officialBody []byte,
+	modelIDs []string,
+	accounts []Account,
+) ([]byte, bool, error) {
+	officialMetadata, err := parseOfficialCodexCatalogMetadata(officialBody)
+	if err != nil {
+		return nil, false, fmt.Errorf("parse official Codex catalog metadata: %w", err)
+	}
+	if len(officialMetadata) == 0 || len(modelIDs) == 0 {
+		return body, false, nil
+	}
+
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, false, fmt.Errorf("decode generated Codex manifest: %w", err)
+	}
+	var models []json.RawMessage
+	if err := json.Unmarshal(envelope["models"], &models); err != nil {
+		return nil, false, fmt.Errorf("decode generated Codex models: %w", err)
+	}
+	metadataModels := codexCatalogMetadataModels(PlatformOpenAI, modelIDs, accounts, nil, true)
+	changed := false
+	for i, rawModel := range models {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(rawModel, &fields); err != nil {
+			return nil, false, fmt.Errorf("decode generated Codex model: %w", err)
+		}
+		var slug string
+		if len(fields["slug"]) == 0 || json.Unmarshal(fields["slug"], &slug) != nil {
+			continue
+		}
+		slug = strings.TrimSpace(slug)
+		if slug == "" {
+			continue
+		}
+		target := strings.TrimSpace(metadataModels[slug])
+		if target == "" {
+			target = slug
+		}
+		metadata, ok := officialCodexModelMetadataForID(officialMetadata, target)
+		if !ok {
+			continue
+		}
+		if err := applyOfficialCodexMetadataFields(fields, metadata); err != nil {
+			return nil, false, fmt.Errorf("apply official metadata to Codex model %q: %w", slug, err)
+		}
+		encoded, err := json.Marshal(fields)
+		if err != nil {
+			return nil, false, fmt.Errorf("encode generated Codex model %q: %w", slug, err)
+		}
+		if !bytes.Equal(bytes.TrimSpace(encoded), bytes.TrimSpace(rawModel)) {
+			models[i] = encoded
+			changed = true
+		}
+	}
+	if !changed {
+		return body, false, nil
+	}
+
+	encodedModels, err := json.Marshal(models)
+	if err != nil {
+		return nil, false, fmt.Errorf("encode generated Codex models: %w", err)
+	}
+	envelope["models"] = encodedModels
+	updated, err := json.Marshal(envelope)
+	if err != nil {
+		return nil, false, fmt.Errorf("encode generated Codex manifest: %w", err)
+	}
+	return updated, true, nil
+}
+
+func applyOfficialCodexMetadataFields(fields map[string]json.RawMessage, metadata UpstreamModelMetadata) error {
+	if metadata.Reasoning != nil {
+		levels := normalizeReasoningLevels(metadata.SupportedReasoningLevels)
+		defaultLevel := normalizeReasoningLevel(metadata.DefaultReasoningLevel)
+		if !*metadata.Reasoning {
+			levels = []string{"none"}
+			defaultLevel = "none"
+		} else if len(levels) > 0 {
+			if !stringSliceContains(levels, defaultLevel) {
+				defaultLevel = levels[0]
+			}
+		} else {
+			defaultLevel = ""
+		}
+		if len(levels) > 0 {
+			codexLevels := make([]configuredCodexReasoningLevel, 0, len(levels))
+			for _, level := range levels {
+				codexLevels = append(codexLevels, configuredCodexReasoningLevel{
+					Effort:      level,
+					Description: configuredCodexReasoningLevelDescription(level),
+				})
+			}
+			rawLevels, err := json.Marshal(codexLevels)
+			if err != nil {
+				return fmt.Errorf("encode reasoning levels: %w", err)
+			}
+			fields["supported_reasoning_levels"] = rawLevels
+		}
+		if defaultLevel != "" {
+			rawDefault, err := json.Marshal(defaultLevel)
+			if err != nil {
+				return fmt.Errorf("encode default reasoning level: %w", err)
+			}
+			fields["default_reasoning_level"] = rawDefault
+		}
+	}
+	if modalities := normalizeCodexInputModalities(metadata.InputModalities); len(modalities) > 0 {
+		rawModalities, err := json.Marshal(modalities)
+		if err != nil {
+			return fmt.Errorf("encode input modalities: %w", err)
+		}
+		fields["input_modalities"] = rawModalities
+	}
+	if metadata.ContextWindow > 0 {
+		rawContextWindow, err := json.Marshal(metadata.ContextWindow)
+		if err != nil {
+			return fmt.Errorf("encode context window: %w", err)
+		}
+		fields["context_window"] = rawContextWindow
+		fields["max_context_window"] = rawContextWindow
+	}
+	if metadata.MaxOutputTokens > 0 {
+		rawMaxOutputTokens, err := json.Marshal(metadata.MaxOutputTokens)
+		if err != nil {
+			return fmt.Errorf("encode max output tokens: %w", err)
+		}
+		fields["max_output_tokens"] = rawMaxOutputTokens
+	}
+	applyCodexToolCapabilities(fields, metadata.CodexToolCapabilities, true)
+	return nil
+}
+
+func parseOfficialCodexCatalogMetadata(body []byte) (map[string]UpstreamModelMetadata, error) {
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, fmt.Errorf("decode official Codex manifest: %w", err)
+	}
+	modelsRaw, ok := envelope["models"]
+	modelsRaw = bytes.TrimSpace(modelsRaw)
+	if !ok || len(modelsRaw) == 0 || modelsRaw[0] != '[' {
+		return nil, fmt.Errorf("official Codex manifest has no models array")
+	}
+	var entries []json.RawMessage
+	if err := json.Unmarshal(modelsRaw, &entries); err != nil {
+		return nil, fmt.Errorf("decode official Codex model entries: %w", err)
+	}
+
+	metadataByID := make(map[string]UpstreamModelMetadata, len(entries))
+	seen := make(map[string]struct{}, len(entries))
+	ambiguous := make(map[string]struct{})
+	for _, raw := range entries {
+		var entry struct {
+			Slug                     string            `json:"slug"`
+			Reasoning                *bool             `json:"reasoning"`
+			DefaultReasoningLevel    string            `json:"default_reasoning_level"`
+			SupportedReasoningLevels []json.RawMessage `json:"supported_reasoning_levels"`
+			InputModalities          []string          `json:"input_modalities"`
+			ContextWindow            int64             `json:"context_window"`
+			MaxContextWindow         int64             `json:"max_context_window"`
+			MaxOutputTokens          int64             `json:"max_output_tokens"`
+		}
+		if err := json.Unmarshal(raw, &entry); err != nil {
+			continue
+		}
+		modelID := strings.TrimSpace(entry.Slug)
+		if modelID == "" {
+			continue
+		}
+		if _, duplicate := seen[modelID]; duplicate {
+			delete(metadataByID, modelID)
+			ambiguous[modelID] = struct{}{}
+			continue
+		}
+		seen[modelID] = struct{}{}
+		if _, duplicate := ambiguous[modelID]; duplicate {
+			continue
+		}
+
+		levels := reasoningLevelsFromRawEntries(entry.SupportedReasoningLevels)
+		reasoning := entry.Reasoning
+		if reasoning == nil && len(levels) > 0 {
+			inferred := len(levels) != 1 || levels[0] != "none"
+			reasoning = &inferred
+		}
+		defaultLevel := normalizeReasoningLevel(entry.DefaultReasoningLevel)
+		if reasoning != nil && !*reasoning {
+			levels = []string{"none"}
+			defaultLevel = "none"
+		} else if reasoning != nil && *reasoning && len(levels) == 0 {
+			reasoning = nil
+			defaultLevel = ""
+		}
+		if defaultLevel == "" && len(levels) > 0 {
+			defaultLevel = levels[0]
+		}
+		contextWindow := entry.ContextWindow
+		if contextWindow <= 0 {
+			contextWindow = entry.MaxContextWindow
+		}
+		fields := make(map[string]json.RawMessage)
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			continue
+		}
+		toolCapabilities := make(map[string]json.RawMessage)
+		applyCodexToolCapabilities(toolCapabilities, fields, true)
+		metadata := UpstreamModelMetadata{
+			ID:                       modelID,
+			Reasoning:                reasoning,
+			DefaultReasoningLevel:    defaultLevel,
+			SupportedReasoningLevels: levels,
+			InputModalities:          normalizeCodexInputModalities(entry.InputModalities),
+			ContextWindow:            contextWindow,
+			MaxOutputTokens:          entry.MaxOutputTokens,
+			CodexToolCapabilities:    toolCapabilities,
+		}
+		if upstreamModelMetadataIsUseful(metadata) {
+			metadataByID[modelID] = metadata
+		}
+	}
+	return metadataByID, nil
+}
+
+func officialCodexModelMetadataForID(
+	metadataByID map[string]UpstreamModelMetadata,
+	modelID string,
+) (UpstreamModelMetadata, bool) {
+	modelID = strings.TrimSpace(modelID)
+	if metadata, ok := metadataByID[modelID]; ok {
+		return metadata, true
+	}
+	target := strings.ToLower(codexProviderQualifiedModelID(modelID))
+	if target == "" {
+		return UpstreamModelMetadata{}, false
+	}
+	var matched UpstreamModelMetadata
+	found := false
+	for candidateID, metadata := range metadataByID {
+		if strings.ToLower(codexProviderQualifiedModelID(candidateID)) != target {
+			continue
+		}
+		if found {
+			return UpstreamModelMetadata{}, false
+		}
+		matched = metadata
+		found = true
+	}
+	return matched, found
 }
 
 func configuredCodexReasoningLevelDescription(level string) string {

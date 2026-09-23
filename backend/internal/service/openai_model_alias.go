@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
@@ -104,6 +105,31 @@ func isOpenAIGPT56Model(model string) bool {
 func isOpenAIGPT6AstraModel(model string) bool {
 	normalized := canonicalizeOpenAIModelAliasSpelling(model)
 	return normalized == "gpt-6" || normalized == "gpt-6-astra" || strings.HasPrefix(normalized, "gpt-6-astra-")
+}
+
+// GPT-5.6 起 max 是独立强度；高版本家族沿用该语义，避免新型号漏入白名单。
+func isOpenAIGPT56OrNewerModel(model string) bool {
+	normalized := lastOpenAIModelSegment(canonicalizeOpenAIModelAliasSpelling(model))
+	if !strings.HasPrefix(normalized, "gpt-") {
+		return false
+	}
+
+	version := strings.TrimPrefix(normalized, "gpt-")
+	version, _, _ = strings.Cut(version, "-")
+	majorPart, minorPart, hasMinor := strings.Cut(version, ".")
+	major, err := strconv.Atoi(majorPart)
+	if err != nil {
+		return false
+	}
+	if major >= 6 {
+		return true
+	}
+	if major != 5 || !hasMinor {
+		return false
+	}
+	minorPart, _, _ = strings.Cut(minorPart, ".")
+	minor, err := strconv.Atoi(minorPart)
+	return err == nil && minor >= 6
 }
 
 func appendUsageBillingModelCandidate(candidates []string, seen map[string]struct{}, model string) []string {

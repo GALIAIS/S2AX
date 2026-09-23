@@ -347,8 +347,8 @@ func TestCodexModelsSupplementsConfiguredModelsWithUnmappedAccountDefaults(t *te
 		Platform: service.PlatformOpenAI,
 	}, "")
 
-	if got := upstream.calls(); len(got) != 0 {
-		t.Fatalf("upstream account calls: got %v, want none", got)
+	if got := upstream.calls(); len(got) != 1 || got[0] != 2 {
+		t.Fatalf("upstream account calls: got %v, want only the ChatGPT catalog account [2]", got)
 	}
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())

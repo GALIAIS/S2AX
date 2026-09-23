@@ -349,6 +349,10 @@ func TestNewConfiguredCodexModelDescriptorUsesProviderMetadataAndSafeFallback(t 
 	require.Equal(t, []string{"low", "medium", "high", "xhigh", "max"}, effortsFromConfiguredCodexLevels(gpt56Luna.SupportedReasoningLevels))
 	require.Equal(t, "medium", *gpt56Luna.DefaultReasoningLevel)
 
+	gpt57 := newConfiguredCodexModelDescriptor("gpt-5.7-codex")
+	require.Contains(t, effortsFromConfiguredCodexLevels(gpt57.SupportedReasoningLevels), "max")
+	require.NotContains(t, effortsFromConfiguredCodexLevels(gpt57.SupportedReasoningLevels), "ultra")
+
 	gpt6Astra := newConfiguredCodexModelDescriptor("gpt-6-astra")
 	require.Equal(t, "GPT-6 Astra", gpt6Astra.DisplayName)
 	require.True(t, strings.HasPrefix(strings.TrimSpace(gpt6Astra.ModelMessages.InstructionsTemplate), "You are Codex, an agent based on GPT-6."))
@@ -371,6 +375,13 @@ func TestNewConfiguredCodexModelDescriptorUsesProviderMetadataAndSafeFallback(t 
 	require.False(t, isOpenAIGPT6AstraModel("gpt-6-other"))
 	require.Equal(t, int64(1_050_000), gpt6Astra.ContextWindow)
 	require.Equal(t, int64(1_050_000), gpt6Astra.MaxContextWindow)
+
+	gpt6Luna := newConfiguredCodexModelDescriptor("gpt-6-luna")
+	require.NotNil(t, gpt6Luna.DefaultReasoningLevel)
+	require.Equal(t, "medium", *gpt6Luna.DefaultReasoningLevel)
+	require.Equal(t, []string{"low", "medium", "high", "xhigh", "max"}, effortsFromConfiguredCodexLevels(gpt6Luna.SupportedReasoningLevels))
+	require.True(t, isOpenAICodexReasoningGPTModel("openai/gpt-6-luna-2026-09-01"))
+
 	gpt6 := newConfiguredCodexModelDescriptor("gpt-6")
 	require.Equal(t, "GPT-6 (Astra)", gpt6.DisplayName)
 	require.True(t, strings.HasPrefix(strings.TrimSpace(gpt6.ModelMessages.InstructionsTemplate), "You are Codex, an agent based on GPT-6."))
@@ -1131,6 +1142,36 @@ func TestMergeGroupConfiguredCodexModelsInjectsCurrentGroupAliases(t *testing.T)
 	require.Equal(t, codexModelsManifestBodyETag(manifest.Body), manifest.ETag)
 }
 
+func TestMergeGroupConfiguredCodexModelsPreservesOfficialFieldsAndRefreshesAliasCapabilities(t *testing.T) {
+	const groupID int64 = 710
+	account := Account{
+		ID:       25,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"model_mapping": map[string]any{"luna-public": "gpt-6-luna"},
+		},
+	}
+	svc := &OpenAIGatewayService{accountRepo: codexModelsVisibilityAccountRepo{
+		byGroup: map[int64][]Account{groupID: {account}},
+	}}
+	manifest := &OpenAIModelsResponse{Body: []byte("{\"models\":[{\"slug\":\"gpt-6-luna\",\"display_name\":\"GPT-6 Luna\",\"reasoning\":true,\"default_reasoning_level\":\"max\",\"supported_reasoning_levels\":[{\"effort\":\"low\"},{\"effort\":\"max\"}],\"future_metadata\":{\"preserved\":true}}]}")}
+
+	err := svc.MergeGroupConfiguredCodexModels(
+		context.Background(),
+		&Group{ID: groupID, Platform: PlatformOpenAI},
+		manifest,
+		"",
+	)
+	require.NoError(t, err)
+	models := decodeCodexManifestModels(t, manifest.Body)
+	require.Len(t, models, 2)
+	require.Equal(t, map[string]any{"preserved": true}, models[0]["future_metadata"])
+	require.Equal(t, []string{"low", "max"}, effortsFromManifestModel(t, models[1]))
+	require.Equal(t, "max", models[1]["default_reasoning_level"])
+	require.Equal(t, codexModelsManifestBodyETag(manifest.Body), manifest.ETag)
+}
+
 // Mixed groups retain configured metadata alongside defaults for unmapped accounts.
 func TestBuildGroupConfiguredCodexModelsManifestUsesAdministratorConfiguration(t *testing.T) {
 	t.Parallel()
@@ -1197,6 +1238,74 @@ func TestBuildGroupConfiguredCodexModelsManifestUsesAdministratorConfiguration(t
 	require.True(t, notModified.NotModified)
 	require.Empty(t, notModified.Body)
 	require.Equal(t, manifest.ETag, notModified.ETag)
+}
+
+func TestBuildGroupConfiguredCodexModelsManifestUsesLatestOfficialOAuthMetadata(t *testing.T) {
+	const groupID int64 = 78
+	officialCatalog := "{\"models\":[{\"slug\":\"gpt-6-luna\",\"reasoning\":true,\"default_reasoning_level\":\"max\",\"supported_reasoning_levels\":[{\"effort\":\"high\"},{\"effort\":\"max\"}],\"input_modalities\":[\"text\",\"image\"],\"context_window\":1000000}]}"
+	_, calls := newCodexModelsOAuthCacheServer(t, officialCatalog)
+
+	account := *newCodexModelsTestAccount()
+	account.Credentials["model_mapping"] = map[string]any{"luna-public": "gpt-6-luna"}
+	reasoning := true
+	account.SetUpstreamModelMetadataSnapshot(UpstreamModelMetadataSnapshot{Models: map[string]UpstreamModelMetadata{
+		"gpt-6-luna": {
+			ID:                       "gpt-6-luna",
+			Reasoning:                &reasoning,
+			DefaultReasoningLevel:    "low",
+			SupportedReasoningLevels: []string{"low", "high"},
+			InputModalities:          []string{"text"},
+			ContextWindow:            128_000,
+		},
+	}})
+	repo := codexModelsVisibilityAccountRepo{byGroup: map[int64][]Account{groupID: {account}}}
+	svc := &OpenAIGatewayService{accountRepo: repo}
+	group := &Group{ID: groupID, Platform: PlatformOpenAI}
+
+	manifest, configured, err := svc.BuildGroupConfiguredCodexModelsManifest(context.Background(), group, "")
+	require.NoError(t, err)
+	require.True(t, configured)
+	models := decodeCodexManifestModels(t, manifest.Body)
+	require.Len(t, models, 1)
+	require.Equal(t, "luna-public", models[0]["slug"])
+	require.Equal(t, []string{"high", "max"}, effortsFromManifestModel(t, models[0]))
+	require.Equal(t, "max", models[0]["default_reasoning_level"])
+	require.Equal(t, []any{"text", "image"}, models[0]["input_modalities"])
+	require.EqualValues(t, 1_000_000, models[0]["context_window"])
+	require.EqualValues(t, 1, calls.Load())
+
+	_, configured, err = svc.BuildGroupConfiguredCodexModelsManifest(context.Background(), group, "")
+	require.NoError(t, err)
+	require.True(t, configured)
+	require.EqualValues(t, 1, calls.Load(), "official catalog refresh must reuse the OAuth manifest cache")
+}
+
+func TestBuildGroupConfiguredCodexModelsManifestFallsBackToVersionRuleOnOfficialRefreshFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	originalURL := chatgptCodexModelsURL
+	chatgptCodexModelsURL = server.URL
+	t.Cleanup(func() { chatgptCodexModelsURL = originalURL })
+
+	const groupID int64 = 781
+	account := *newCodexModelsTestAccount()
+	account.Credentials["model_mapping"] = map[string]any{"gpt-6-luna": "gpt-6-luna"}
+	repo := codexModelsVisibilityAccountRepo{byGroup: map[int64][]Account{groupID: {account}}}
+	svc := &OpenAIGatewayService{accountRepo: repo}
+
+	manifest, configured, err := svc.BuildGroupConfiguredCodexModelsManifest(
+		context.Background(),
+		&Group{ID: groupID, Platform: PlatformOpenAI},
+		"",
+	)
+	require.NoError(t, err)
+	require.True(t, configured)
+	models := decodeCodexManifestModels(t, manifest.Body)
+	require.Len(t, models, 1)
+	require.Equal(t, "gpt-6-luna", models[0]["slug"])
+	require.Contains(t, effortsFromManifestModel(t, models[0]), "max")
 }
 
 // Scenario: OpenAI 通配映射展开组内精确选择，但不发布通配符 slug。

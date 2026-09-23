@@ -65,9 +65,12 @@ func TestNormalizeOpenAIReasoningEffortForMaxCapableModels(t *testing.T) {
 		want  string
 	}{
 		{name: "Astra 保留 max", raw: "max", model: "gpt-6-astra", want: "max"},
+		{name: "GPT-6 Luna 保留 max", raw: "max", model: "openai/gpt-6-luna-2026-09-01", want: "max"},
 		{name: "Sol 保留 max", raw: "max", model: "gpt-5.6-sol", want: "max"},
 		{name: "Terra 保留 max", raw: "max", model: "openai/gpt-5.6-terra", want: "max"},
 		{name: "Luna 后缀保留 max", raw: "max", model: "gpt-5.6-luna-2026-07-09", want: "max"},
+		{name: "GPT-5.7 保留 max", raw: "max", model: "gpt-5.7-codex", want: "max"},
+		{name: "GPT-7 保留 max", raw: "max", model: "gpt-7.1", want: "max"},
 		{name: "DeepSeek V4 保留 max", raw: "max", model: "deepseek-v4-pro", want: "max"},
 		{name: "旧 GPT 模型沿用 xhigh", raw: "max", model: "gpt-5.5", want: "xhigh"},
 	}
@@ -75,6 +78,29 @@ func TestNormalizeOpenAIReasoningEffortForMaxCapableModels(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			require.Equal(t, tt.want, normalizeOpenAIReasoningEffortForModel(tt.raw, tt.model))
+		})
+	}
+}
+
+func TestIsOpenAIGPT56OrNewerModel(t *testing.T) {
+	tests := []struct {
+		model string
+		want  bool
+	}{
+		{model: "gpt-5.5", want: false},
+		{model: "gpt-5.6", want: true},
+		{model: "gpt-5.7-codex", want: true},
+		{model: "gpt-5.10", want: true},
+		{model: "gpt-6", want: true},
+		{model: "openai/gpt-6-luna-2026-09-01", want: true},
+		{model: "gpt-7.1", want: true},
+		{model: "gpt-4.1", want: false},
+		{model: "deepseek-v4-pro", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			require.Equal(t, tt.want, isOpenAIGPT56OrNewerModel(tt.model))
 		})
 	}
 }

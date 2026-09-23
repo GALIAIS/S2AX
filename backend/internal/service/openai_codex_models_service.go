@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -149,6 +150,10 @@ func (s *OpenAIGatewayService) BuildGroupConfiguredCodexModelsManifest(
 	if err != nil {
 		return nil, false, fmt.Errorf("initialize group configured Codex models: %w", err)
 	}
+	body, err = s.applyLatestOfficialCodexCatalogMetadata(ctx, group.ID, body, configuredModels, visible, catalog)
+	if err != nil {
+		return nil, false, fmt.Errorf("apply official Codex catalog metadata: %w", err)
+	}
 	body, _, err = mergeConfiguredCodexModelsManifest(
 		body,
 		nil,
@@ -186,10 +191,12 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 		return nil
 	}
 
+	sourceBody := append([]byte(nil), manifest.Body...)
 	var configuredModels []string
+	var metadataAccounts []Account
 	if !group.CodexModelsManifestConfig.Enabled {
 		var err error
-		configuredModels, err = s.groupConfiguredCodexModelIDs(ctx, group)
+		configuredModels, metadataAccounts, err = s.groupConfiguredCodexModelIDs(ctx, group)
 		if err != nil {
 			return fmt.Errorf("load group configured Codex models: %w", err)
 		}
@@ -211,6 +218,19 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 		changed = true
 	}
 	if changed {
+		if len(configuredModels) > 0 {
+			enriched, enrichedChanged, enrichErr := applyOfficialCodexCatalogMetadataToManifest(
+				body,
+				sourceBody,
+				configuredModels,
+				metadataAccounts,
+			)
+			if enrichErr != nil {
+				slog.Warn("openai_codex_manifest_official_metadata_parse_failed", "group_id", group.ID, "error", enrichErr)
+			} else if enrichedChanged {
+				body = enriched
+			}
+		}
 		manifest.Body = body
 		manifest.ETag = codexModelsManifestBodyETag(body)
 	}
@@ -221,15 +241,76 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 	return nil
 }
 
-func (s *OpenAIGatewayService) groupConfiguredCodexModelIDs(ctx context.Context, group *Group) ([]string, error) {
+func (s *OpenAIGatewayService) groupConfiguredCodexModelIDs(ctx context.Context, group *Group) ([]string, []Account, error) {
 	if group == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	accounts, err := s.accountRepo.ListSchedulableByGroupID(ctx, group.ID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return openAIConfiguredCodexModelIDsForGroup(accounts, group), nil
+	return openAIConfiguredCodexModelIDsForGroup(accounts, group), accounts, nil
+}
+
+func (s *OpenAIGatewayService) applyLatestOfficialCodexCatalogMetadata(
+	ctx context.Context,
+	groupID int64,
+	body []byte,
+	modelIDs []string,
+	visibleAccounts []Account,
+	metadataAccounts []Account,
+) ([]byte, error) {
+	account := selectOfficialCodexCatalogSourceAccount(visibleAccounts, modelIDs)
+	if account == nil {
+		return body, nil
+	}
+	manifest, err := s.FetchCodexModelsManifest(ctx, account, "", "")
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		slog.Warn("openai_codex_official_catalog_fetch_failed", "group_id", groupID, "account_id", account.ID, "error", err)
+		return body, nil
+	}
+	if manifest == nil || manifest.NotModified || len(manifest.Body) == 0 {
+		return body, nil
+	}
+	enriched, changed, err := applyOfficialCodexCatalogMetadataToManifest(body, manifest.Body, modelIDs, metadataAccounts)
+	if err != nil {
+		slog.Warn("openai_codex_official_catalog_parse_failed", "group_id", groupID, "account_id", account.ID, "error", err)
+		return body, nil
+	}
+	if !changed {
+		return body, nil
+	}
+	return enriched, nil
+}
+
+func selectOfficialCodexCatalogSourceAccount(accounts []Account, modelIDs []string) *Account {
+	indices := make([]int, 0, len(accounts))
+	for i := range accounts {
+		account := &accounts[i]
+		if !account.IsOpenAIOAuth() {
+			continue
+		}
+		if account.ParentAccountID == nil && !account.IsOpenAIAgentIdentity() &&
+			strings.TrimSpace(account.GetOpenAIAccessToken()) == "" {
+			continue
+		}
+		for _, modelID := range modelIDs {
+			if account.IsModelSupported(modelID) {
+				indices = append(indices, i)
+				break
+			}
+		}
+	}
+	if len(indices) == 0 {
+		return nil
+	}
+	sort.SliceStable(indices, func(i, j int) bool {
+		return accounts[indices[i]].ID < accounts[indices[j]].ID
+	})
+	return &accounts[indices[0]]
 }
 
 // loadCodexGroupCatalogAccounts separates picker membership from capability
@@ -621,7 +702,7 @@ func configuredCodexGPTReasoningLevels(modelID string) []configuredCodexReasonin
 		{Effort: "xhigh", Description: "Extra-high reasoning depth for difficult tasks"},
 	}
 	normalized := getNormalizedCodexModel(modelID)
-	if isOpenAIGPT56Model(modelID) || isOpenAIGPT6AstraModel(modelID) {
+	if isOpenAIGPT56OrNewerModel(modelID) {
 		levels = append(levels, configuredCodexReasoningLevel{
 			Effort:      "max",
 			Description: "Maximum reasoning depth for complex tasks",
@@ -646,7 +727,7 @@ func isOpenAICodexGPTModel(modelID string) bool {
 
 func isOpenAICodexReasoningGPTModel(modelID string) bool {
 	normalized := canonicalizeOpenAIModelAliasSpelling(modelID)
-	return isOpenAIGPT6AstraModel(normalized) || strings.HasPrefix(normalized, "gpt-5")
+	return strings.HasPrefix(normalized, "gpt-5") || isOpenAIGPT56OrNewerModel(normalized)
 }
 
 func isOpenAICodexImageInputModel(modelID string) bool {
