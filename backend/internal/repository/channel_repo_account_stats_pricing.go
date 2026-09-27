@@ -69,7 +69,8 @@ func (r *channelRepository) batchLoadAccountStatsModelPricing(ctx context.Contex
 		`SELECT id, rule_id, platform, models, billing_mode,
 		        input_price, input_price_priority, output_price, output_price_priority,
 		        cache_write_price, cache_write_1h_price, cache_write_price_priority,
-		        cache_read_price, cache_read_price_priority, image_input_price, image_output_price, per_request_price, created_at, updated_at
+		        cache_read_price, cache_read_price_priority, reasoning_effort_multipliers,
+	        image_input_price, image_output_price, per_request_price, created_at, updated_at
 		 FROM channel_account_stats_model_pricing WHERE rule_id = ANY($1) ORDER BY rule_id, id`,
 		pq.Array(ruleIDs),
 	)
@@ -83,17 +84,24 @@ func (r *channelRepository) batchLoadAccountStatsModelPricing(ctx context.Contex
 		var p service.ChannelModelPricing
 		var ruleID int64
 		var modelsJSON []byte
+		var reasoningEffortMultipliersJSON []byte
 		if err := rows.Scan(
 			&p.ID, &ruleID, &p.Platform, &modelsJSON, &p.BillingMode,
 			&p.InputPrice, &p.InputPricePriority, &p.OutputPrice, &p.OutputPricePriority,
 			&p.CacheWritePrice, &p.CacheWrite1hPrice, &p.CacheWritePricePriority,
-			&p.CacheReadPrice, &p.CacheReadPricePriority, &p.ImageInputPrice, &p.ImageOutputPrice, &p.PerRequestPrice, &p.CreatedAt, &p.UpdatedAt,
+			&p.CacheReadPrice, &p.CacheReadPricePriority, &reasoningEffortMultipliersJSON,
+			&p.ImageInputPrice, &p.ImageOutputPrice, &p.PerRequestPrice, &p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan account stats model pricing: %w", err)
 		}
 		if err := json.Unmarshal(modelsJSON, &p.Models); err != nil {
 			p.Models = []string{}
 		}
+		multipliers, err := unmarshalReasoningEffortMultipliers(reasoningEffortMultipliersJSON)
+		if err != nil {
+			return nil, err
+		}
+		p.ReasoningEffortMultipliers = multipliers
 		pricingMap[ruleID] = append(pricingMap[ruleID], p)
 	}
 	if err := rows.Err(); err != nil {
@@ -175,19 +183,28 @@ func createAccountStatsModelPricingTx(ctx context.Context, tx *sql.Tx, ruleID in
 	if err != nil {
 		return fmt.Errorf("marshal models: %w", err)
 	}
+	reasoningEffortMultipliersJSON, err := marshalReasoningEffortMultipliers(pricing.ReasoningEffortMultipliers)
+	if err != nil {
+		return err
+	}
 	billingMode := pricing.BillingMode
 	if billingMode == "" {
 		billingMode = service.BillingModeToken
 	}
 	platform := pricing.Platform
 	err = tx.QueryRowContext(ctx,
-		`INSERT INTO channel_account_stats_model_pricing (rule_id, platform, models, billing_mode, input_price, input_price_priority, output_price, output_price_priority, cache_write_price, cache_write_1h_price, cache_write_price_priority, cache_read_price, cache_read_price_priority, image_input_price, image_output_price, per_request_price)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id, created_at, updated_at`,
+		`INSERT INTO channel_account_stats_model_pricing
+			(rule_id, platform, models, billing_mode, input_price, input_price_priority,
+			 output_price, output_price_priority, cache_write_price, cache_write_1h_price,
+			 cache_write_price_priority, cache_read_price, cache_read_price_priority,
+			 reasoning_effort_multipliers, image_input_price, image_output_price, per_request_price)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+		 RETURNING id, created_at, updated_at`,
 		ruleID, platform, modelsJSON, billingMode,
 		pricing.InputPrice, pricing.InputPricePriority, pricing.OutputPrice, pricing.OutputPricePriority,
 		pricing.CacheWritePrice, pricing.CacheWrite1hPrice, pricing.CacheWritePricePriority,
 		pricing.CacheReadPrice, pricing.CacheReadPricePriority,
-		pricing.ImageInputPrice, pricing.ImageOutputPrice, pricing.PerRequestPrice,
+		reasoningEffortMultipliersJSON, pricing.ImageInputPrice, pricing.ImageOutputPrice, pricing.PerRequestPrice,
 	).Scan(&pricing.ID, &pricing.CreatedAt, &pricing.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("insert account stats model pricing: %w", err)

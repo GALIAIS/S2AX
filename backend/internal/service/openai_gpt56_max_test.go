@@ -72,6 +72,7 @@ func TestNormalizeOpenAIReasoningEffortForMaxCapableModels(t *testing.T) {
 		{name: "GPT-5.7 保留 max", raw: "max", model: "gpt-5.7-codex", want: "max"},
 		{name: "GPT-7 保留 max", raw: "max", model: "gpt-7.1", want: "max"},
 		{name: "DeepSeek V4 保留 max", raw: "max", model: "deepseek-v4-pro", want: "max"},
+		{name: "DeepSeek Flash 保留 max", raw: "max", model: "deepseek-flash", want: "max"},
 		{name: "旧 GPT 模型沿用 xhigh", raw: "max", model: "gpt-5.5", want: "xhigh"},
 	}
 

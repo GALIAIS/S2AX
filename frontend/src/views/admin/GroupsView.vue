@@ -214,7 +214,9 @@
                                 ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400'
                                 : value === 'devin'
                                   ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400'
-                                  : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+                                  : value === 'opencode_go'
+                                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                                    : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
               ]"
             >
               <PlatformIcon :platform="value" size="xs" />
@@ -3759,7 +3761,9 @@
                                     ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400'
                                     : group.platform === 'devin'
                                       ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400'
-                                      : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+                                      : group.platform === 'opencode_go'
+                                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                                        : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
                   ]"
                 >
                   {{ t("admin.groups.platforms." + group.platform) }}
@@ -4245,9 +4249,11 @@ import {
   apiIntervalsToForm,
   createDefaultTimePricingForm,
   formIntervalsToAPI,
+  formReasoningEffortMultipliersToAPI,
   mTokToPerToken,
   perTokenToMTok,
   toNullableNumber,
+  validateReasoningEffortMultipliers,
 } from "@/components/admin/channel/types";
 import type { ChannelModelPricing } from "@/api/admin/channels";
 import { VueDraggable } from "vue-draggable-plus";
@@ -4335,6 +4341,7 @@ const emptyGroupPricing = (): PricingFormEntry => ({
   cache_read_price_priority: null,
   fast_multiplier: null,
   flex_multiplier: null,
+  reasoning_effort_multipliers: null,
   image_input_price: null,
   image_output_price: null,
   per_request_price: null,
@@ -4362,6 +4369,9 @@ const groupPricingFromAPI = (
     cache_read_price_priority: perTokenToMTok(entry.cache_read_price_priority),
     fast_multiplier: entry.fast_multiplier,
     flex_multiplier: entry.flex_multiplier,
+    reasoning_effort_multipliers: entry.reasoning_effort_multipliers
+      ? { ...entry.reasoning_effort_multipliers }
+      : null,
     image_input_price: perTokenToMTok(entry.image_input_price),
     image_output_price: perTokenToMTok(entry.image_output_price),
     per_request_price: entry.per_request_price,
@@ -4390,6 +4400,9 @@ const groupPricingToAPI = (
       cache_read_price_priority: mTokToPerToken(entry.cache_read_price_priority),
       fast_multiplier: toNullableNumber(entry.fast_multiplier),
       flex_multiplier: toNullableNumber(entry.flex_multiplier),
+      reasoning_effort_multipliers: formReasoningEffortMultipliersToAPI(
+        entry.reasoning_effort_multipliers,
+      ),
       image_input_price: mTokToPerToken(entry.image_input_price),
       image_output_price: mTokToPerToken(entry.image_output_price),
       per_request_price: toNullableNumber(entry.per_request_price),
@@ -5994,6 +6007,17 @@ const validateProfitControlForm = (form: ProfitControlFormState): boolean => {
   return true;
 };
 
+const validateGroupReasoningMultipliers = (pricing: PricingFormEntry[]): boolean => {
+  for (const entry of pricing) {
+    const error = validateReasoningEffortMultipliers(entry.reasoning_effort_multipliers, t);
+    if (error) {
+      appStore.showError(`${entry.models.join(", ") || t("admin.channels.form.unnamed")}: ${error}`);
+      return false;
+    }
+  }
+  return true;
+};
+
 const handleCreateGroup = async () => {
   if (!createForm.name.trim()) {
     appStore.showError(t("admin.groups.nameRequired"));
@@ -6009,6 +6033,7 @@ const handleCreateGroup = async () => {
   if (!validateProfitControlForm(createForm)) {
     return;
   }
+  if (!validateGroupReasoningMultipliers(createForm.model_pricing)) return;
   // 模型白名单：开启且没有任何条目时阻止提交，与后端 400 对齐。
   if (
     createModelAllowlistState.enabled &&
@@ -6340,6 +6365,7 @@ const handleUpdateGroup = async () => {
   if (!validateProfitControlForm(editForm)) {
     return;
   }
+  if (!validateGroupReasoningMultipliers(editForm.model_pricing)) return;
   // 模型白名单：开启且没有任何条目时阻止提交，与后端 400 对齐。
   if (
     editModelAllowlistState.enabled &&

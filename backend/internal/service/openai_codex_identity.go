@@ -322,7 +322,7 @@ func codexCanonicalUserAgent() string {
 	resolver := codexCanonicalUAResolver
 	codexCanonicalUAMu.RUnlock()
 	if resolver != nil {
-		if ua := strings.TrimSpace(resolver()); ua != "" {
+		if ua := resolver(); strings.TrimSpace(ua) != "" {
 			return ua
 		}
 	}
@@ -339,7 +339,7 @@ type codexOutboundIdentity struct {
 }
 
 // resolveCodexOutboundIdentity 由候选 User-Agent 推导自洽的出站身份。
-// candidateUA 为空时使用规范 User-Agent；推导不出官方身份时整体回退为规范 TUI 身份。
+// candidateUA 为空时使用规范 User-Agent；无法识别时整体回退为规范 CLI 身份。
 //
 // 候选 UA（面板 / 账号级的管理员显式配置）只贡献客户端名与 OS / 架构 / 终端指纹，
 // 其自带的版本段一律用当前生效版本重建：一条填写于某个历史版本的 UA 否则会把出站身份
@@ -347,8 +347,11 @@ type codexOutboundIdentity struct {
 // 需要固定版本请填「Codex 客户端版本号」并关闭自动同步。
 func resolveCodexOutboundIdentity(candidateUA string) codexOutboundIdentity {
 	canonical := codexCanonicalUserAgent()
-	ua := strings.TrimSpace(candidateUA)
-	if ua == "" {
+	if _, _, ok := openai.PairCodexClientIdentity(canonical); !ok {
+		canonical = codexCLIUserAgent
+	}
+	ua := candidateUA
+	if strings.TrimSpace(ua) == "" {
 		ua = canonical
 	}
 	originator, pairedUA, ok := openai.PairCodexClientIdentity(ua)

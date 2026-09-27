@@ -4,7 +4,7 @@
       <div v-if="historyError" class="data-table-error" role="alert">
         <Icon name="xCircle" size="sm" />
         <span>{{ historyError }}</span>
-        <button type="button" class="btn btn-ghost btn-sm" @click="fetchHistory">{{ t('misc.retry') }}</button>
+        <button type="button" class="btn btn-ghost btn-sm" @click="fetchHistory()">{{ t('misc.retry') }}</button>
       </div>
       <!-- Current Balance Card -->
       <div class="card overflow-hidden">
@@ -340,7 +340,6 @@
               {{ t('redeem.historyWillAppear') }}
             </p>
           </div>
-
           <div
             v-if="loadingHistory && history.length > 0"
             class="pointer-events-none absolute inset-0 flex items-start justify-center bg-white/45 pt-4 dark:bg-dark-900/45"
@@ -350,6 +349,32 @@
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
               <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
+          </div>
+          <div class="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm">
+            <span>{{ t('common.total') }}: {{ historyTotal }} {{ t('pagination.results') }}</span>
+            <label>
+              {{ t('pagination.perPage') }}
+              <select
+                v-model="historyPageSize"
+                class="input w-20"
+                :disabled="loadingHistory || submitting"
+                @change="fetchHistory(1)"
+              >
+                <option v-for="size in [20, 50, 100]" :key="size" :value="size">{{ size }}</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              :disabled="loadingHistory || submitting || historyPage <= 1"
+              @click="fetchHistory(historyPage - 1)"
+            >{{ t('pagination.previous') }}</button>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              :disabled="loadingHistory || submitting || historyPage * historyPageSize >= historyTotal"
+              @click="fetchHistory(historyPage + 1)"
+            >{{ t('pagination.next') }}</button>
           </div>
         </div>
       </div>
@@ -393,6 +418,11 @@ const errorMessage = ref('')
 const history = ref<RedeemHistoryItem[]>([])
 const loadingHistory = ref(false)
 const historyError = ref('')
+const historyPage = ref(1)
+const historyPageSize = ref(20)
+const historyTotal = ref(0)
+let historyRequest = 0
+let loadedHistoryPageSize = 20
 const contactInfo = ref('')
 
 // Helper functions for history display
@@ -438,17 +468,27 @@ const formatHistoryValue = (item: RedeemHistoryItem) => {
   }
 }
 
-const fetchHistory = async () => {
+const fetchHistory = async (page = 1) => {
+  const request = ++historyRequest
+  const pageSize = historyPageSize.value
   loadingHistory.value = true
   historyError.value = ''
   try {
-    history.value = await redeemAPI.getHistory()
+    const result = await redeemAPI.getHistory(page, pageSize)
+    if (request !== historyRequest) return
+    history.value = result.items
+    historyTotal.value = result.total
+    historyPage.value = page
+    historyPageSize.value = pageSize
+    loadedHistoryPageSize = pageSize
   } catch (error) {
+    if (request !== historyRequest) return
+    historyPageSize.value = loadedHistoryPageSize
     console.error('Failed to fetch history:', error)
     historyError.value = extractApiErrorMessage(error, t('common.error'))
-    appStore.showError(historyError.value)
+    appStore.showError(t('redeem.historyLoadFailed'))
   } finally {
-    loadingHistory.value = false
+    if (request === historyRequest) loadingHistory.value = false
   }
 }
 
@@ -468,7 +508,12 @@ const handleRedeem = async () => {
     redeemResult.value = result
 
     // Refresh user data to get updated balance/concurrency
-    await authStore.refreshUser()
+    try {
+      await authStore.refreshUser()
+    } catch (error) {
+      console.error('Failed to refresh user after redeem:', error)
+      appStore.showWarning(t('redeem.userRefreshFailed'))
+    }
 
     // If subscription type, immediately refresh subscription status
     if (result.type === 'subscription') {

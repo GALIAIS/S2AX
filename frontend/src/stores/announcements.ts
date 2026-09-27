@@ -15,6 +15,7 @@ export const useAnnouncementStore = defineStore('announcements', () => {
 
   // Session-scoped dedup set — not reactive, used as plain lookup only
   let shownPopupIds = new Set<number>()
+  let fetchGeneration = 0
 
   // Getters
   const unreadCount = computed(() =>
@@ -30,18 +31,21 @@ export const useAnnouncementStore = defineStore('announcements', () => {
 
     // Set immediately to prevent concurrent duplicate requests
     lastFetchTime.value = now
+    const generation = ++fetchGeneration
 
     try {
       loading.value = true
       const all = await announcementsAPI.list(false)
+      if (generation !== fetchGeneration) return
       announcements.value = all.slice(0, 20)
       enqueueNewPopups()
     } catch (err: any) {
+      if (generation !== fetchGeneration) return
       // Revert throttle timestamp on failure so retry is allowed
       lastFetchTime.value = 0
       console.error('Failed to fetch announcements:', err)
     } finally {
-      loading.value = false
+      if (generation === fetchGeneration) loading.value = false
     }
   }
 
@@ -106,12 +110,15 @@ export const useAnnouncementStore = defineStore('announcements', () => {
     if (unread.length === 0) return
 
     const readAt = new Date().toISOString()
-    unread.forEach((a) => { a.read_at = readAt })
     try {
       loading.value = true
-      await announcementsAPI.markAllRead()
+      const results = await Promise.allSettled(unread.map(async (announcement) => {
+        await announcementsAPI.markRead(announcement.id)
+        announcement.read_at = readAt
+      }))
+      const failure = results.find((result) => result.status === 'rejected')
+      if (failure?.status === 'rejected') throw failure.reason
     } catch (err: any) {
-      unread.forEach((a) => { a.read_at = undefined })
       console.error('Failed to mark all as read:', err)
       throw err
     } finally {
@@ -120,6 +127,7 @@ export const useAnnouncementStore = defineStore('announcements', () => {
   }
 
   function reset() {
+    fetchGeneration++
     announcements.value = []
     lastFetchTime.value = 0
     shownPopupIds = new Set()

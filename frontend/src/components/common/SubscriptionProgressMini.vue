@@ -1,5 +1,5 @@
 <template>
-  <div v-if="hasActiveSubscriptions" class="relative" ref="containerRef">
+  <div v-if="subscriptionFeatureEnabled && hasActiveSubscriptions" class="relative" ref="containerRef">
     <!-- Mini Progress Display -->
     <button
       @click="toggleTooltip"
@@ -213,6 +213,8 @@ import type {
   SubscriptionProgress,
   UserSubscription
 } from '@/types'
+import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
+import { getExpirationDateRelation } from '@/utils/subscriptionQuota'
 
 const { t } = useI18n()
 
@@ -227,6 +229,8 @@ const progressError = ref(false)
 // Use store data instead of local state
 const activeSubscriptions = computed(() => subscriptionStore.activeSubscriptions)
 const hasActiveSubscriptions = computed(() => subscriptionStore.hasActiveSubscriptions)
+// 订阅功能关闭后，即使用户仍持有后台分配的订阅，顶栏也不再露出订阅进度与「查看全部订阅」入口。
+const subscriptionFeatureEnabled = computed(() => isFeatureFlagEnabled(FeatureFlags.subscription))
 
 const displaySubscriptions = computed(() => {
   // Sort by most usage (highest percentage first)
@@ -393,10 +397,11 @@ function formatDaysRemaining(expiresAt: string): string {
   const now = new Date()
   const expires = new Date(expiresAt)
   const diff = expires.getTime() - now.getTime()
-  if (diff < 0) return t('subscriptionProgress.expired')
+  const relation = getExpirationDateRelation(expires, now)
+  if (relation === 'expired') return t('subscriptionProgress.expired')
+  if (relation === 'today') return t('subscriptionProgress.expiresToday')
+  if (relation === 'tomorrow') return t('subscriptionProgress.expiresTomorrow')
   const days = Math.ceil(diff / (1000 * 60 * 60 * 24))
-  if (days === 0) return t('subscriptionProgress.expiresToday')
-  if (days === 1) return t('subscriptionProgress.expiresTomorrow')
   return t('subscriptionProgress.daysRemaining', { days })
 }
 
@@ -429,6 +434,7 @@ onMounted(() => {
   loadProgress()
   // Trigger initial fetch if not already loaded
   // The actual data loading is handled by App.vue globally
+  if (!subscriptionFeatureEnabled.value) return
   subscriptionStore.fetchActiveSubscriptions().catch((error) => {
     console.error('Failed to load subscriptions in SubscriptionProgressMini:', error)
   })

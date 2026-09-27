@@ -515,8 +515,8 @@ func (s *AccountService) TestCredentials(ctx context.Context, id int64) error {
 	case PlatformGrok:
 		// Grok OAuth credentials are validated via token exchange/refresh and request-path probes.
 		return nil
-	case PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax:
-		// 国产 OpenAI 兼容供应商：凭证为 API Key，实际可用性经余额/额度探测与转发路径验证。
+	case PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo:
+		// 国产 OpenAI 兼容供应商与 OpenCode：凭证为 API Key，实际可用性经余额/额度探测与转发路径验证。
 		return nil
 	case PlatformDevin:
 		// Devin：凭证为 session token（或经 API key 换发），实际可用性经 ACP 转发路径验证。

@@ -59,7 +59,7 @@ type updateChannelRequest struct {
 type channelModelPricingRequest struct {
 	Platform                     string                     `json:"platform" binding:"omitempty,max=50"`
 	Models                       []string                   `json:"models" binding:"required,min=1,max=100"`
-	BillingMode                  string                     `json:"billing_mode" binding:"omitempty,oneof=token per_request image"`
+	BillingMode                  string                     `json:"billing_mode" binding:"omitempty,oneof=token per_request image video"`
 	InputPrice                   *float64                   `json:"input_price" binding:"omitempty,min=0"`
 	InputPricePriority           *float64                   `json:"input_price_priority" binding:"omitempty,min=0"`
 	OutputPrice                  *float64                   `json:"output_price" binding:"omitempty,min=0"`
@@ -72,6 +72,7 @@ type channelModelPricingRequest struct {
 	FastMultiplier               *float64                   `json:"fast_multiplier" binding:"omitempty,gt=0"`
 	FlexMultiplier               *float64                   `json:"flex_multiplier" binding:"omitempty,gt=0"`
 	MaxReasoningEffortMultiplier *float64                   `json:"max_reasoning_effort_multiplier" binding:"omitempty,gt=0"`
+	ReasoningEffortMultipliers   map[string]float64         `json:"reasoning_effort_multipliers"`
 	ImageInputPrice              *float64                   `json:"image_input_price" binding:"omitempty,min=0"`
 	ImageOutputPrice             *float64                   `json:"image_output_price" binding:"omitempty,min=0"`
 	PerRequestPrice              *float64                   `json:"per_request_price" binding:"omitempty,min=0"`
@@ -153,6 +154,7 @@ type channelModelPricingResponse struct {
 	FastMultiplier               *float64                    `json:"fast_multiplier"`
 	FlexMultiplier               *float64                    `json:"flex_multiplier"`
 	MaxReasoningEffortMultiplier *float64                    `json:"max_reasoning_effort_multiplier"`
+	ReasoningEffortMultipliers   map[string]float64          `json:"reasoning_effort_multipliers"`
 	ImageInputPrice              *float64                    `json:"image_input_price"`
 	ImageOutputPrice             *float64                    `json:"image_output_price"`
 	PerRequestPrice              *float64                    `json:"per_request_price"`
@@ -290,6 +292,7 @@ func pricingToResponse(p *service.ChannelModelPricing) channelModelPricingRespon
 		FastMultiplier:               p.FastMultiplier,
 		FlexMultiplier:               p.FlexMultiplier,
 		MaxReasoningEffortMultiplier: p.MaxReasoningEffortMultiplier,
+		ReasoningEffortMultipliers:   p.ReasoningEffortMultipliers,
 		ImageInputPrice:              p.ImageInputPrice,
 		ImageOutputPrice:             p.ImageOutputPrice,
 		PerRequestPrice:              p.PerRequestPrice,
@@ -402,6 +405,7 @@ func pricingRequestToService(reqs []channelModelPricingRequest, allowChannelMult
 			FastMultiplier:               fastMultiplier,
 			FlexMultiplier:               flexMultiplier,
 			MaxReasoningEffortMultiplier: maxReasoningEffortMultiplier,
+			ReasoningEffortMultipliers:   r.ReasoningEffortMultipliers,
 			ImageInputPrice:              r.ImageInputPrice,
 			ImageOutputPrice:             r.ImageOutputPrice,
 			PerRequestPrice:              r.PerRequestPrice,
@@ -651,18 +655,19 @@ func (h *ChannelHandler) GetModelDefaultPricing(c *gin.Context) {
 	}
 
 	response.Success(c, gin.H{
-		"found":                           true,
-		"input_price":                     pricing.InputPricePerToken,
-		"input_price_priority":            pricing.InputPricePerTokenPriority,
-		"output_price":                    pricing.OutputPricePerToken,
-		"output_price_priority":           pricing.OutputPricePerTokenPriority,
-		"cache_write_price":               cacheWritePrice,
-		"cache_write_1h_price":            cacheWrite1hPrice,
-		"cache_write_price_priority":      pricing.CacheCreationPricePerTokenPriority,
-		"cache_read_price":                pricing.CacheReadPricePerToken,
-		"cache_read_price_priority":       pricing.CacheReadPricePerTokenPriority,
-		"image_input_price":               pricing.ImageInputPricePerToken,
-		"image_output_price":              pricing.ImageOutputPricePerToken,
+		"found":                         true,
+		"input_price":                   pricing.InputPricePerToken,
+		"input_price_priority":          pricing.InputPricePerTokenPriority,
+		"output_price":                  pricing.OutputPricePerToken,
+		"output_price_priority":         pricing.OutputPricePerTokenPriority,
+		"cache_write_price":             cacheWritePrice,
+		"cache_write_1h_price":          cacheWrite1hPrice,
+		"cache_write_price_priority":    pricing.CacheCreationPricePerTokenPriority,
+		"cache_read_price":              pricing.CacheReadPricePerToken,
+		"cache_read_price_priority":     pricing.CacheReadPricePerTokenPriority,
+		"reasoning_effort_multipliers":  pricing.ReasoningEffortMultipliers,
+		"image_input_price":             pricing.ImageInputPricePerToken,
+		"image_output_price":            pricing.ImageOutputPricePerToken,
 		"max_reasoning_effort_multiplier": pricing.MaxReasoningEffortMultiplier,
 	})
 }
@@ -680,6 +685,7 @@ var platformToLiteLLMProvider = map[string]string{
 	service.PlatformDeepseek:    "deepseek",
 	service.PlatformMiniMax:     "minimax",
 	service.PlatformDevin:       "devin",
+	service.PlatformOpenCodeGo:  "opencode-go",
 }
 
 // SyncPricingModels 返回 LiteLLM 定价目录中指定平台的最新模型列表

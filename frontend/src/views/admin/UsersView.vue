@@ -265,6 +265,17 @@
               {{ t('admin.users.bulkLimits.action', { count: selectedCount }) }}
             </button>
 
+            <button
+              v-if="selectedCount > 0"
+              class="btn btn-danger flex-1 md:flex-initial"
+              data-test="bulk-delete-users"
+              :disabled="bulkDeleting || bulkActionLoading"
+              @click="bulkDeleteIds = [...selectedIds]"
+            >
+              <Icon name="trash" size="md" class="mr-2" />
+              {{ t('admin.users.bulkDelete.action', { count: selectedCount }) }}
+            </button>
+
             <!-- Create User Button (full width on mobile, auto width on desktop) -->
             <button type="button" @click="showCreateModal = true" class="btn btn-primary flex-1 md:flex-initial">
               <Icon name="plus" size="md" class="mr-2" />
@@ -286,9 +297,9 @@
               <Icon name="ban" size="sm" />
               {{ t('admin.users.bulkDisable') }}
             </button>
-            <button type="button" class="btn btn-danger btn-sm" :disabled="bulkActionLoading" @click="requestBulkAction('delete')">
+            <button type="button" class="btn btn-danger btn-sm" :disabled="bulkActionLoading || bulkDeleting" @click="bulkDeleteIds = [...selectedIds]">
               <Icon name="trash" size="sm" />
-              {{ t('admin.users.bulkDelete') }}
+              {{ t('admin.users.bulkDelete.action', { count: selectedCount }) }}
             </button>
             <button type="button" class="btn btn-ghost btn-sm" :disabled="bulkActionLoading" @click="clearSelectedUsers">
               {{ t('common.clear') }}
@@ -803,10 +814,18 @@
       :show="bulkAction !== null"
       :title="t('admin.users.bulkActionTitle')"
       :message="t('admin.users.bulkActionConfirm', { action: bulkAction ? t('admin.users.bulk.' + bulkAction) : '', count: selectedCount })"
-      :confirm-text="bulkAction === 'delete' ? t('common.delete') : t('common.confirm')"
-      :danger="bulkAction === 'delete'"
+      :confirm-text="t('common.confirm')"
       @confirm="confirmBulkAction"
       @cancel="bulkAction = null"
+    />
+    <ConfirmDialog
+      :show="bulkDeleteIds.length > 0"
+      :title="t('admin.users.bulkDelete.title')"
+      :message="t('admin.users.bulkDelete.confirm', { count: bulkDeleteIds.length })"
+      :confirm-text="t('common.delete')"
+      danger
+      @confirm="confirmBulkDelete"
+      @cancel="bulkDeleteIds = []"
     />
     <UserCreateModal :show="showCreateModal" @close="showCreateModal = false" @success="loadUsers" />
     <UserEditModal :show="showEditModal" :user="editingUser" @close="closeEditModal" @success="loadUsers" />
@@ -1084,7 +1103,7 @@ const users = ref<AdminUser[]>([])
 const loading = ref(true)
 const usersError = ref<string | null>(null)
 
-type BulkUserAction = 'enable' | 'disable' | 'delete'
+type BulkUserAction = 'enable' | 'disable'
 const bulkAction = ref<BulkUserAction | null>(null)
 const bulkActionLoading = ref(false)
 const requestBulkAction = (action: BulkUserAction) => {
@@ -1404,7 +1423,8 @@ const {
   selectedIds,
   selectedCount,
   setSelectedIds,
-  clear: clearSelection
+  clear: clearSelection,
+  removeMany: removeSelectedIds
 } = useTableSelection<AdminUser>({
   rows: sortedUsers,
   getId: (user) => user.id
@@ -1433,6 +1453,8 @@ const showCreateModal = ref(false)
 const showEditModal = ref(false)
 const showBulkEditModal = ref(false)
 const showDeleteDialog = ref(false)
+const bulkDeleteIds = ref<number[]>([])
+const bulkDeleting = ref(false)
 const showApiKeysModal = ref(false)
 const showAttributesModal = ref(false)
 const showPlatformQuotaModal = ref(false)
@@ -1838,11 +1860,21 @@ const closeEditModal = () => {
 const handleToggleStatus = async (user: AdminUser) => {
   const newStatus = user.status === 'active' ? 'disabled' : 'active'
   try {
-    await adminAPI.users.toggleStatus(user.id, newStatus)
+    const updated = await adminAPI.users.toggleStatus(user.id, newStatus)
     appStore.showSuccess(
       newStatus === 'active' ? t('admin.users.userEnabled') : t('admin.users.userDisabled')
     )
-    loadUsers()
+    if (loading.value) {
+      // 与本次更新并发的列表请求可能读到更新前的状态，重新拉取保证一致。
+      loadUsers()
+      return
+    }
+    // 更新接口的响应不含 current_concurrency、subscriptions 等列表专属字段，只回写状态相关字段。
+    const row = users.value.find((u) => u.id === user.id)
+    if (row) {
+      row.status = updated.status
+      row.updated_at = updated.updated_at
+    }
   } catch (error: any) {
     appStore.showError(error.response?.data?.detail || t('admin.users.failedToToggle'))
     console.error('Error toggling user status:', error)
@@ -1909,7 +1941,6 @@ const confirmBulkAction = async () => {
   bulkActionLoading.value = true
   try {
     const results = await Promise.allSettled(ids.map((id) => {
-      if (action === 'delete') return adminAPI.users.delete(id)
       return adminAPI.users.toggleStatus(id, action === 'enable' ? 'active' : 'disabled')
     }))
     const success = results.filter((result) => result.status === 'fulfilled').length
@@ -1924,6 +1955,34 @@ const confirmBulkAction = async () => {
     await loadUsers()
   } finally {
     bulkActionLoading.value = false
+  }
+}
+
+const confirmBulkDelete = async () => {
+  const ids = [...bulkDeleteIds.value]
+  if (ids.length === 0 || bulkDeleting.value) return
+  bulkDeleteIds.value = []
+  bulkDeleting.value = true
+  const deletedIds: number[] = []
+  try {
+    for (const id of ids) {
+      try {
+        await adminAPI.users.delete(id)
+        deletedIds.push(id)
+      } catch (error) {
+        console.error('Error deleting user:', error)
+      }
+    }
+    removeSelectedIds(deletedIds)
+    if (deletedIds.length > 0) {
+      appStore.showSuccess(t('admin.users.bulkDelete.success', { count: deletedIds.length }))
+      pagination.page = 1
+    }
+    const failed = ids.length - deletedIds.length
+    if (failed > 0) appStore.showError(t('admin.users.bulkDelete.failed', { count: failed }))
+    await loadUsers()
+  } finally {
+    bulkDeleting.value = false
   }
 }
 

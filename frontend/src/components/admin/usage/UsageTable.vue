@@ -438,11 +438,11 @@
                     {{ line.tokens.toLocaleString() }} × {{ line.unitPrice }} {{ t('usage.perMillionTokens') }}
                   </div>
                 </div>
-                <span class="font-medium text-white">${{ line.cost.toFixed(6) }}</span>
+                <span class="font-medium text-white">${{ line.cost.toFixed(8) }}</span>
               </div>
               <div class="mt-1.5 flex items-center justify-between gap-3 border-t border-gray-700 pt-1.5">
                 <span class="text-gray-400">{{ t('usage.billingSubtotal') }}</span>
-                <span class="font-semibold text-white">${{ tooltipData.total_cost?.toFixed(6) || '0.000000' }}</span>
+                <span class="font-semibold text-white">${{ tooltipData.total_cost?.toFixed(8) || '0.00000000' }}</span>
               </div>
             </div>
             <template v-else-if="tooltipData && isImageUsage(tooltipData)">
@@ -470,19 +470,69 @@
                 <span class="text-gray-400">{{ t('usage.imageSizeBreakdown') }}</span>
                 <span class="font-medium text-white">{{ formatImageSizeBreakdown(tooltipData) }}</span>
               </div>
+              <div v-if="tooltipData.input_cost > 0" class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('admin.usage.inputCost') }}</span>
+                <span class="font-medium text-white">${{ tooltipData.input_cost.toFixed(8) }}</span>
+              </div>
+              <div v-if="tooltipData.image_input_cost > 0" class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.imageInputCost') }}</span>
+                <span class="font-medium text-fuchsia-300">${{ tooltipData.image_input_cost.toFixed(8) }}</span>
+              </div>
+              <div v-if="tooltipData.output_cost > 0" class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('admin.usage.outputCost') }}</span>
+                <span class="font-medium text-white">${{ tooltipData.output_cost.toFixed(8) }}</span>
+              </div>
+              <div v-if="tooltipData.image_output_cost > 0" class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.imageOutputCost') }}</span>
+                <span class="font-medium text-pink-300">${{ tooltipData.image_output_cost.toFixed(8) }}</span>
+              </div>
+              <div v-if="tooltipData.cache_creation_cost > 0" class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('admin.usage.cacheCreationCost') }}</span>
+                <span class="font-medium text-white">${{ tooltipData.cache_creation_cost.toFixed(8) }}</span>
+              </div>
+              <div v-if="tooltipData.cache_read_cost > 0" class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('admin.usage.cacheReadCost') }}</span>
+                <span class="font-medium text-white">${{ tooltipData.cache_read_cost.toFixed(8) }}</span>
+              </div>
               <div class="flex items-center justify-between gap-4">
                 <span class="text-gray-400">{{ t('usage.imageUnitPrice') }}</span>
-                <span class="font-medium text-sky-300">${{ imageUnitPrice(tooltipData).toFixed(6) }}</span>
+                <span class="font-medium text-sky-300">${{ imageUnitPrice(tooltipData).toFixed(8) }}</span>
               </div>
               <div class="flex items-center justify-between gap-4">
                 <span class="text-gray-400">{{ t('usage.imageTotalPrice') }}</span>
-                <span class="font-medium text-white">${{ tooltipData.total_cost?.toFixed(6) || '0.000000' }}</span>
+                <span class="font-medium text-white">${{ tooltipData.total_cost?.toFixed(8) || '0.00000000' }}</span>
               </div>
             </template>
-            <div v-else class="flex items-center justify-between gap-4">
-              <span class="text-gray-400">{{ t('usage.unitPrice') }}</span>
-              <span class="font-medium text-sky-300">${{ tooltipData?.total_cost?.toFixed(6) || '0.000000' }}</span>
-            </div>
+            <template v-else>
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.unitPrice') }}</span>
+                <span class="font-medium text-sky-300">${{ tooltipData?.total_cost?.toFixed(8) || '0.00000000' }}</span>
+              </div>
+              <div v-if="tooltipData && tooltipData.input_cost > 0" class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('admin.usage.inputCost') }}</span>
+                <span class="font-medium text-white">${{ tooltipData.input_cost.toFixed(8) }}</span>
+              </div>
+              <div v-if="tooltipData && tooltipData.image_input_cost > 0" class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.imageInputCost') }}</span>
+                <span class="font-medium text-fuchsia-300">${{ tooltipData.image_input_cost.toFixed(8) }}</span>
+              </div>
+              <div v-if="tooltipData && tooltipData.output_cost > 0" class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('admin.usage.outputCost') }}</span>
+                <span class="font-medium text-white">${{ tooltipData.output_cost.toFixed(8) }}</span>
+              </div>
+              <div v-if="tooltipData && tooltipData.image_output_cost > 0" class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.imageOutputCost') }}</span>
+                <span class="font-medium text-pink-300">${{ tooltipData.image_output_cost.toFixed(8) }}</span>
+              </div>
+              <div v-if="tooltipData && tooltipData.cache_creation_cost > 0" class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('admin.usage.cacheCreationCost') }}</span>
+                <span class="font-medium text-white">${{ tooltipData.cache_creation_cost.toFixed(8) }}</span>
+              </div>
+              <div v-if="tooltipData && tooltipData.cache_read_cost > 0" class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('admin.usage.cacheReadCost') }}</span>
+                <span class="font-medium text-white">${{ tooltipData.cache_read_cost.toFixed(8) }}</span>
+              </div>
+            </template>
           </div>
           <!-- Pricing context and billing summary -->
           <div class="flex items-center justify-between gap-6">
@@ -507,11 +557,11 @@
           </div>
           <div class="flex items-center justify-between gap-6">
             <span class="text-gray-400">{{ t('usage.original') }}</span>
-            <span class="font-medium text-white">${{ tooltipData?.total_cost?.toFixed(6) || '0.000000' }}</span>
+            <span class="font-medium text-white">${{ tooltipData?.total_cost?.toFixed(8) || '0.00000000' }}</span>
           </div>
           <div class="flex items-center justify-between gap-6">
             <span class="text-gray-400">{{ t('usage.userBilled') }}</span>
-            <span class="font-semibold text-green-400">${{ tooltipData?.actual_cost?.toFixed(6) || '0.000000' }}</span>
+            <span class="font-semibold text-green-400">${{ tooltipData?.actual_cost?.toFixed(8) || '0.00000000' }}</span>
           </div>
           <!-- Account billing (separated from user billing) -->
           <template v-if="showAccountBilling">
@@ -526,7 +576,7 @@
                   total_cost: tooltipData?.total_cost,
                   account_stats_cost: tooltipData?.account_stats_cost,
                   account_rate_multiplier: tooltipData?.account_rate_multiplier,
-                }).toFixed(6) }}
+                }).toFixed(8) }}
               </span>
             </div>
           </template>

@@ -88,5 +88,26 @@ describe('UserBalanceModal virtual currency adjustments', () => {
     }))
     expect(api.adjust.mock.calls[0][1]).not.toHaveProperty('group_id')
     expect(api.updateBalance).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it.each([
+    [{ message: 'User balance changed; retry' }, 'User balance changed; retry'],
+    [{ response: { data: { detail: 'Legacy detail' } } }, 'Legacy detail'],
+    [{}, 'common.error']
+  ])('shows the API error and keeps the dialog open', async (error, message) => {
+    api.updateBalance.mockRejectedValueOnce(error)
+    const wrapper = mountModal()
+    await wrapper.setProps({ show: true, user: { id: 1, email: 'a@example.com', balance: 5 } as AdminUser })
+    await flushPromises()
+    await wrapper.get('input[type="number"]').setValue('1')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(api.showError).toHaveBeenCalledWith(message)
+    expect(wrapper.emitted('success')).toBeUndefined()
+    expect(wrapper.emitted('close')).toBeUndefined()
+    expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
   })
 })
