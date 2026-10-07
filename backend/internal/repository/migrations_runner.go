@@ -225,6 +225,17 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 			return fmt.Errorf("check migration %s: %w", name, rowErr)
 		}
 
+		// 两条历史白名单各自缺少另一分支的平台；升级已有数据时不能先收窄再扩展。
+		// 旧文件及其 checksum 保持不变，仅未执行的迁移改用 318 的完整超集；
+		// 318 随后独立登记其文件校验和，已执行旧版本的数据库也会得到相同约束。
+		if name == "241_add_typesafe_platform.sql" || name == "316_add_devin_platform.sql" {
+			merged, readErr := fs.ReadFile(fsys, "318_merge_platform_constraints.sql")
+			if readErr != nil {
+				return fmt.Errorf("read merged platform migration for %s: %w", name, readErr)
+			}
+			content = strings.TrimSpace(string(merged))
+		}
+
 		nonTx, err := validateMigrationExecutionMode(name, content)
 		if err != nil {
 			return fmt.Errorf("validate migration %s: %w", name, err)

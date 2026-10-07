@@ -48,6 +48,15 @@ ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS example_column VARCHAR(100);
 
 ## Important Rules
 
+### Upstream/fork platform convergence
+
+`318_merge_platform_constraints.sql` combines the TypeSafe/OpenCode and Devin
+platform constraints. The runner executes this superset in place of pending
+`241_add_typesafe_platform.sql` and `316_add_devin_platform.sql`, then records
+318 normally. This prevents either older whitelist from rejecting data created
+by the other branch during upgrades. Historical files and their checksum checks
+remain unchanged; already applied migrations are not replayed.
+
 ### ⚠️ Immutability Principle
 
 **Once a migration is applied to ANY environment (dev, staging, production), it MUST NOT be modified.**
