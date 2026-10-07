@@ -80,6 +80,7 @@ var (
 
 // OpenAI allowed headers whitelist (for non-passthrough).
 var openaiAllowedHeaders = map[string]bool{
+	"openai-beta":              true,
 	"accept-language":          true,
 	"content-type":             true,
 	"conversation_id":          true,

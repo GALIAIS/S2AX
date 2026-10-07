@@ -184,6 +184,8 @@ func TestDetectModelPlatform(t *testing.T) {
 		{name: "devin swe", model: "devin-swe-2-max", platform: PlatformDevin, ok: true},
 		{name: "devin prefix", model: "devin/devin-auto", platform: PlatformDevin, ok: true},
 		{name: "swe bare", model: "swe-2-max", platform: PlatformDevin, ok: true},
+		{name: "jev", model: "jev-latest", platform: PlatformTypeSafe, ok: true},
+		{name: "typesafe prefix", model: "typesafe/jev-latest", platform: PlatformTypeSafe, ok: true},
 		{name: "abab unrelated namespace", model: "abab-other", ok: false},
 		{name: "unknown k3 alias", model: "k3-preview", ok: false},
 		{name: "unknown", model: "llama-4-maverick", ok: false},
@@ -220,13 +222,13 @@ func TestCompositeGroupSchedulerHasAllCanonicalPlatformBuckets(t *testing.T) {
 		platforms = append(platforms, platform)
 	}
 	require.ElementsMatch(t,
-		[]string{PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformDevin, PlatformOpenCodeGo},
+		[]string{PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformDevin, PlatformOpenCodeGo, PlatformTypeSafe},
 		platforms,
 	)
 }
 
 func TestCompositeConcretePlatformsIncludeCNProviders(t *testing.T) {
-	for _, platform := range []string{PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformDevin, PlatformOpenCodeGo} {
+	for _, platform := range []string{PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformDevin, PlatformOpenCodeGo, PlatformTypeSafe} {
 		require.True(t, isConcreteRequestPlatform(platform))
 		require.True(t, canCopyAccountsFromGroupPlatform(PlatformComposite, platform))
 	}
