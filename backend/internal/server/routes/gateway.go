@@ -78,6 +78,14 @@ func RegisterGatewayRoutes(
 	isOpenAIOnlyEndpointGatewayPlatform := func(c *gin.Context) bool {
 		return getGroupPlatform(c) == service.PlatformOpenAI
 	}
+	decisionsHandler := func(c *gin.Context) {
+		if !isOpenAIOnlyEndpointGatewayPlatform(c) {
+			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
+			c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"type": "not_found_error", "message": "Decisions API is only available for OpenAI groups or OpenAI routes in Composite groups"}})
+			return
+		}
+		h.OpenAIGateway.Decisions(c)
+	}
 	imagesHandler := func(c *gin.Context) {
 		switch getGroupPlatform(c) {
 		case service.PlatformOpenAI:
@@ -231,6 +239,7 @@ func RegisterGatewayRoutes(
 			h.Gateway.Responses(c)
 		}))
 		gateway.POST("/alpha/search", textBodyLimit, h.OpenAIGateway.AlphaSearch)
+		gateway.POST("/decisions", textBodyLimit, decisionsHandler)
 		gateway.GET("/responses", func(c *gin.Context) {
 			h.OpenAIGateway.ResponsesWebSocket(c)
 		})
@@ -377,6 +386,7 @@ func RegisterGatewayRoutes(
 	rootRoute(http.MethodPost, "/responses", bodyLimit, responsesHandler)
 	rootRoute(http.MethodPost, "/responses/*subpath", bodyLimit, guardResponsesSubpath(responsesHandler))
 	rootRoute(http.MethodPost, "/alpha/search", textBodyLimit, h.OpenAIGateway.AlphaSearch)
+	rootRoute(http.MethodPost, "/decisions", textBodyLimit, decisionsHandler)
 	rootRoute(http.MethodGet, "/responses", bodyLimit, func(c *gin.Context) {
 		h.OpenAIGateway.ResponsesWebSocket(c)
 	})
@@ -677,6 +687,8 @@ func compositeRouteEndpointForPath(path string) string {
 		return service.CompositeRouteEndpointChatCompletions
 	case strings.Contains(path, "/embeddings"):
 		return service.CompositeRouteEndpointEmbeddings
+	case strings.Contains(path, "/decisions"):
+		return service.CompositeRouteEndpointDecisions
 	case strings.Contains(path, "/images/"):
 		return service.CompositeRouteEndpointImages
 	case strings.Contains(path, "/v1beta/"):

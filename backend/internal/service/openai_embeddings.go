@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -24,6 +25,14 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	body []byte,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	return s.forwardOpenAIJSON(ctx, c, account, body, defaultMappedModel, OpenAIEndpointCapabilityEmbeddings)
+}
+
+func (s *OpenAIGatewayService) ForwardDecisions(ctx context.Context, c *gin.Context, account *Account, body []byte, defaultMappedModel string) (*OpenAIForwardResult, error) {
+	return s.forwardOpenAIJSON(ctx, c, account, body, defaultMappedModel, OpenAIEndpointCapabilityDecisions)
+}
+
+func (s *OpenAIGatewayService) forwardOpenAIJSON(ctx context.Context, c *gin.Context, account *Account, body []byte, defaultMappedModel string, capability OpenAIEndpointCapability) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
 
 	originalModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
@@ -34,13 +43,23 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 
 	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	if capability == OpenAIEndpointCapabilityDecisions {
+		if !account.SupportsOpenAIEndpointCapability(capability) {
+			return nil, fmt.Errorf("account does not support Decisions")
+		}
+		if upstreamModel != openai.DecisionsModel {
+			writeOpenAIEmbeddingsError(c, http.StatusBadRequest, "invalid_request_error", "Decisions currently supports only gpt-6-luna after model mapping")
+			return nil, fmt.Errorf("unsupported Decisions model")
+		}
+	}
 	SetOpsUpstreamModel(c, upstreamModel)
 	upstreamBody := body
 	if upstreamModel != originalModel {
 		upstreamBody = ReplaceModelInBody(body, upstreamModel)
 	}
 
-	logger.L().Debug("openai embeddings: forwarding",
+	logger.L().Debug("openai JSON endpoint: forwarding",
+		zap.String("endpoint", string(capability)),
 		zap.Int64("account_id", account.ID),
 		zap.String("original_model", originalModel),
 		zap.String("billing_model", billingModel),
@@ -61,7 +80,7 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	if err != nil {
 		return nil, fmt.Errorf("invalid base_url: %w", err)
 	}
-	targetURL := buildOpenAIEmbeddingsURL(validatedURL)
+	targetURL := buildOpenAIEndpointURL(validatedURL, "/v1/"+string(capability))
 
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost, targetURL, bytes.NewReader(upstreamBody))
@@ -161,12 +180,22 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 		return nil, fmt.Errorf("read upstream body: %w", err)
 	}
 
+	usage := extractOpenAIEmbeddingsUsage(respBody)
+	if capability == OpenAIEndpointCapabilityDecisions {
+		inputTokens := gjson.GetBytes(respBody, "usage.input_tokens")
+		if !gjson.ValidBytes(respBody) || !gjson.GetBytes(respBody, "answers").IsArray() || inputTokens.Type != gjson.Number || inputTokens.Int() < 0 || inputTokens.Float() != float64(inputTokens.Int()) {
+			writeOpenAIEmbeddingsError(c, http.StatusBadGateway, "upstream_error", "Invalid Decisions response or missing input token usage")
+			return nil, fmt.Errorf("invalid Decisions response")
+		}
+		// Decisions 仅按总输入计费；上游附带的缓存、输出明细不产生费用。
+		usage = OpenAIUsage{InputTokens: int(inputTokens.Int())}
+	}
 	writeOpenAIEmbeddingsUpstreamResponse(c, resp, respBody, s.responseHeaderFilter)
 
 	return &OpenAIForwardResult{
 		RequestID:       firstNonEmptyString(resp.Header.Get("x-request-id"), resp.Header.Get("request-id")),
 		UpstreamHeaders: resp.Header,
-		Usage:           extractOpenAIEmbeddingsUsage(respBody),
+		Usage:           usage,
 		Model:           originalModel,
 		BillingModel:    billingModel,
 		UpstreamModel:   upstreamModel,

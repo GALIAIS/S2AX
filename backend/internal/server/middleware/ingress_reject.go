@@ -159,6 +159,8 @@ func ingressRejectRoute(path string) (string, string) {
 		return "videos", "openai"
 	case strings.Contains(path, "/embeddings"):
 		return "embeddings", "openai"
+	case strings.Contains(path, "/decisions"):
+		return "decisions", "openai"
 	case strings.Contains(path, "/models"):
 		return "models", "openai"
 	default:

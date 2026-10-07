@@ -646,6 +646,12 @@ func (s *BillingService) initFallbackPricing() {
 		LongContextInputMultiplier:         2,
 		LongContextOutputMultiplier:        1.5,
 	}
+	s.fallbackPrices[OpenAIDecisionsBillingModel] = &ModelPricing{
+		InputPricePerToken:         0.1e-6,
+		CacheCreationPriceExplicit: true,
+		LongContextInputThreshold:  272_000,
+		LongContextInputMultiplier: 2,
+	}
 	s.fallbackPrices["gpt-6-luna"] = &ModelPricing{
 		InputPricePerToken:                 0.1e-6,
 		InputPricePerTokenPriority:         0.2e-6,
@@ -1394,6 +1400,12 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 func (s *BillingService) getModelPricingAt(model string, pricingAt time.Time) (*ModelPricing, error) {
 	// 标准化模型名称（转小写）
 	model = strings.ToLower(model)
+	if strings.HasSuffix(model, openAIDecisionsPricingSuffix) {
+		if pricing := s.fallbackPrices[model]; pricing != nil {
+			return pricing, nil
+		}
+		return nil, fmt.Errorf("%w for Decisions model: %s", ErrModelPricingUnavailable, model)
+	}
 
 	// 1. 优先从动态价格服务获取
 	if s.pricingService != nil {

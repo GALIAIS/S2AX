@@ -1242,6 +1242,7 @@ export default {
           responses: 'Responses',
           chatCompletions: 'Chat Completions',
           embeddings: 'Embeddings',
+          decisions: 'Decisions',
           images: 'Images',
           gemini: 'Gemini Native'
         },

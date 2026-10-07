@@ -1371,6 +1371,7 @@ describe('EditAccountModal', () => {
     updateAccountMock.mockResolvedValue(account)
 
     const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="openai-endpoint-capability-decisions"]').setValue(false)
 
     const chatCheckbox = wrapper.get<HTMLInputElement>(
       '[data-testid="openai-endpoint-capability-chat_completions"]'

@@ -745,6 +745,30 @@ OAuth / Setup Token 图片请求使用 Responses 主控模型调用 `image_gener
 
 ---
 
+## OpenAI Decisions
+
+提供 `POST /v1/decisions` 和 `/decisions` 别名，使用项目 API Key 鉴权、分组模型权限、并发限制、账号调度、故障切换、内容审核和用量结算。上游必须是支持 Decisions 的 **OpenAI API Key 账号**；ChatGPT OAuth/PAT 账号不参与此接口调度。在账号新增、编辑或批量编辑的端点能力中启用 **Decisions**。Composite 分组可使用 `decisions` 专用路由，目标平台为 OpenAI。
+
+按 [OpenAI Decisions 官方文档](https://developers.openai.com/api/docs/guides/decisions)，当前为公测，模型映射后的上游型号须为 `gpt-6-luna`。请求支持字符串或 user 消息中的 `input_text`、内联 base64 `input_image`，最多 128 张图片；不支持外链图片、文件、工具、音频和流式输出。`questions` 支持 `predicate`、`choice`、`score`，其中 choice 值可为字符串或布尔值。问题名可省略；提供时须唯一。上游答案（包括 `refusal`）与概率字段原样返回。
+
+```json
+{
+  "model": "gpt-6-luna",
+  "input": "订单被重复扣款。",
+  "questions": [{
+    "type": "choice",
+    "name": "department",
+    "instructions": "这条反馈应交给哪个部门？",
+    "choices": [
+      {"value": "billing", "description": "扣款、账单和退款"},
+      {"value": "other", "description": "其他问题"}
+    ]
+  }]
+}
+```
+
+Decisions 使用独立计费键 `gpt-6-luna-decisions`，基础输入价为 **$0.10 / 百万 token**，没有输出、缓存读取和缓存写入费用；不复用普通对话价卡。分组/渠道可为该键单独配价，别名的专用价卡使用 `<别名>-decisions`。沿用现有分组倍率、高峰、长上下文开关及账号成本统计；默认长上下文阶梯为超过 272,000 输入 token 后输入价 ×2。区域处理溢价或第三方上游差价需在专用价卡或账号倍率中配置。审核同时覆盖全部输入与问题说明，失败响应不记录为成功用量。
+
 ## TypeSafe / Jev 使用说明
 
 Sub2API 支持使用 TypeSafe API Key 账户，通过 Jev 原生、非流式的 System One 协议调用模型。

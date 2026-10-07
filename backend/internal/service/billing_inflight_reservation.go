@@ -478,6 +478,7 @@ func validCost(v float64) bool { return v > 0 && !math.IsNaN(v) && !math.IsInf(v
 
 // estimateOne 估算单个候选计费模型（未乘倍率的 token 部分与按次部分分开返回，便于套用不同倍率）。
 func (d inflightEstimateDeps) estimateOne(ctx context.Context, apiKey *APIKey, model string, req InflightEstimateRequest, textRate, imageRate float64) float64 {
+	model = openAIDecisionsPricingModel(ctx, model)
 	cfg := inflightReservationCfg(d.cfg)
 	units := req.Units
 	if units <= 0 {

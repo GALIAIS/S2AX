@@ -64,6 +64,7 @@ const (
 	ContentModerationProtocolGemini            = "gemini"
 	ContentModerationProtocolOpenAIImages      = "openai_images"
 	ContentModerationProtocolTypeSafeSystemOne = "typesafe_systemone"
+	ContentModerationProtocolOpenAIDecisions   = "openai_decisions"
 
 	defaultContentModerationBaseURL             = "https://api.openai.com"
 	defaultContentModerationModel               = "omni-moderation-latest"

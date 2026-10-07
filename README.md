@@ -829,6 +829,14 @@ Administrators can override automatic media eligibility through the account crea
 
 ---
 
+## OpenAI Decisions
+
+`POST /v1/decisions` (alias `/decisions`) uses gateway API-key authentication, model permissions, concurrency limits, account routing, failover, prompt auditing, and usage billing. Enable **Decisions** in an OpenAI API-key account's endpoint capabilities; ChatGPT OAuth/PAT accounts are excluded. Composite groups can configure a `decisions` route targeting OpenAI.
+
+The [official Decisions API](https://developers.openai.com/api/docs/guides/decisions) is in public beta and currently supports `gpt-6-luna` after model mapping. Supply a string or user messages containing text and inline base64 images (up to 128), plus `predicate`, `choice`, or `score` questions. Choice values may be strings or booleans. Question names are optional and must be unique when supplied. External image URLs, files, tools, audio, and streaming are unsupported. Answers, probabilities, and refusals pass through unchanged.
+
+Billing uses the separate `gpt-6-luna-decisions` price key: **$0.10 per million input tokens**, with no output or cache charges. Configure group/channel overrides on that key, or `<alias>-decisions` for a custom public model name. Existing group multipliers, peak pricing, long-context controls, and account cost accounting apply; the default input rate doubles above 272,000 input tokens. Configure regional processing premiums or third-party upstream differences through the dedicated price card or account multiplier. Auditing covers all questions and shared input.
+
 ## TypeSafe / Jev Support
 
 Sub2API supports TypeSafe API-key accounts through Jev's native, non-streaming System One protocol.

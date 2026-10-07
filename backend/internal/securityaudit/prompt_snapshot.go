@@ -108,6 +108,13 @@ func extractProtocolSegments(protocol string, document any) []promptSegment {
 		return userPromptSegments(extractMediaPrompts(root))
 	case "typesafe_systemone":
 		return extractSystemOneSegments(root)
+	case "openai_decisions":
+		texts := appendJSONStringLeaves(nil, root["questions"])
+		for _, segment := range extractResponses(root["input"]) {
+			texts = append(texts, segment.text)
+		}
+		// 整次 Decisions 共用全部证据；最近一轮审核也必须覆盖所有问题及输入。
+		return userPromptSegments([]string{strings.Join(texts, "\n")})
 	default:
 		if segments := extractChatLikeSegments(root); len(segments) > 0 {
 			return segments

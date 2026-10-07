@@ -11,6 +11,7 @@ import (
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,16 @@ import (
 // Embeddings handles the OpenAI-compatible Embeddings API.
 // POST /v1/embeddings
 func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
+	h.openAIJSONEndpoint(c, service.OpenAIEndpointCapabilityEmbeddings)
+}
+
+func (h *OpenAIGatewayHandler) Decisions(c *gin.Context) {
+	c.Request = c.Request.WithContext(service.WithOpenAIDecisionsPricing(c.Request.Context()))
+	h.openAIJSONEndpoint(c, service.OpenAIEndpointCapabilityDecisions)
+}
+
+func (h *OpenAIGatewayHandler) openAIJSONEndpoint(c *gin.Context, capability service.OpenAIEndpointCapability) {
+	protocol := "openai_" + string(capability)
 	streamStarted := false
 	requestStart := time.Now()
 
@@ -37,7 +48,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 	}
 	reqLog := requestLogger(
 		c,
-		"handler.openai_gateway.embeddings",
+		"handler.openai_gateway."+string(capability),
 		zap.Int64("user_id", subject.UserID),
 		zap.Int64("api_key_id", apiKey.ID),
 		zap.Any("group_id", apiKey.GroupID),
@@ -71,6 +82,12 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 		return
 	}
 	reqModel := modelResult.String()
+	if capability == service.OpenAIEndpointCapabilityDecisions {
+		if err := openai.ValidateDecisionsRequest(body); err != nil {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+			return
+		}
+	}
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
 	if !compositeTargetPlatformAllowed(c, apiKey, reqModel, service.PlatformOpenAI) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by this OpenAI-compatible endpoint for composite groups")
@@ -79,7 +96,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 	reqLog = reqLog.With(zap.String("model", reqModel))
 	setOpsRequestContext(c, reqModel, false)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeSync))
-	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, "openai_embeddings", reqModel, body); decision != nil && !decision.AllowNextStage {
+	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, protocol, reqModel, body); decision != nil && !decision.AllowNextStage {
 		h.openAISecurityAuditError(c, decision)
 		return
 	}
@@ -99,7 +116,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 	}
 
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
-		reqLog.Info("openai_embeddings.billing_check_failed", zap.Error(err))
+		reqLog.Info(protocol+".billing_check_failed", zap.Error(err))
 		status, code, message, retryAfter := billingErrorDetails(err)
 		if retryAfter > 0 {
 			c.Header("Retry-After", strconv.Itoa(retryAfter))
@@ -130,9 +147,9 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 	}
 	routingStart := time.Now()
 
-	// 分组利润控制：embeddings 文本入口请求级装门并固定 pricingAt。
-	embPricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
-	c.Request = c.Request.WithContext(embPricingCtx)
+	// 两个非流式入口共用请求级利润门与计费时点。
+	pricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
+	c.Request = c.Request.WithContext(pricingCtx)
 
 	for {
 		selection, _, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
@@ -143,17 +160,17 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 			forwardModel,
 			failedAccountIDs,
 			service.OpenAIUpstreamTransportHTTPSSE,
-			service.OpenAIEndpointCapabilityEmbeddings,
+			capability,
 			false,
 			false,
 			true,
 		)
 		if err != nil {
 			if failoverClientGone(c) {
-				reqLog.Info("openai_embeddings.account_select_aborted_client_disconnected", zap.Error(err))
+				reqLog.Info(protocol+".account_select_aborted_client_disconnected", zap.Error(err))
 				return
 			}
-			reqLog.Warn("openai_embeddings.account_select_failed",
+			reqLog.Warn(protocol+".account_select_failed",
 				zap.Error(err),
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 			)
@@ -210,6 +227,9 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
+			if capability == service.OpenAIEndpointCapabilityDecisions {
+				return h.gatewayService.ForwardDecisions(c.Request.Context(), c, account, forwardBody, "")
+			}
 			return h.gatewayService.ForwardEmbeddings(c.Request.Context(), c, account, forwardBody, "")
 		}()
 
@@ -230,7 +250,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 				}
 				h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, reqModel, false, result), false, nil, err)
 				if failoverClientGone(c) {
-					reqLog.Info("openai_embeddings.failover_aborted_client_disconnected",
+					reqLog.Info(protocol+".failover_aborted_client_disconnected",
 						zap.Int64("account_id", account.ID),
 						zap.Int("upstream_status", failoverErr.StatusCode),
 					)
@@ -244,7 +264,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 					return
 				}
 				switchCount++
-				reqLog.Warn("openai_embeddings.upstream_failover_switching",
+				reqLog.Warn(protocol+".upstream_failover_switching",
 					zap.Int64("account_id", account.ID),
 					zap.Int("upstream_status", failoverErr.StatusCode),
 					zap.Int("switch_count", switchCount),
@@ -256,7 +276,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 			if c.Writer.Size() == writerSizeBeforeForward {
 				h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Upstream request failed")
 			}
-			reqLog.Warn("openai_embeddings.forward_failed",
+			reqLog.Warn(protocol+".forward_failed",
 				zap.Int64("account_id", account.ID),
 				zap.Error(err),
 			)
@@ -271,7 +291,8 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 		sessionID := service.ExtractClientSessionID(c)
 
-		h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
+		channelUsage := clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel)
+		recordUsage := func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 				Result:             result,
 				APIKey:             apiKey,
@@ -285,20 +306,25 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 				APIKeyService:      h.apiKeyService,
 				QuotaPlatform:      quotaPlatform,
 				SessionID:          sessionID,
-				ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
+				ChannelUsageFields: channelUsage,
 				PricingAt:          pricingAt,
 			}); err != nil {
 				logger.L().With(
-					zap.String("component", "handler.openai_gateway.embeddings"),
+					zap.String("component", "handler.openai_gateway."+string(capability)),
 					zap.Int64("user_id", subject.UserID),
 					zap.Int64("api_key_id", apiKey.ID),
 					zap.Any("group_id", apiKey.GroupID),
 					zap.String("model", reqModel),
 					zap.Int64("account_id", account.ID),
-				).Error("openai_embeddings.record_usage_failed", zap.Error(err))
+				).Error(protocol+".record_usage_failed", zap.Error(err))
 			}
-		})
-		reqLog.Debug("openai_embeddings.request_completed",
+		}
+		if capability == service.OpenAIEndpointCapabilityDecisions {
+			h.submitMandatoryUsageRecordTask(c.Request.Context(), recordUsage)
+		} else {
+			h.submitOpenAIUsageRecordTask(c.Request.Context(), result, recordUsage)
+		}
+		reqLog.Debug(protocol+".request_completed",
 			zap.Int64("account_id", account.ID),
 			zap.Int("switch_count", switchCount),
 		)

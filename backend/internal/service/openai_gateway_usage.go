@@ -155,6 +155,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if input == nil {
 		return errors.New("openai usage input is nil")
 	}
+	if input.InboundEndpoint == "/v1/decisions" {
+		ctx = WithOpenAIDecisionsPricing(ctx)
+	}
 	result := input.Result
 	if result == nil {
 		return errors.New("openai usage result is nil")
@@ -232,6 +235,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		result.Model,
 	)
 	billingModels = s.filterCNProviderBillingModelCandidates(ctx, account, apiKey, billingModels)
+	for i, model := range billingModels {
+		billingModels[i] = openAIDecisionsPricingModel(ctx, model)
+	}
 	serviceTier := ""
 	if result.ServiceTier != nil {
 		serviceTier = strings.TrimSpace(*result.ServiceTier)

@@ -84,6 +84,18 @@ func extractContentModerationInputWithContext(protocol string, body []byte, cont
 		// System One carries no client-harness reminder blocks, so a literal
 		// <system-reminder> is ordinary user text and must never be skipped.
 		moderationTextCollector{}.collectSystemOneInput(body, &parts)
+	case ContentModerationProtocolOpenAIDecisions:
+		literal := moderationTextCollector{}
+		literal.collectSystemOneText(gjson.GetBytes(body, "questions"), &parts)
+		input := gjson.GetBytes(body, "input")
+		if input.Type == gjson.String {
+			literal.addModerationText(&parts, input.String())
+		} else {
+			input.ForEach(func(_, message gjson.Result) bool {
+				literal.collectContentValue(message.Get("content"), &parts, &images)
+				return true
+			})
+		}
 	default:
 		collector.collectLastResponsesInput(gjson.GetBytes(body, "input"), &parts, &images)
 		collector.collectLastRoleMessage(gjson.GetBytes(body, "messages"), "user", &parts, &images)

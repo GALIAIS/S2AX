@@ -396,6 +396,7 @@ func applyAccountStatsCost(
 	if model == "" {
 		model = requestedModel
 	}
+	model = openAIDecisionsPricingModel(ctx, model)
 	requestCount := 1
 	if usageLog != nil {
 		if usageLog.ImageCount > 0 {
