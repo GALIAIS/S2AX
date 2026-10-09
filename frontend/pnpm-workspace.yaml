@@ -11,3 +11,4 @@ overrides:
   postcss@<8.5.18: '>=8.5.18'
   dompurify@<3.4.14: '>=3.4.14'
   source-map-js@<1.2.2: '>=1.2.2'
+  '@xmldom/xmldom@<0.8.15': '0.8.15'
