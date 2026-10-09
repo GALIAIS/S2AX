@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -655,38 +656,31 @@ func (h *ChannelHandler) GetModelDefaultPricing(c *gin.Context) {
 	}
 
 	response.Success(c, gin.H{
-		"found":                         true,
-		"input_price":                   pricing.InputPricePerToken,
-		"input_price_priority":          pricing.InputPricePerTokenPriority,
-		"output_price":                  pricing.OutputPricePerToken,
-		"output_price_priority":         pricing.OutputPricePerTokenPriority,
-		"cache_write_price":             cacheWritePrice,
-		"cache_write_1h_price":          cacheWrite1hPrice,
-		"cache_write_price_priority":    pricing.CacheCreationPricePerTokenPriority,
-		"cache_read_price":              pricing.CacheReadPricePerToken,
-		"cache_read_price_priority":     pricing.CacheReadPricePerTokenPriority,
-		"reasoning_effort_multipliers":  pricing.ReasoningEffortMultipliers,
-		"image_input_price":             pricing.ImageInputPricePerToken,
-		"image_output_price":            pricing.ImageOutputPricePerToken,
+		"found":                           true,
+		"input_price":                     pricing.InputPricePerToken,
+		"input_price_priority":            pricing.InputPricePerTokenPriority,
+		"output_price":                    pricing.OutputPricePerToken,
+		"output_price_priority":           pricing.OutputPricePerTokenPriority,
+		"cache_write_price":               cacheWritePrice,
+		"cache_write_1h_price":            cacheWrite1hPrice,
+		"cache_write_price_priority":      pricing.CacheCreationPricePerTokenPriority,
+		"cache_read_price":                pricing.CacheReadPricePerToken,
+		"cache_read_price_priority":       pricing.CacheReadPricePerTokenPriority,
+		"reasoning_effort_multipliers":    pricing.ReasoningEffortMultipliers,
+		"image_input_price":               pricing.ImageInputPricePerToken,
+		"image_output_price":              pricing.ImageOutputPricePerToken,
 		"max_reasoning_effort_multiplier": pricing.MaxReasoningEffortMultiplier,
 	})
 }
 
-// platformToLiteLLMProvider maps a channel platform name to the corresponding
-// LiteLLM provider string used as the key in the pricing catalog.
-var platformToLiteLLMProvider = map[string]string{
-	service.PlatformAnthropic:   "anthropic",
-	service.PlatformOpenAI:      "openai",
-	service.PlatformGemini:      "gemini",
-	service.PlatformAntigravity: "anthropic",
-	service.PlatformGrok:        "xai",
-	service.PlatformKimi:        "moonshot",
-	service.PlatformZhipu:       "zhipu",
-	service.PlatformDeepseek:    "deepseek",
-	service.PlatformMiniMax:     "minimax",
-	service.PlatformDevin:       "devin",
-	service.PlatformOpenCodeGo:  "opencode-go",
-	service.PlatformTypeSafe:    "typesafe",
+// platformLiteLLMProvider maps a channel platform name to the corresponding
+// LiteLLM provider string used as the key in the pricing catalog (platform list).
+func platformLiteLLMProvider(platform string) (string, bool) {
+	spec, ok := domain.LookupPlatform(platform)
+	if !ok || spec.LiteLLMProvider == "" {
+		return "", false
+	}
+	return spec.LiteLLMProvider, true
 }
 
 // SyncPricingModels 返回 LiteLLM 定价目录中指定平台的最新模型列表
@@ -699,7 +693,7 @@ func (h *ChannelHandler) SyncPricingModels(c *gin.Context) {
 		return
 	}
 
-	provider, ok := platformToLiteLLMProvider[platform]
+	provider, ok := platformLiteLLMProvider(platform)
 	if !ok {
 		response.ErrorFrom(c, infraerrors.BadRequest("UNSUPPORTED_PLATFORM",
 			fmt.Sprintf("unsupported platform: %s", platform)).

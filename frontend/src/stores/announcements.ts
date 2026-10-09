@@ -93,15 +93,20 @@ export const useAnnouncementStore = defineStore('announcements', () => {
 
   async function markAsRead(id: number) {
     const ann = announcements.value.find((a) => a.id === id)
-    if (ann?.read_at) return
+    if (ann?.read_at) return true
     const previousReadAt = ann?.read_at
     if (ann) ann.read_at = new Date().toISOString()
     try {
       await announcementsAPI.markRead(id)
+      const ann = announcements.value.find((a) => a.id === id)
+      if (ann) {
+        ann.read_at = new Date().toISOString()
+      }
+      return true
     } catch (err: any) {
       if (ann) ann.read_at = previousReadAt
       console.error('Failed to mark announcement as read:', err)
-      throw err
+      return false
     }
   }
 

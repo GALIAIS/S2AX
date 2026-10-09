@@ -1,22 +1,37 @@
 <template>
-  <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-    <SearchInput
-      :model-value="searchQuery"
-      :placeholder="t('admin.accounts.searchAccounts')"
-      class="w-full sm:w-64"
-      @update:model-value="$emit('update:searchQuery', $event)"
-      @search="$emit('change')"
-    />
-    <Select :model-value="filters.platform" class="w-full sm:w-40" :options="platformOptions" @update:model-value="updatePlatform" @change="$emit('change')" />
-    <Select :model-value="filters.type" class="w-full sm:w-40" :options="typeOptions" @update:model-value="updateType" @change="$emit('change')" />
-    <Select :model-value="filters.status" class="w-full sm:w-40" :options="statusOptions" @update:model-value="updateStatus" @change="$emit('change')" />
-    <Select :model-value="filters.privacy_mode" class="w-full sm:w-40" :options="privacyOptions" @update:model-value="updatePrivacyMode" @change="$emit('change')" />
-    <Select :model-value="filters.group" class="w-full sm:w-40" :options="groupOptions" @update:model-value="updateGroup" @change="$emit('change')" />
+  <div class="min-w-0 w-full space-y-2">
+    <div class="grid grid-cols-2 items-center gap-2 sm:flex sm:flex-wrap">
+      <SearchInput
+        :model-value="searchQuery"
+        :placeholder="t('admin.accounts.searchAccounts')"
+        class="col-span-2 min-w-0 w-full sm:w-56"
+        @update:model-value="$emit('update:searchQuery', $event)"
+        @search="$emit('change')"
+      />
+      <Select :model-value="filters.platform" :aria-label="t('admin.accounts.allPlatforms')" class="min-w-0 w-full sm:w-36" :options="platformOptions" @update:model-value="updatePlatform" @change="$emit('change')" />
+      <Select :model-value="filters.status" :aria-label="t('admin.accounts.allStatus')" class="min-w-0 w-full sm:w-36" :options="statusOptions" @update:model-value="updateStatus" @change="$emit('change')" />
+      <button
+        type="button"
+        class="btn btn-secondary col-span-2 min-w-0 w-full sm:w-auto"
+        :aria-expanded="moreFiltersOpen"
+        :aria-controls="moreFiltersId"
+        :aria-label="activeSecondaryCount ? t('admin.accounts.moreFiltersActive', { count: activeSecondaryCount }) : t('admin.accounts.moreFilters')"
+        @click="moreFiltersOpen = !moreFiltersOpen"
+      >
+        {{ t('admin.accounts.moreFilters') }}
+        <span v-if="activeSecondaryCount" aria-hidden="true" class="rounded-full bg-primary-100 px-2 text-xs font-medium text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">{{ activeSecondaryCount }}</span>
+      </button>
+    </div>
+    <div v-show="moreFiltersOpen" :id="moreFiltersId" class="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
+      <Select :model-value="filters.type" :aria-label="t('admin.accounts.allTypes')" class="min-w-0 w-full" :options="typeOptions" @update:model-value="updateType" @change="$emit('change')" />
+      <Select :model-value="filters.privacy_mode" :aria-label="t('admin.accounts.allPrivacyModes')" class="min-w-0 w-full" :options="privacyOptions" @update:model-value="updatePrivacyMode" @change="$emit('change')" />
+      <Select :model-value="filters.group" :aria-label="t('admin.accounts.allGroups')" class="min-w-0 w-full" :options="groupOptions" @update:model-value="updateGroup" @change="$emit('change')" />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Select from '@/components/common/Select.vue'
 import SearchInput from '@/components/common/SearchInput.vue'
@@ -39,6 +54,15 @@ const props = defineProps<{
 
 const emit = defineEmits(['update:searchQuery', 'update:filters', 'change'])
 const { t } = useI18n()
+
+const moreFiltersOpen = ref(false)
+const moreFiltersId = useId()
+const activeSecondaryCount = computed(() =>
+  ['type', 'privacy_mode', 'group'].filter(key => {
+    const value = props.filters[key]
+    return value !== '' && value !== null && value !== undefined
+  }).length
+)
 
 const updatePlatform = (value: FilterValue) => {
   emit('update:filters', { ...props.filters, platform: value })
