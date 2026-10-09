@@ -15,6 +15,9 @@ func WithOpenAIDecisionsPricing(ctx context.Context) context.Context {
 }
 
 func openAIDecisionsPricingModel(ctx context.Context, model string) string {
+	if ctx == nil {
+		return model
+	}
 	if enabled, _ := ctx.Value(openAIDecisionsPricingKey{}).(bool); !enabled {
 		return model
 	}
