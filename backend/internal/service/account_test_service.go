@@ -3258,7 +3258,8 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 		if len(imageTextModelIDs) > 0 {
 			imageTextModelID = imageTextModelIDs[0]
 		}
-		textModelID, err := s.resolveOpenAIImageTextModel(ctx, credentialAccount, imageTextModelID)
+		var textModelID string
+		textModelID, err = s.resolveOpenAIImageTextModel(ctx, credentialAccount, imageTextModelID)
 		if err != nil {
 			return s.sendErrorAndEnd(c, err.Error())
 		}
