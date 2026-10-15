@@ -761,7 +761,7 @@
         </div>
       </div>
 
-      <!-- OpenAI/Grok OAuth Model Mapping (OAuth 类型没有 apikey 容器，需要独立的模型映射区域) -->
+      <!-- OAuth 类型没有 API Key 表单，需要独立配置模型限制。 -->
       <div
         v-if="(account.platform === 'openai' || account.platform === 'grok' || isWorkBuddyPlatform(account.platform)) && account.type === 'oauth'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
@@ -4632,8 +4632,13 @@ const syncFormFromAccount = (newAccount: Account | null) => {
             : 'https://api.anthropic.com'
     editBaseUrl.value = platformDefaultUrl
 
-    // Load model mappings for OpenAI/Grok OAuth accounts
-    if ((newAccount.platform === 'openai' || newAccount.platform === 'grok') && newAccount.credentials) {
+    // 回填的平台需与 OAuth 模型限制的展示和保存分支保持一致。
+    if (
+      (newAccount.platform === 'openai' ||
+        newAccount.platform === 'grok' ||
+        isWorkBuddyPlatform(newAccount.platform)) &&
+      newAccount.credentials
+    ) {
       const oauthCredentials = newAccount.credentials as Record<string, unknown>
       loadModelRestrictionFromMapping(oauthCredentials.model_mapping as Record<string, unknown> | undefined)
     } else {
@@ -5537,7 +5542,6 @@ const handleSubmit = async () => {
       updatePayload.credentials = newCredentials
     }
 
-    // OpenAI/Grok OAuth: persist model mapping to credentials
     if ((props.account.platform === 'openai' || props.account.platform === 'grok' || isWorkBuddyPlatform(props.account.platform)) && props.account.type === 'oauth') {
       const currentCredentials = isSparkShadow.value
         ? {}
