@@ -95,12 +95,6 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		return nil, errors.New("codex_cli_only restriction: only codex official clients are allowed")
 	}
 
-	// Devin：上游为 Codeium Connect-RPC proto 流（非标准 HTTP JSON），
-	// 直接走专用转发器；必须早于 isResponsesShape 探测。
-	if account.Platform == PlatformDevin {
-		return s.forwardAsDevinDirect(ctx, c, account, body, defaultMappedModel)
-	}
-
 	if account.Platform == PlatformGrok {
 		if account.IsGrokOAuth() {
 			if eligible, reason := grokChatResponsesBridgeEligibility(body); eligible {

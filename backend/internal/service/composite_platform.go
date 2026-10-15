@@ -115,8 +115,6 @@ func DetectModelPlatform(model string) (string, bool) {
 			return PlatformDeepseek, true
 		case "minimax":
 			return PlatformMiniMax, true
-		case "devin", "cognition":
-			return PlatformDevin, true
 		case "typesafe", "jev":
 			return PlatformTypeSafe, true
 		}
@@ -160,12 +158,6 @@ func DetectModelPlatform(model string) (string, bool) {
 		strings.HasPrefix(normalized, "abab6"),
 		strings.HasPrefix(normalized, "abab7"):
 		return PlatformMiniMax, true
-	case normalized == "devin",
-		strings.HasPrefix(normalized, "devin-"),
-		strings.HasPrefix(normalized, "devin_"),
-		strings.HasPrefix(normalized, "swe-"),
-		strings.HasPrefix(normalized, "swe_"):
-		return PlatformDevin, true
 	case normalized == "jev-latest" || strings.HasPrefix(normalized, "jev-"):
 		return PlatformTypeSafe, true
 	default:

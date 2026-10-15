@@ -205,32 +205,6 @@ export function serializeHeaderOverrideRows(rows: HeaderOverrideRow[]): string {
   return JSON.stringify(record, null, 2)
 }
 
-// ========== Devin（Cognition）凭据 ==========
-// 上游为 server.codeium.com 的 ApiServerService/GetChatMessage
-// （Connect-RPC proto streaming），本地模型档免费，不经 Devin Cloud。
-// 支持两种凭据来源：devin-session-token$ 前缀的会话令牌（session_token），
-// 或 Codeium/Devin API Key（api_key，后端经 GetSelfDevinSessionToken 换发）。
-
-export const DEVIN_SESSION_TOKEN_PREFIX = 'devin-session-token$'
-
-export function buildDevinCredentials(
-  tokenOrKey: string,
-  apiServerUrl: string
-): Record<string, unknown> {
-  const value = tokenOrKey.trim()
-  const credentials: Record<string, unknown> = {}
-  if (value.startsWith(DEVIN_SESSION_TOKEN_PREFIX)) {
-    credentials.session_token = value
-  } else {
-    credentials.api_key = value
-  }
-  const server = apiServerUrl.trim()
-  if (server) {
-    credentials.api_server_url = server
-  }
-  return credentials
-}
-
 // ========== Grok 自定义转发地址（base_url 仅改写转发端点，凭证生命周期不受影响） ==========
 
 /** OAuth 账号建号/刷新默认写入的 CLI 网关 host——只有它视同"未定制"。 */

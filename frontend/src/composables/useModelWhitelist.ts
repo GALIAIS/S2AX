@@ -224,28 +224,6 @@ const minimaxModels = [
   'abab5.5-chat', 'abab5.5s-chat'
 ]
 
-// Devin（Cognition）本地模型档——Codeium GetChatMessage 的 chat_model_uid，
-// 免费档不消耗云端额度。完整枚举见 devin session/new configOptions。
-const devinModels = [
-  'swe-2-max',
-  'swe-2-high',
-  'swe-2-medium',
-  'swe-1-7-lightning',
-  'swe-1-7-lightning-medium',
-  'glm-5-2',
-  'glm-5-2-max',
-  'glm-5-2-none',
-  'glm-5-2-1m',
-  'glm-5-3-high',
-  'glm-5-3-max',
-  'kimi-k3-high',
-  'kimi-k3-max',
-  'claude-opus-5-max',
-  'claude-sonnet-5-max',
-  'gemini-3-7-flash-high',
-  'gemini-3-8-flash-high'
-]
-
 // 百度 文心
 const baiduModels = [
   'ernie-4.0-8k-latest', 'ernie-4.0-8k', 'ernie-4.0-turbo-8k',
@@ -292,7 +270,6 @@ const allModelsList: string[] = [
   ...moonshotModels,
   ...doubaoModels,
   ...minimaxModels,
-  ...devinModels,
   ...baiduModels,
   ...sparkModels,
   ...hunyuanModels,
@@ -415,13 +392,6 @@ const antigravityPresetMappings = [
   { label: 'Opus 4.8', from: 'claude-opus-4-8', to: 'claude-opus-4-8', color: 'bg-pink-100 text-pink-700 hover:bg-pink-200 dark:bg-pink-900/30 dark:text-pink-400' }
 ]
 
-// Devin 预设映射：公共名 -> 本地 chat_model_uid（与后端 DefaultDevinModelMapping 一致）
-const devinPresetMappings = [
-  { label: 'SWE-2 Max', from: 'swe-2-max', to: 'swe-2-max', color: 'bg-violet-100 text-violet-700 hover:bg-violet-200 dark:bg-violet-900/30 dark:text-violet-400' },
-  { label: 'SWE-2 High', from: 'swe-2-high', to: 'swe-2-high', color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400' },
-  { label: 'GLM-5.2', from: 'glm-5-2', to: 'glm-5-2', color: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400' }
-]
-
 // Bedrock 预设映射（与后端 DefaultBedrockModelMapping 保持一致）
 const bedrockPresetMappings = [
   { label: 'Fable 5.1', from: 'claude-fable-5-1', to: 'anthropic.claude-fable-5-1', color: 'bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-900/30 dark:text-rose-400' },
@@ -510,7 +480,6 @@ export function getModelsByPlatform(platform: string): string[] {
     case 'typesafe': return ['jev-latest']
     case 'doubao': return doubaoModels
     case 'minimax': return minimaxModels
-    case 'devin': return devinModels
     case 'baidu': return baiduModels
     case 'spark': return sparkModels
     case 'hunyuan': return hunyuanModels
@@ -529,7 +498,6 @@ export function getPresetMappingsByPlatform(platform: string) {
   if (platform === 'grok' || platform === 'xai') return grokPresetMappings
   if (platform === 'antigravity') return antigravityPresetMappings
   if (platform === 'bedrock') return bedrockPresetMappings
-  if (platform === 'devin') return devinPresetMappings
   return anthropicPresetMappings
 }
 

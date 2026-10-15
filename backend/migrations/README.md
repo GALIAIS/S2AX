@@ -57,6 +57,22 @@ platform constraints. The runner executes this superset in place of pending
 by the other branch during upgrades. Historical files and their checksum checks
 remain unchanged; already applied migrations are not replayed.
 
+### Retired platforms
+
+`320_retire_devin_platform.sql` disables legacy Devin accounts, groups,
+composite routes, and channel monitors. It publishes scheduler invalidations
+in the same transaction; group changes also trigger the existing durable
+authentication-cache invalidation mechanism. Credentials, subscriptions,
+usage logs, quota records, and monitor templates remain available for audit
+and recovery. The application no longer exposes Devin platform options or
+forwarding code and rejects unsupported group platforms during authentication.
+
+Keep migrations 316, 318, and 319 and their runner compatibility records:
+their checksums are part of deployed databases. Retiring a platform does not
+rewrite previously applied schema history. Re-enabling stored records alone
+does not restore a removed provider; restoring service requires its matching
+application version and a deliberate configuration recovery.
+
 ### ⚠️ Immutability Principle
 
 **Once a migration is applied to ANY environment (dev, staging, production), it MUST NOT be modified.**

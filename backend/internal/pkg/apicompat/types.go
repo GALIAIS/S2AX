@@ -683,8 +683,7 @@ type ChatCompletionsRequest struct {
 	Seed                *int64             `json:"seed,omitempty"`
 	TopK                *int               `json:"top_k,omitempty"` // OpenRouter 系扩展字段
 
-	// 会话粘性键：prompt_cache_key（Codex 线程级）/user（OpenAI 传统字段），
-	// 供 Devin 等需要会话标识的上游派生 trajectory/cascade ID。
+	// 会话粘性键：prompt_cache_key（Codex 线程级）/user（OpenAI 传统字段）。
 	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
 	User           string `json:"user,omitempty"`
 
@@ -709,8 +708,7 @@ type ChatMessage struct {
 	ToolCalls        []ChatToolCall  `json:"tool_calls,omitempty"`
 	ToolCallID       string          `json:"tool_call_id,omitempty"`
 
-	// Devin signature passthrough：assistant 轮次的供应商推理签名/输出标识，
-	// 客户端回显消息对象时随历史原样回传（上游错配会 invalid_argument）。
+	// 供应商推理签名与输出标识，随 assistant 历史回传以保持推理状态。
 	Signature     string `json:"signature,omitempty"`
 	SignatureType string `json:"signature_type,omitempty"`
 	OutputID      string `json:"output_id,omitempty"`
@@ -854,7 +852,7 @@ type ChatDelta struct {
 	Reasoning        *string        `json:"reasoning,omitempty"`
 	ToolCalls        []ChatToolCall `json:"tool_calls,omitempty"`
 
-	// Devin signature passthrough（流式增量里的供应商签名/输出标识）。
+	// 流式增量中的供应商推理签名与输出标识。
 	Signature     string `json:"signature,omitempty"`
 	SignatureType string `json:"signature_type,omitempty"`
 	OutputID      string `json:"output_id,omitempty"`

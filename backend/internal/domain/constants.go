@@ -30,10 +30,6 @@ const (
 	PlatformZhipu    = "zhipu"    // 智谱 GLM (bigmodel)
 	PlatformDeepseek = "deepseek" // DeepSeek
 	PlatformMiniMax  = "minimax"  // MiniMax (M 系列)
-	// PlatformDevin 是 Cognition Devin 平台：上游为 server.codeium.com 的
-	// ApiServerService/GetChatMessage（Connect-RPC proto streaming，
-	// 本地免费模型档），模型即 chat_model_uid（glm-5-2 / swe-2-* 等）。
-	PlatformDevin    = "devin"
 	PlatformTypeSafe = "typesafe" // TypeSafe AI System One (Jev)
 	// PlatformOpenCodeGo 是 OpenCode 平台（账号类型 Zen 按量 / Go 订阅）。
 	// 值保持 opencode_go 以兼容已落库的账号、分组、配额与 Composite 路由。
@@ -216,27 +212,4 @@ var DefaultBedrockModelMapping = map[string]string{
 	// Claude Haiku
 	"claude-haiku-4-5":          "us.anthropic.claude-haiku-4-5-20251001-v1:0",
 	"claude-haiku-4-5-20251001": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-}
-
-// DefaultDevinModelMapping 是 Devin 平台的默认模型映射。
-// 直连 Codeium GetChatMessage（本地模型档，免费），公共模型名即上游
-// chat_model_uid；完整枚举见 devin session/new configOptions（~180 个），
-// 这里列出常用免费档。devin- 前缀的旧 cloud 档位名会被自动剥离。
-var DefaultDevinModelMapping = map[string]string{
-	// 主推免费档
-	"swe-2-max":                "swe-2-max",
-	"swe-2-high":               "swe-2-high",
-	"swe-2-medium":             "swe-2-medium",
-	"swe-1-7-lightning":        "swe-1-7-lightning",
-	"swe-1-7-lightning-medium": "swe-1-7-lightning-medium",
-	"glm-5-2":                  "glm-5-2", // GLM-5.2 High
-	"glm-5-2-max":              "glm-5-2-max",
-	"glm-5-2-none":             "glm-5-2-none", // No Thinking
-	"glm-5-3-high":             "glm-5-3-high",
-	"glm-5-3-max":              "glm-5-3-max",
-	"kimi-k3-high":             "kimi-k3-high",
-	"kimi-k3-max":              "kimi-k3-max",
-	// 旧 cloud 档位名兼容（normalize 剥 devin- 前缀后落回本地 uid）
-	"devin-swe-2-max":  "swe-2-max",
-	"devin-swe-2-high": "swe-2-high",
 }

@@ -161,7 +161,6 @@ export default {
         zhipu: 'Zhipu GLM',
         deepseek: 'DeepSeek',
         minimax: 'MiniMax',
-        devin: 'Devin',
         opencode_go: 'OpenCode',
         typesafe: 'TypeSafe / Jev',
       },
@@ -807,15 +806,6 @@ export default {
         imageTextModel: 'Image bridge text model',
         imageTextModelDesc: 'The outer Responses text model for OAuth/Codex image requests; leave empty to select one from the account catalog.',
         modelRestrictionDisabledByPassthrough: 'Automatic passthrough is enabled: model whitelist/mapping will not take effect.',
-      },
-      devin: {
-        acpEndpointHint:
-          'Devin forwards directly to the Codeium local model tier (server.codeium.com GetChatMessage); no cloud ACP and no Devin credit usage.',
-        sessionTokenHint:
-          'Paste a Devin session token (devin-session-token$...) or a Cognition API key (exchanged for a session token automatically).',
-        apiServerUrl: 'API Server (optional)',
-        apiServerUrlHint:
-          'Defaults to https://server.codeium.com; change only for private deployments or relays.',
       },
       grok: {
         baseUrlHint: 'Grok OAuth accounts forward to the official xAI API base URL.',

@@ -1009,7 +1009,7 @@ func decodeUpstreamBillingProbeSnapshot(extra map[string]any) *UpstreamBillingPr
 // type=apikey by the admin form, so only pre-existing type=upstream rows
 // cannot turn the probe on.
 func IsUpstreamBillingProbeIdentity(platform, accountType string) bool {
-	return accountType == AccountTypeAPIKey && platform != PlatformDevin && domain.IsConcretePlatform(platform)
+	return accountType == AccountTypeAPIKey && domain.IsConcretePlatform(platform)
 }
 
 func isUpstreamBillingProbeAccount(account *Account) bool {
@@ -1017,9 +1017,7 @@ func isUpstreamBillingProbeAccount(account *Account) bool {
 }
 
 // upstreamBillingProbeIneligibleError 区分两种不合格原因：非 apikey 账号沿用
-// ErrUpstreamBillingProbeAccountInvalid；apikey 账号但平台没有上游计费探测
-// 约定（devin 直连 Codeium GetChatMessage，无 /v1/sub2api/billing 端点）时
-// 明确报平台不支持，避免"不是 API key 账号"的误导性文案。
+// ErrUpstreamBillingProbeAccountInvalid；未登记的平台明确报平台不支持。
 func upstreamBillingProbeIneligibleError(account *Account) error {
 	if account != nil && account.Type == AccountTypeAPIKey {
 		return infraerrors.BadRequest(

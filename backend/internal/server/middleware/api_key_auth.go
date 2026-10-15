@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -442,6 +443,9 @@ func validateAPIKeyGroupAvailable(apiKey *service.APIKey) (string, string, bool)
 	group := apiKey.Group
 	if group == nil || strings.EqualFold(group.Status, "deleted") {
 		return "GROUP_DELETED", "API Key 所属分组已删除", false
+	}
+	if !domain.IsGroupPlatform(group.Platform) {
+		return "GROUP_PLATFORM_UNSUPPORTED", "API Key 所属分组的平台已不再支持", false
 	}
 	if !group.IsActive() {
 		return "GROUP_DISABLED", "API Key 所属分组已停用", false

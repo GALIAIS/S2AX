@@ -36,13 +36,7 @@
         :proxy-id="form.proxy_id"
       />
       <div v-if="account.type === 'apikey'" class="space-y-4">
-        <!-- Devin：直连 Codeium GetChatMessage，无 HTTP base_url 概念 -->
-        <div v-if="account.platform === 'devin'" class="rounded-lg border border-violet-200 bg-violet-50 p-3 dark:border-violet-800 dark:bg-violet-900/20">
-          <p class="text-xs text-violet-700 dark:text-violet-300">
-            {{ t('admin.accounts.devin.acpEndpointHint') }}
-          </p>
-        </div>
-        <div v-else-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
+        <div v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
             v-model="editBaseUrl"
@@ -258,27 +252,10 @@
                     ? 'sk-...'
                     : account.platform === 'grok'
                       ? 'xai-...'
-                      : account.platform === 'devin'
-                        ? 'devin-session-token$... / sk-...'
-                        : 'sk-ant-...'
+                      : 'sk-ant-...'
             "
           />
           <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
-          <p v-if="account.platform === 'devin'" class="input-hint">
-            {{ t('admin.accounts.devin.sessionTokenHint') }}
-          </p>
-        </div>
-
-        <!-- Devin API server（可选） -->
-        <div v-if="account.platform === 'devin'">
-          <label class="input-label">{{ t('admin.accounts.devin.apiServerUrl') }}</label>
-          <input
-            v-model="editDevinApiServerUrl"
-            type="text"
-            class="input font-mono"
-            placeholder="https://server.codeium.com"
-          />
-          <p class="input-hint">{{ t('admin.accounts.devin.apiServerUrlHint') }}</p>
         </div>
 
         <!-- Model Restriction Section (不适用于 Antigravity) -->
@@ -1753,7 +1730,7 @@
               )
             }}
           </p>
-          <div v-if="account?.type === 'apikey' && account?.platform !== 'devin'" class="mt-3 flex items-center justify-between gap-3">
+          <div v-if="account?.type === 'apikey'" class="mt-3 flex items-center justify-between gap-3">
             <div class="min-w-0">
               <p class="text-xs font-medium text-gray-700 dark:text-gray-200">
                 {{ t('admin.accounts.upstreamBilling.syncRate') }}
@@ -2058,7 +2035,7 @@
       </div>
 
       <div
-        v-if="account?.type === 'apikey' && account?.platform !== 'devin'"
+        v-if="account?.type === 'apikey'"
         class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div>
@@ -3261,7 +3238,6 @@ import {
   defaultCNAdaptiveBaseUrls,
   defaultCNBaseUrl,
   isCNProviderPlatform,
-  DEVIN_SESSION_TOKEN_PREFIX,
   HEADER_OVERRIDE_ENABLED_CREDENTIAL_KEY,
   HEADER_OVERRIDES_CREDENTIAL_KEY,
   type CnAccountMode,
@@ -3496,7 +3472,6 @@ function currentOpenCodeOrCNMode(): string {
 }
 // 智谱团队版 Coding Plan：组织/项目 ID，写入 credentials 供额度探测切换团队端点
 const editZhipuOrganization = ref('')
-const editDevinApiServerUrl = ref('')
 const editZhipuProject = ref('')
 const editAdaptiveBaseUrls = ref<Record<CnNativeApiProtocol, string>>({
   chat_completions: '',
@@ -4570,10 +4545,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
           cloneOpenCodeGoProtocolRules(defaultProviderProtocolRules(newAccount.platform, currentOpenCodeOrCNMode()))
       }
     }
-    // Devin：回填可选 API server
-    if (newAccount.platform === 'devin') {
-      editDevinApiServerUrl.value = typeof credentials.api_server_url === 'string' ? credentials.api_server_url : ''
-    }
     const platformDefaultUrl =
       newAccount.platform === 'openai'
         ? 'https://api.openai.com'
@@ -5295,8 +5266,7 @@ const handleSubmit = async () => {
       updatePayload.load_factor = 0
     }
     updatePayload.auto_pause_on_expired = autoPauseOnExpired.value
-    // devin 直连 Codeium，无上游计费探测端点，不发送探测/倍率同步字段
-    if (props.account.type === 'apikey' && props.account.platform !== 'devin') {
+    if (props.account.type === 'apikey') {
       updatePayload.upstream_billing_probe_enabled = upstreamBillingAutoProbeEnabled.value
       updatePayload.upstream_billing_rate_sync_enabled = upstreamBillingRateSyncEnabled.value
       if (upstreamBillingRateSyncEnabled.value) {
@@ -5311,13 +5281,8 @@ const handleSubmit = async () => {
       const shouldApplyModelMapping = !(props.account.platform === 'openai' && openaiPassthroughEnabled.value)
 
       // Always update credentials for apikey type to handle model mapping changes
-      // Devin 直连上游无 base_url
       const newCredentials: Record<string, unknown> = { ...currentCredentials }
-      if (props.account.platform === 'devin') {
-        delete newCredentials.base_url
-      } else {
-        newCredentials.base_url = newBaseUrl
-      }
+      newCredentials.base_url = newBaseUrl
 
       // 国产供应商：模式与协议写入凭据（决定额度/余额探测与转发端点/格式）。
       if (isCNApiKeyAccount.value) {
@@ -5359,30 +5324,7 @@ const handleSubmit = async () => {
       // 两者都无才报错。
       const hasExistingApiKey =
         props.account.credentials_status?.has_api_key ?? Boolean(currentCredentials.api_key)
-      if (props.account.platform === 'devin') {
-        // Devin：按前缀区分 session_token / api_key；session_token 亦算已有凭据
-        const hasExistingDevinCred = hasExistingApiKey || Boolean(currentCredentials.session_token)
-        const devinCred = editApiKey.value.trim()
-        if (devinCred) {
-          if (devinCred.startsWith(DEVIN_SESSION_TOKEN_PREFIX)) {
-            newCredentials.session_token = devinCred
-            delete newCredentials.api_key
-          } else {
-            newCredentials.api_key = devinCred
-            delete newCredentials.session_token
-          }
-        } else if (!hasExistingDevinCred) {
-          appStore.showError(t('admin.accounts.apiKeyIsRequired'))
-          return
-        }
-        const apiServer = editDevinApiServerUrl.value.trim()
-        if (apiServer) {
-          newCredentials.api_server_url = apiServer
-        } else {
-          delete newCredentials.api_server_url
-        }
-        delete newCredentials.org_id
-      } else if (editApiKey.value.trim()) {
+      if (editApiKey.value.trim()) {
         newCredentials.api_key = editApiKey.value.trim()
       } else if (!hasExistingApiKey) {
         appStore.showError(t('admin.accounts.apiKeyIsRequired'))

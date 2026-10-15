@@ -155,13 +155,6 @@
       }
     },
     {
-      "id": "devin",
-      "display_name": "Devin",
-      "gateway": "openai",
-      "cn_provider": false,
-      "litellm_provider": "devin"
-    },
-    {
       "id": "opencode_go",
       "display_name": "OpenCode",
       "gateway": "openai",
@@ -311,7 +304,6 @@
     "zhipu",
     "deepseek",
     "minimax",
-    "devin",
     "opencode_go",
     "typesafe",
     "command_code",

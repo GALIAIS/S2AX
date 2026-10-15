@@ -1503,13 +1503,6 @@ func defaultModelIDsForPlatform(platform string) []string {
 		return xai.DefaultModelIDs()
 	case service.PlatformWorkBuddy, service.PlatformWorkBuddyAI:
 		return service.DefaultWorkBuddyModelIDs(platform)
-	case service.PlatformDevin:
-		ids := make([]string, 0, len(domain.DefaultDevinModelMapping))
-		for id := range domain.DefaultDevinModelMapping {
-			ids = append(ids, id)
-		}
-		sort.Strings(ids)
-		return ids
 	case service.PlatformOpenCodeGo:
 		return service.DefaultOpenCodeGoModelIDs()
 	case service.PlatformTypeSafe:

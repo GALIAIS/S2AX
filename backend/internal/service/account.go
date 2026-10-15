@@ -299,19 +299,13 @@ func (a *Account) IsMiniMax() bool {
 	return a.Platform == PlatformMiniMax
 }
 
-// IsDevin 标识 Devin（Cognition）账号：上游为 Devin Cloud ACP over WebSocket。
-func (a *Account) IsDevin() bool {
-	return a != nil && a.Platform == PlatformDevin
-}
-
 // IsCNProvider 报告是否为国产 OpenAI 兼容供应商（kimi/zhipu/deepseek/minimax）。
 func (a *Account) IsCNProvider() bool {
 	return a != nil && IsCNProvider(a.Platform)
 }
 
 // IsOpenAICompatible 报告账号是否走 OpenAI 网关（OpenAI 协议族）。
-// openai/grok 原生走 OpenAI 网关；国产供应商同为 OpenAI Chat Completions
-// 兼容上游，也经 OpenAI 网关转发；Devin 走 ACP/WS 上游，OpenCode 走 OpenAI 协议。
+// 归属由统一平台目录决定，包含 OpenAI、Grok、国产供应商及聚合平台。
 func (a *Account) IsOpenAICompatible() bool {
 	return a != nil && domain.UsesOpenAIGateway(a.Platform)
 }
@@ -660,9 +654,6 @@ func (a *Account) resolveModelMapping(rawMapping map[string]any) map[string]stri
 		if a.Platform == domain.PlatformGrok {
 			return xai.DefaultModelMapping()
 		}
-		if a.Platform == domain.PlatformDevin {
-			return domain.DefaultDevinModelMapping
-		}
 		return nil
 	}
 
@@ -708,9 +699,6 @@ func (a *Account) resolveModelMapping(rawMapping map[string]any) map[string]stri
 	}
 	if a.Platform == domain.PlatformGrok {
 		return xai.DefaultModelMapping()
-	}
-	if a.Platform == domain.PlatformDevin {
-		return domain.DefaultDevinModelMapping
 	}
 	return nil
 }
@@ -1058,35 +1046,6 @@ func (a *Account) GetExtraString(key string) string {
 		}
 	}
 	return ""
-}
-
-// DevinSessionToken 返回 Devin 会话令牌（devin-session-token$ 前缀原样保存）。
-// 兼容管理员把 token 填进 api_key 字段的场景。
-func (a *Account) DevinSessionToken() string {
-	if v := strings.TrimSpace(a.GetCredential("session_token")); v != "" {
-		return v
-	}
-	if v := strings.TrimSpace(a.GetCredential("api_key")); v != "" && strings.HasPrefix(v, DevinSessionTokenPrefix) {
-		return v
-	}
-	return ""
-}
-
-// DevinAPIKey 返回底层 Codeium/Devin API Key（sk-ws- / cog_ 等非 session 前缀值），
-// 用于经 GetSelfDevinSessionToken 换取会话令牌。
-func (a *Account) DevinAPIKey() string {
-	if v := strings.TrimSpace(a.GetCredential("api_key")); v != "" && !strings.HasPrefix(v, DevinSessionTokenPrefix) {
-		return v
-	}
-	return ""
-}
-
-// DevinAPIServerURL 返回 Codeium API server（GetChatMessage 直连 + 换 session token）。
-func (a *Account) DevinAPIServerURL() string {
-	if v := strings.TrimSpace(a.GetCredential("api_server_url")); v != "" {
-		return strings.TrimRight(v, "/")
-	}
-	return DevinDefaultAPIServerURL
 }
 
 func (a *Account) GetClaudeUserID() string {

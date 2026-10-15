@@ -447,10 +447,6 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		return s.testWorkBuddyConnection(c, account, modelID, prompt)
 	}
 
-	if account.IsDevin() {
-		return s.testDevinAccountConnection(c, account, modelID, prompt)
-	}
-
 	if account.IsOpenAI() {
 		return s.testOpenAIAccountConnection(c, account, modelID, prompt, normalizeAccountTestMode(mode), testOpts)
 	}

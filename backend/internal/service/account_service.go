@@ -544,9 +544,6 @@ func (s *AccountService) TestCredentials(ctx context.Context, id int64) error {
 		return nil
 	case PlatformWorkBuddy, PlatformWorkBuddyAI:
 		return ValidateWorkBuddyCredentials(account.Credentials)
-	case PlatformDevin:
-		// Devin：凭证为 session token（或经 API key 换发），实际可用性经 ACP 转发路径验证。
-		return nil
 	default:
 		if IsMultiProtocolAPIKeyProvider(account.Platform) {
 			// 多协议 API Key 供应商（国产厂商与聚合平台）：凭证为 API Key，实际可用性

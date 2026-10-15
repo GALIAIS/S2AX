@@ -12,19 +12,19 @@ var (
 	legacyDisplayOrder = []string{
 		PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity, PlatformGrok,
 		PlatformWorkBuddy, PlatformWorkBuddyAI,
-		PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformDevin, PlatformOpenCodeGo, PlatformTypeSafe,
+		PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformTypeSafe,
 		PlatformCommandCode,
 		PlatformCline,
 	}
 	legacyCompositePrecedence = []string{
 		PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok,
 		PlatformWorkBuddy, PlatformWorkBuddyAI,
-		PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformDevin, PlatformOpenCodeGo, PlatformTypeSafe,
+		PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformTypeSafe,
 		PlatformCommandCode,
 		PlatformCline,
 	}
 	legacyOpenAIGateway = []string{
-		PlatformOpenAI, PlatformGrok, PlatformWorkBuddy, PlatformWorkBuddyAI, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformDevin, PlatformOpenCodeGo,
+		PlatformOpenAI, PlatformGrok, PlatformWorkBuddy, PlatformWorkBuddyAI, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo,
 		PlatformCommandCode,
 		PlatformCline,
 	}
@@ -33,7 +33,7 @@ var (
 		PlatformAnthropic: "anthropic", PlatformOpenAI: "openai", PlatformGemini: "gemini",
 		PlatformAntigravity: "anthropic", PlatformGrok: "xai", PlatformKimi: "moonshot",
 		PlatformZhipu: "zhipu", PlatformDeepseek: "deepseek", PlatformMiniMax: "minimax",
-		PlatformWorkBuddy: "", PlatformWorkBuddyAI: "", PlatformDevin: "devin", PlatformOpenCodeGo: "opencode-go", PlatformTypeSafe: "typesafe", PlatformCommandCode: "", PlatformCline: "",
+		PlatformWorkBuddy: "", PlatformWorkBuddyAI: "", PlatformOpenCodeGo: "opencode-go", PlatformTypeSafe: "typesafe", PlatformCommandCode: "", PlatformCline: "",
 	}
 )
 

@@ -162,19 +162,6 @@
           </button>
           <button
             type="button"
-            @click="form.platform = 'devin'"
-            :class="[
-              'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
-              form.platform === 'devin'
-                ? 'bg-white text-violet-600 shadow-sm dark:bg-dark-600 dark:text-violet-400'
-                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
-            ]"
-          >
-            <PlatformIcon platform="devin" size="sm" />
-            Devin
-          </button>
-          <button
-            type="button"
             @click="selectTypeSafePlatform()"
             :class="[
               'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
@@ -1460,13 +1447,7 @@
         :proxy-id="form.proxy_id"
       />
       <div v-if="form.type === 'apikey' && form.platform !== 'antigravity'" class="space-y-4">
-        <!-- Devin：直连 Codeium GetChatMessage，无 HTTP base_url 概念 -->
-        <div v-if="form.platform === 'devin'" class="rounded-lg border border-violet-200 bg-violet-50 p-3 dark:border-violet-800 dark:bg-violet-900/20">
-          <p class="text-xs text-violet-700 dark:text-violet-300">
-            {{ t('admin.accounts.devin.acpEndpointHint') }}
-          </p>
-        </div>
-        <div v-else-if="!isMultiProtocolPlatform || apiProtocol !== 'adaptive'">
+        <div v-if="!isMultiProtocolPlatform || apiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
             v-model="apiKeyBaseUrl"
@@ -1527,21 +1508,8 @@
           <p v-if="apiKeyHint" class="input-hint">{{ apiKeyHint }}</p>
         </div>
 
-        <!-- Devin API server（可选；默认 server.codeium.com） -->
-        <div v-if="form.platform === 'devin'">
-          <label class="input-label">{{ t('admin.accounts.devin.apiServerUrl') }}</label>
-          <input
-            v-model="devinApiServerUrl"
-            type="text"
-            class="input font-mono"
-            placeholder="https://server.codeium.com"
-          />
-          <p class="input-hint">{{ t('admin.accounts.devin.apiServerUrlHint') }}</p>
-        </div>
-
-        <!-- 上游倍率自动探测：API-key 平台可用；devin 直连 Codeium 无计费探测端点 -->
+        <!-- 上游倍率自动探测：API-key 平台可用 -->
         <div
-          v-if="form.platform !== 'devin'"
           class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
         >
           <div>
@@ -4111,7 +4079,6 @@ import {
   applyAntigravityProjectID,
   applyHeaderOverride,
   applyInterceptWarmup,
-  buildDevinCredentials,
   applyOpenCodeGoProtocolRules,
   cloneOpenCodeGoProtocolRules,
   cnSupportsNativeResponses,
@@ -4203,7 +4170,6 @@ const baseUrlHint = computed(() => {
 const apiKeyHint = computed(() => {
   if (form.platform === 'openai') return t('admin.accounts.openai.apiKeyHint')
   if (form.platform === 'gemini') return t('admin.accounts.gemini.apiKeyHint')
-  if (form.platform === 'devin') return t('admin.accounts.devin.sessionTokenHint')
   // Grok 与多协议供应商没有对应的说明文案；通用文案指 Claude Console Key。
   if (form.platform === 'grok' || isMultiProtocolPlatform.value) return ''
   return t('admin.accounts.apiKeyHint')
@@ -4246,8 +4212,6 @@ const apiKeyValuePlaceholder = computed(() => {
     case 'minimax':
     case 'opencode_go':
       return 'sk-...'
-    case 'devin':
-      return 'devin-session-token$... / sk-...'
     case 'typesafe':
       return 'ts-...'
     default:
@@ -4336,8 +4300,6 @@ const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock' | 'service_acco
 const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
 const apiKeyBaseUrl = ref('https://api.anthropic.com')
 const apiKeyValue = ref('')
-// Devin 可选 API server（写入 credentials.api_server_url）
-const devinApiServerUrl = ref('')
 const upstreamBillingAutoProbeEnabled = ref(true)
 
 // ── 国产供应商（Kimi / Zhipu / DeepSeek）账号类型、API 协议与端点 ──
@@ -5114,13 +5076,6 @@ watch(
     if (newPlatform === 'grok') {
       accountCategory.value = 'oauth-based'
       addMethod.value = 'oauth'
-      modelRestrictionMode.value = 'mapping'
-      form.concurrency = 1
-      form.load_factor = null
-    }
-    if (newPlatform === 'devin') {
-      // Devin 只有 apikey 类型（session token / api key 凭据）
-      accountCategory.value = 'apikey'
       modelRestrictionMode.value = 'mapping'
       form.concurrency = 1
       form.load_factor = null
@@ -6066,14 +6021,10 @@ const handleSubmit = async () => {
           : 'https://api.anthropic.com'
 
   // Build credentials with optional model mapping
-  // Devin：直连上游无 base_url；按值前缀写 session_token 或 api_key + 可选 api_server_url
-  const credentials: Record<string, unknown> =
-    form.platform === 'devin'
-      ? buildDevinCredentials(apiKeyValue.value, devinApiServerUrl.value)
-      : {
-          base_url: apiKeyBaseUrl.value.trim() || defaultBaseUrl,
-          api_key: apiKeyValue.value.trim()
-        }
+  const credentials: Record<string, unknown> = {
+    base_url: apiKeyBaseUrl.value.trim() || defaultBaseUrl,
+    api_key: apiKeyValue.value.trim()
+  }
   if (form.platform === 'gemini') {
     credentials.tier_id = geminiTierAIStudio.value
   }
@@ -6167,9 +6118,7 @@ const handleSubmit = async () => {
     ...form,
     group_ids: form.group_ids,
     extra: withUpstreamRequestIdHeader(extra),
-    // devin 直连 Codeium 无上游计费探测端点，不传该字段
-    upstream_billing_probe_enabled:
-      form.platform === 'devin' ? undefined : upstreamBillingAutoProbeEnabled.value,
+    upstream_billing_probe_enabled: upstreamBillingAutoProbeEnabled.value,
     auto_pause_on_expired: autoPauseOnExpired.value
   })
 }
@@ -6299,9 +6248,9 @@ const createAccountAndFinish = async (
     group_ids: form.group_ids,
     expires_at: form.expires_at,
     // 上游倍率探测对全部 API-key 平台开放（antigravity upstream 走本 helper）；
-    // 非 apikey 类型（bedrock/oauth）与 devin（无探测端点）不传，后端不动作。
+    // 非 apikey 类型（bedrock/oauth）不传，后端不动作。
     upstream_billing_probe_enabled:
-      type === 'apikey' && platform !== 'devin' ? upstreamBillingAutoProbeEnabled.value : undefined,
+      type === 'apikey' ? upstreamBillingAutoProbeEnabled.value : undefined,
     auto_pause_on_expired: autoPauseOnExpired.value
   })
 }

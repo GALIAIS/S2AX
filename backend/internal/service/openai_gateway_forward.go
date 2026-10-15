@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
@@ -162,24 +161,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return s.forwardGrokResponses(ctx, c, account, body, originalModel, reqStream, startTime)
 	}
 
-	// Devin 没有 Responses 端点，Responses 入站需要先转成 Chat Completions。
-	if account.Platform == PlatformDevin {
-		var responsesReq apicompat.ResponsesRequest
-		if err := json.Unmarshal(body, &responsesReq); err != nil {
-			return nil, fmt.Errorf("parse responses request for devin: %w", err)
-		}
-		chatReq, err := apicompat.ResponsesToChatCompletionsRequestWithOptions(&responsesReq, &apicompat.ResponsesToChatOptions{
-			ReasoningContentByID: s.reasoningContentByID,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("convert responses to chat completions for devin: %w", err)
-		}
-		chatBody, err := json.Marshal(chatReq)
-		if err != nil {
-			return nil, fmt.Errorf("marshal converted chat completions for devin: %w", err)
-		}
-		return s.forwardAsDevinDirect(ctx, c, account, chatBody, "")
-	}
 	if account.IsOpenAIApiKey() {
 		if normalized, changed, normalizeErr := normalizeOpenAIParallelToolCallsWithoutTools(body, responsesLite); normalizeErr != nil {
 			return nil, normalizeErr

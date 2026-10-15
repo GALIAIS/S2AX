@@ -46,7 +46,6 @@ const (
 	PlatformWorkBuddy   = domain.PlatformWorkBuddy
 	PlatformWorkBuddyAI = domain.PlatformWorkBuddyAI
 	// 国产 OpenAI 兼容供应商（与 grok 一样经 OpenAI 网关转发）。
-	PlatformDevin       = domain.PlatformDevin
 	PlatformKimi        = domain.PlatformKimi
 	PlatformZhipu       = domain.PlatformZhipu
 	PlatformDeepseek    = domain.PlatformDeepseek
@@ -95,16 +94,6 @@ const (
 	DefaultCommandCodeBaseURL = "https://api.commandcode.ai/provider/v1"
 	// Cline API：只提供 Chat Completions（{base}/chat/completions）与模型列表。
 	DefaultClineBaseURL = "https://api.cline.bot/api/v1"
-)
-
-// Devin（Cognition）平台常量：上游为 server.codeium.com 的
-// ApiServerService/GetChatMessage（Connect-RPC proto streaming），不经过
-// Devin Cloud ACP（app.devin.ai 云端会话按订阅/ACU 计费，已移除）。
-const (
-	// DevinSessionTokenPrefix 是会话令牌前缀（`devin-session-token$<jwt>`）。
-	DevinSessionTokenPrefix = "devin-session-token$"
-	// DevinDefaultAPIServerURL 是 Codeium API server（X-Api-Key 换 session token + GetChatMessage）。
-	DevinDefaultAPIServerURL = "https://server.codeium.com"
 )
 
 // 国产供应商 Anthropic 协议端点的默认 base_url（上游路径为 {base}/v1/messages）。

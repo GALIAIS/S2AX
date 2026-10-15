@@ -7,8 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Devin 上游的 thinking_signature 经 encrypted_content 回放进下一轮 input，
-// 桥接层必须把它挂到紧随其后的 assistant 消息上供 Connect 编码回传。
+// encrypted_content 必须随原轮次回放到紧随其后的 assistant 消息。
 func TestResponsesToChat_EncryptedContentSealed_AttachesToAssistant(t *testing.T) {
 	req := &ResponsesRequest{
 		Model: "swe-2",
@@ -116,7 +115,7 @@ func TestChatToResponses_SignatureOnly_StillEmitsReasoningItem(t *testing.T) {
 	require.Equal(t, "message", out.Output[1].Type)
 }
 
-// 流式：Devin 实测时序 thinking → text → signature → stop。signature 晚到
+// 流式时序为 thinking → text → signature → stop。signature 晚到
 // 时 reasoning item 的收尾必须挂起等签名，done 事件带 encrypted_content；
 // message item id 用上游 output_id。
 func TestStream_SignatureLateArrival_DefersReasoningDone(t *testing.T) {

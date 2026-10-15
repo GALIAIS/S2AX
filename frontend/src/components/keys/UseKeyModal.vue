@@ -366,8 +366,6 @@ const defaultClientTab = computed(() => {
       return 'gemini'
     case 'antigravity':
       return 'claude'
-    case 'devin':
-      return 'codex'
     case 'typesafe':
       return 'systemone'
     default:
@@ -509,13 +507,6 @@ const clientTabs = computed((): TabConfig[] => {
     case 'composite':
       return [
         { id: 'claude', label: t('keys.useKeyModal.cliTabs.claudeCode'), icon: TerminalIcon },
-        { id: 'codex', label: t('keys.useKeyModal.cliTabs.codexCli'), icon: TerminalIcon },
-        { id: 'opencode', label: t('keys.useKeyModal.cliTabs.opencode'), icon: TerminalIcon }
-      ]
-    case 'devin':
-      // Devin 仅暴露 OpenAI chat_completions/responses 入站，无 /v1/messages，
-      // 不提供 Claude Code 配置。
-      return [
         { id: 'codex', label: t('keys.useKeyModal.cliTabs.codexCli'), icon: TerminalIcon },
         { id: 'opencode', label: t('keys.useKeyModal.cliTabs.opencode'), icon: TerminalIcon }
       ]
@@ -1327,7 +1318,6 @@ function generateRoutedCodexFiles(
     zhipu: 'glm-4.7',
     deepseek: 'deepseek-v4-pro',
     minimax: 'MiniMax-M3',
-    devin: 'devin-2-5',
     opencode_go: 'glm-5.3',
     composite: 'gpt-5.5'
   }
@@ -1345,7 +1335,6 @@ function generateRoutedCodexFiles(
     zhipu: 'Zhipu',
     deepseek: 'DeepSeek',
     minimax: 'MiniMax',
-    devin: 'Devin',
     opencode_go: 'OpenCode',
     typesafe: 'TypeSafe / Jev',
     command_code: 'Command Code',

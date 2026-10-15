@@ -107,7 +107,7 @@ describe('UserPlatformQuotaModal', () => {
     expect(rows.map(row => row.find('td').text())).toEqual([
       'anthropic', 'openai', 'gemini', 'antigravity', 'grok',
       'workbuddy', 'workbuddy_ai',
-      'kimi', 'zhipu', 'deepseek', 'minimax', 'devin', 'opencode_go', 'typesafe', 'command_code', 'cline',
+      'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go', 'typesafe', 'command_code', 'cline',
     ])
     for (const row of rows) {
       const inputs = row.findAll('input[type=number]')

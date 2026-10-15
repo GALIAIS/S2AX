@@ -398,23 +398,23 @@ func normalizeResponsesDerivedChatMessageRoles(messages []ChatMessage) []ChatMes
 	return out
 }
 
-// classifyDevinSignature 识别回放进 input 的 encrypted_content 属于哪种上游
+// classifyReasoningSignature 识别回放进 input 的 encrypted_content 属于哪种上游
 // 签名体制：sealed.* 与序列化 reasoning item 数组（openai 型）都是网关自己
 // 下发过的形态，原样回放；其余外来不透明载荷不可解，丢弃。
-func classifyDevinSignature(encrypted string) (signature, signatureType string, keep bool) {
+func classifyReasoningSignature(encrypted string) (signature, signatureType string, keep bool) {
 	switch {
 	case strings.HasPrefix(encrypted, "sealed."):
 		return encrypted, "sealed", true
-	case devinOpenAIReasoningItemID(encrypted) != "":
+	case openAIReasoningSignatureItemID(encrypted) != "":
 		return encrypted, "openai", true
 	default:
 		return "", "", false
 	}
 }
 
-// devinOpenAIReasoningItemID 从 openai 型签名（序列化 reasoning item 数组）
+// openAIReasoningSignatureItemID 从 openai 型签名（序列化 reasoning item 数组）
 // 取出上游分配的真实 rs_* item id；解析失败返回空串。
-func devinOpenAIReasoningItemID(blob string) string {
+func openAIReasoningSignatureItemID(blob string) string {
 	trimmed := strings.TrimSpace(blob)
 	if !strings.HasPrefix(trimmed, "[") {
 		return ""
@@ -440,7 +440,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 	// still receives it); any other role ends the thinking span.
 	var pendingReasoning string
 	// pendingSignature/pendingSignatureType 携带 reasoning.encrypted_content
-	// 到它所属的下一条 assistant 消息（Devin 上游签名回传通道）。
+	// 到它所属的下一条 assistant 消息，保持供应商签名的轮次归属。
 	var pendingSignature string
 	var pendingSignatureType string
 	// lastTurnReasoning is the most recent reasoning text of the current turn,
@@ -511,7 +511,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 			// encrypted_content 是上游签名 blob 的回放通道：识别得出形态才
 			// 透传，外来不透明载荷丢弃。
 			if ec := rawString(item["encrypted_content"]); ec != "" {
-				if sig, sigType, keep := classifyDevinSignature(ec); keep {
+				if sig, sigType, keep := classifyReasoningSignature(ec); keep {
 					pendingSignature, pendingSignatureType = sig, sigType
 				}
 			}
@@ -1458,7 +1458,7 @@ func chatMessageToResponsesOutput(message ChatMessage, customTools, functionTool
 		reasoningID := generateItemID()
 		// openai 型签名内层携带上游真实 rs_* item id，与下行回放对齐。
 		if message.SignatureType == "openai" {
-			if id := devinOpenAIReasoningItemID(message.Signature); id != "" {
+			if id := openAIReasoningSignatureItemID(message.Signature); id != "" {
 				reasoningID = id
 			}
 		}
@@ -1656,16 +1656,14 @@ type ChatCompletionsToResponsesStreamState struct {
 	ReasoningDone   bool
 
 	// ReasoningSignature/ReasoningSignatureType 捕获上游随 reasoning 下发的
-	// 签名 blob（Devin thinking_signature / delta_signature_type）。reasoning
+	// 签名 blob。reasoning
 	// item 收尾时随 encrypted_content 透出，客户端回放进下一轮 input。
 	ReasoningSignature     string
 	ReasoningSignatureType string
 	// ReasoningPendingDone 表示 reasoning 内容已齐但签名未到，收尾事件
-	// 挂起等迟到签名（Devin 实测序：thinking → text → signature → stop）。
+	// 等待可能晚于文本到达的签名。
 	ReasoningPendingDone bool
-	// OutputID 是上游分配的 message item 标识（Devin output_id 随首帧
-	// metadata 到达，早于任何 content delta）。message item 用它作 id，
-	// 客户端回放时上游才能对齐自己的记录。
+	// OutputID 保留上游分配的 message item 标识，供客户端下一轮回放。
 	OutputID string
 
 	// Message item + output_text content-part lifecycle.
@@ -2003,7 +2001,7 @@ func ensureChatReasoningItem(state *ChatCompletionsToResponsesStreamState) []Res
 	// openai 型签名的内层 rs_* 是上游真实 item id：若 signature delta 已先
 	// 到（thinking_signature 在 thinking deltas 之后下发），用它对齐上游记录。
 	if state.ReasoningSignatureType == "openai" {
-		if id := devinOpenAIReasoningItemID(state.ReasoningSignature); id != "" {
+		if id := openAIReasoningSignatureItemID(state.ReasoningSignature); id != "" {
 			state.ReasoningItemID = id
 		}
 	}
@@ -2315,7 +2313,7 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 		if reasoningID == "" {
 			reasoningID = generateItemID()
 			if state.ReasoningSignatureType == "openai" {
-				if id := devinOpenAIReasoningItemID(state.ReasoningSignature); id != "" {
+				if id := openAIReasoningSignatureItemID(state.ReasoningSignature); id != "" {
 					reasoningID = id
 				}
 			}

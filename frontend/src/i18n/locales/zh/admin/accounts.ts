@@ -370,7 +370,6 @@ export default {
         zhipu: 'Zhipu GLM',
         deepseek: 'DeepSeek',
         minimax: 'MiniMax',
-        devin: 'Devin',
         opencode_go: 'OpenCode',
         typesafe: 'TypeSafe / Jev',
       },
@@ -916,14 +915,6 @@ export default {
         imageTextModel: '生图桥接文本模型',
         imageTextModelDesc: 'OAuth/Codex 生图请求的 Responses 外层文本模型；留空时按账号模型目录自动选择。',
         modelRestrictionDisabledByPassthrough: '已开启自动透传：模型白名单/映射不会生效。',
-      },
-      devin: {
-        acpEndpointHint:
-          'Devin 直连 Codeium 本地模型档（server.codeium.com GetChatMessage），不经云端 ACP，不消耗 Devin 额度。',
-        sessionTokenHint:
-          '粘贴 Devin session token（devin-session-token$...）或 Cognition API Key（将自动换取 session token）。',
-        apiServerUrl: 'API Server（可选）',
-        apiServerUrlHint: '默认 https://server.codeium.com；仅在使用私有部署/转发时修改。',
       },
       grok: {
         baseUrlHint: 'Grok OAuth 账号会转发到官方 xAI API Base URL。',
