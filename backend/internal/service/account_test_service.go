@@ -410,9 +410,6 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		return s.sendErrorAndEnd(c, "Account not found")
 	}
 	bindAccountTestPlatform(c, account)
-	if !domain.IsConcretePlatform(account.Platform) {
-		return s.sendErrorAndEnd(c, "Unsupported account platform")
-	}
 
 	// Synthetic UI load-test accounts exercise the real SSE parsing and modal
 	// interactions, but intentionally do not send their placeholder credentials
@@ -472,6 +469,9 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		return s.testTypeSafeAccountConnection(c, account, prompt)
 	}
 
+	if !domain.IsConcretePlatform(account.Platform) {
+		return s.sendErrorAndEnd(c, "Unsupported account platform")
+	}
 	return s.testClaudeAccountConnection(c, account, modelID)
 }
 
