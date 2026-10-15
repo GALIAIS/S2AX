@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
@@ -145,6 +146,12 @@ func workBuddyHeaders(platform string, credentials map[string]any) http.Header {
 	return h
 }
 
+func closeWorkBuddyBody(body io.Closer) {
+	if err := body.Close(); err != nil {
+		slog.Debug("WorkBuddy upstream body close failed", "error", err)
+	}
+}
+
 func (s *WorkBuddyService) call(ctx context.Context, platform, proxy, method, path string, credentials map[string]any, headers http.Header, body any) (map[string]any, error) {
 	endpoint, err := workBuddyEndpoint(platform)
 	if err != nil {
@@ -181,7 +188,7 @@ func (s *WorkBuddyService) call(ctx context.Context, platform, proxy, method, pa
 		}
 		return nil, errors.New("WorkBuddy control API connection failed")
 	}
-	defer resp.Body.Close()
+	defer closeWorkBuddyBody(resp.Body)
 	data, err := io.ReadAll(io.LimitReader(resp.Body, workBuddyBodyLimit+1))
 	if err != nil {
 		return nil, errors.New("failed to read WorkBuddy response")

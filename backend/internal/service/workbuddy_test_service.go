@@ -28,7 +28,7 @@ func (s *AccountTestService) testWorkBuddyConnection(c *gin.Context, account *Ac
 	if err != nil {
 		return s.sendErrorAndEnd(c, err.Error())
 	}
-	defer resp.Body.Close()
+	defer closeWorkBuddyBody(resp.Body)
 	if resp.StatusCode >= 400 {
 		return s.sendErrorAndEnd(c, "WorkBuddy rejected the request ("+resp.Status+")")
 	}

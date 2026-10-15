@@ -97,13 +97,13 @@ func workBuddySignature(content any) string {
 		}
 		if kind == "text" || kind == "" {
 			if s, ok := p["text"].(string); ok {
-				out.WriteString(s)
+				_, _ = out.WriteString(s)
 			}
 			continue
 		}
 		data, _ := json.Marshal(p)
 		digest := sha256.Sum256(data)
-		out.WriteString(kind + ":" + hex.EncodeToString(digest[:]))
+		_, _ = out.WriteString(kind + ":" + hex.EncodeToString(digest[:]))
 	}
 	return out.String()
 }
@@ -165,7 +165,7 @@ func (s *WorkBuddyService) Chat(ctx context.Context, c *gin.Context, account *Ac
 		}
 		if resp.StatusCode >= 300 || !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
 			raw, readErr := io.ReadAll(io.LimitReader(resp.Body, workBuddyBodyLimit+1))
-			resp.Body.Close()
+			closeWorkBuddyBody(resp.Body)
 			if readErr != nil || len(raw) > workBuddyBodyLimit {
 				return nil, errors.New("failed to read WorkBuddy chat response")
 			}
@@ -184,7 +184,7 @@ func (s *WorkBuddyService) Chat(ctx context.Context, c *gin.Context, account *Ac
 			return resp, nil
 		}
 		aggregated, err := aggregateWorkBuddyStream(wrapped)
-		wrapped.Close()
+		closeWorkBuddyBody(wrapped)
 		if err != nil {
 			return nil, err
 		}

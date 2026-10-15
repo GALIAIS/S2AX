@@ -218,17 +218,17 @@ func fitWorkBuddySchema(raw any, keyword string, depth int) (any, error) {
 		for i := 0; i < len(pattern); i++ {
 			if pattern[i] == '\\' && i+1 < len(pattern) {
 				if pattern[i+1] == '\\' {
-					out.WriteString(pattern[i : i+2])
+					_, _ = out.WriteString(pattern[i : i+2])
 					i++
 					continue
 				}
 				if pattern[i+1] == '0' && (i+2 == len(pattern) || pattern[i+2] < '0' || pattern[i+2] > '9') {
-					out.WriteString(`\u0000`)
+					_, _ = out.WriteString(`\u0000`)
 					i++
 					continue
 				}
 			}
-			out.WriteByte(pattern[i])
+			_ = out.WriteByte(pattern[i])
 		}
 		s["pattern"] = out.String()
 	}

@@ -64,7 +64,7 @@ func (s *WorkBuddyService) Models(ctx context.Context, account *Account) (*Upstr
 			m.ContextWindow = int64(input)
 			m.MaxContextWindow = int64(input)
 			m.MaxOutputTokens = int64(output)
-			if d["supportsImages"] == true && !(a.Platform == PlatformWorkBuddyAI && strings.HasPrefix(strings.ToLower(id), "glm-")) {
+			if d["supportsImages"] == true && (a.Platform != PlatformWorkBuddyAI || !strings.HasPrefix(strings.ToLower(id), "glm-")) {
 				m.InputModalities = append(m.InputModalities, "image")
 			}
 			reasoning, _ := d["reasoning"].(map[string]any)
@@ -197,7 +197,7 @@ func (s *WorkBuddyService) Usage(ctx context.Context, account *Account) (*WorkBu
 		out.Plan = "Pro"
 	}
 	packages, ok := data["Packages"].([]any)
-	if !ok && !(a.GetCredential("enterprise_id") != "" && data["Packages"] == nil) {
+	if !ok && (a.GetCredential("enterprise_id") == "" || data["Packages"] != nil) {
 		return nil, errors.New("WorkBuddy usage response has no package list")
 	}
 	for _, raw := range packages {
