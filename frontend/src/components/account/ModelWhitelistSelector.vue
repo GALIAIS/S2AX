@@ -168,7 +168,9 @@ const props = defineProps<{
     platform: string
     type: string
     base_url?: string
-    api_key: string
+    api_key?: string
+    credentials?: Record<string, unknown>
+    proxy_id?: number | null
   }
 }>()
 

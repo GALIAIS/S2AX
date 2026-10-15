@@ -1,5 +1,25 @@
 export default {
     accounts: {
+      workbuddy: {
+        authHint: 'Authorize a WorkBuddy account in your browser. Domestic and international accounts sign in separately; enterprise membership is preserved.',
+        signIn: 'Generate sign-in link',
+        openLogin: 'Open authorization page',
+        waiting: 'Waiting for browser authorization (valid for 5 minutes)',
+        ready: 'Credentials ready; save the account to apply',
+        keepCredentials: 'Existing credentials are retained. Authorize again to replace them.',
+        importTitle: 'Import plaintext desktop sign-in JSON',
+        importHint: 'Paste sign-in JSON containing auth and account. Encrypted tokens from 5.6+ cannot be imported; use browser sign-in. Copied desktop refresh tokens may invalidate the other login; a separate browser sign-in is recommended.',
+        importAction: 'Import credentials',
+        authError: 'WorkBuddy authorization failed; please retry',
+        expired: 'Authorization expired; generate a new sign-in link',
+        signInRequired: 'Authorize WorkBuddy or import credentials first',
+        credits: 'Credits',
+        used: 'Used',
+        remaining: 'Remaining',
+        resets: 'Resets at',
+        expiryUnavailable: 'Package expiry is temporarily unavailable',
+        usageError: 'Failed to fetch WorkBuddy credits'
+      },
       title: 'Account Management',
       description: 'Manage AI platform accounts and credentials',
       createAccount: 'Create Account',

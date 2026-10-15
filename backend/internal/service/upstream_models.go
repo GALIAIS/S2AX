@@ -28,6 +28,8 @@ const (
 )
 
 type UpstreamModelMetadata struct {
+	CreditRate               *float64                   `json:"credit_rate,omitempty"`
+	CreditRateBeforeDiscount *float64                   `json:"credit_rate_before_discount,omitempty"`
 	ID                       string                     `json:"id"`
 	DisplayName              string                     `json:"display_name,omitempty"`
 	Description              string                     `json:"description,omitempty"`
@@ -208,6 +210,16 @@ func (s *AccountTestService) FetchUpstreamSupportedModels(ctx context.Context, a
 // snapshot. When no model is complete, the existing account snapshot is left
 // untouched.
 func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, account *Account) (*UpstreamModelCatalog, error) {
+	if account.IsWorkBuddy() {
+		if s.WorkBuddy() == nil {
+			return nil, newUpstreamModelSyncConfigError("WorkBuddy service is unavailable", nil)
+		}
+		catalog, err := s.WorkBuddy().Models(ctx, account)
+		if err != nil {
+			return nil, newUpstreamModelSyncUpstreamError("Failed to sync WorkBuddy models", err)
+		}
+		return catalog, nil
+	}
 	models, body, err := s.fetchUpstreamModelList(ctx, account)
 	liveListAvailable := err == nil
 	if err != nil {
@@ -725,6 +737,17 @@ func normalizeModelRegistryBaseURL(raw string) string {
 }
 
 func (s *AccountTestService) fetchUpstreamModelList(ctx context.Context, account *Account) ([]string, []byte, error) {
+	if account.IsWorkBuddy() {
+		if s.WorkBuddy() == nil {
+			return nil, nil, newUpstreamModelSyncConfigError("WorkBuddy service is unavailable", nil)
+		}
+		catalog, err := s.WorkBuddy().Models(ctx, account)
+		if err != nil {
+			return nil, nil, newUpstreamModelSyncUpstreamError("Failed to fetch WorkBuddy models", err)
+		}
+		body, err := workBuddyModelsBody(catalog)
+		return catalog.Models, body, err
+	}
 	if s == nil {
 		return nil, nil, newUpstreamModelSyncConfigError("Account test service is not configured", nil)
 	}

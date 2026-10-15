@@ -1,8 +1,9 @@
 <template>
   <div ref="rootRef" v-if="showUsageWindows">
+    <WorkBuddyUsageCell v-if="isWorkBuddyPlatform(account.platform)" :account="account" />
     <!-- Anthropic OAuth and Setup Token accounts: fetch real usage data -->
     <template
-      v-if="
+      v-else-if="
         account.platform === 'anthropic' &&
         (account.type === 'oauth' || account.type === 'setup-token')
       "
@@ -675,6 +676,8 @@
 </template>
 
 <script setup lang="ts">
+import WorkBuddyUsageCell from './WorkBuddyUsageCell.vue'
+import { isWorkBuddyPlatform } from '@/api/admin/workbuddy'
 import { ref, computed, onMounted, onBeforeUnmount, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'

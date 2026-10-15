@@ -20,6 +20,8 @@ const concretePlatforms = [
   'gemini',
   'antigravity',
   'grok',
+  'workbuddy',
+  'workbuddy_ai',
   'kimi',
   'zhipu',
   'deepseek',
@@ -61,10 +63,12 @@ describe('platform catalog with a newly registered platform', () => {
     expect(listPlatformIds()).toEqual(concretePlatforms)
     expect(compositePrecedencePlatformIds()).toEqual([
       'anthropic', 'gemini', 'openai', 'antigravity', 'grok',
+      'workbuddy', 'workbuddy_ai',
       'kimi', 'zhipu', 'deepseek', 'minimax', 'devin', 'opencode_go', 'typesafe', 'command_code', 'cline'
     ])
     expect(CONCRETE_PLATFORM_OPTIONS.map((option) => option.label)).toEqual([
       'Anthropic', 'OpenAI', 'Gemini', 'Antigravity', 'Grok',
+      'WorkBuddy', 'WorkBuddy AI',
       'Kimi', 'Zhipu GLM', 'DeepSeek', 'MiniMax', 'Devin', 'OpenCode', 'TypeSafe / Jev', 'Command Code', 'Cline'
     ])
     expect(platformLabel('zhipu')).toBe('Zhipu GLM')

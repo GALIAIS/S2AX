@@ -13,6 +13,8 @@ func TestAllPlatformsIncludesEveryConcretePlatform(t *testing.T) {
 		"gemini",
 		"antigravity",
 		"grok",
+		"workbuddy",
+		"workbuddy_ai",
 		"kimi",
 		"zhipu",
 		"deepseek",

@@ -1198,6 +1198,10 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	}
 
 	// Fallback to default models
+	if platform == service.PlatformWorkBuddy || platform == service.PlatformWorkBuddyAI {
+		writeModelsList(c, platform, service.DefaultWorkBuddyModelIDs(platform))
+		return
+	}
 	if platform == service.PlatformOpenAI {
 		writeModelsListResponse(c, openai.DefaultModels)
 		return
@@ -1497,6 +1501,8 @@ func defaultModelIDsForPlatform(platform string) []string {
 		return claude.DefaultModelIDs()
 	case service.PlatformGrok:
 		return xai.DefaultModelIDs()
+	case service.PlatformWorkBuddy, service.PlatformWorkBuddyAI:
+		return service.DefaultWorkBuddyModelIDs(platform)
 	case service.PlatformDevin:
 		ids := make([]string, 0, len(domain.DefaultDevinModelMapping))
 		for id := range domain.DefaultDevinModelMapping {

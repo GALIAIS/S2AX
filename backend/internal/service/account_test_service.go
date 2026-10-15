@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
@@ -409,6 +410,9 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		return s.sendErrorAndEnd(c, "Account not found")
 	}
 	bindAccountTestPlatform(c, account)
+	if !domain.IsConcretePlatform(account.Platform) {
+		return s.sendErrorAndEnd(c, "Unsupported account platform")
+	}
 
 	// Synthetic UI load-test accounts exercise the real SSE parsing and modal
 	// interactions, but intentionally do not send their placeholder credentials
@@ -437,6 +441,10 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		case APIProtocolAnthropic:
 			return s.testCNProviderAnthropicConnection(c, account, modelID)
 		}
+	}
+
+	if account.IsWorkBuddy() {
+		return s.testWorkBuddyConnection(c, account, modelID, prompt)
 	}
 
 	if account.IsDevin() {

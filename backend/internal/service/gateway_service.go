@@ -1441,6 +1441,19 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 		}
 
 		mapping := acc.GetModelMapping()
+		if acc.IsWorkBuddy() && len(mapping) == 0 {
+			ids := DefaultWorkBuddyModelIDs(acc.Platform)
+			if snapshot := acc.GetUpstreamModelMetadataSnapshot(); snapshot != nil && len(snapshot.Models) > 0 {
+				ids = make([]string, 0, len(snapshot.Models))
+				for id := range snapshot.Models {
+					ids = append(ids, id)
+				}
+			}
+			for _, id := range ids {
+				modelSet[id] = struct{}{}
+				hasAnyMapping = true
+			}
+		}
 		for model := range mapping {
 			// Accounts pulled in through mixed scheduling only contribute the
 			// models that belong to the listing platform (e.g. an antigravity

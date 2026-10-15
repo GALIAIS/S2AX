@@ -1382,6 +1382,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 }
 
 func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
+	if account.IsWorkBuddy() {
+		return true
+	}
 	if account == nil || account.Type != AccountTypeAPIKey {
 		return false
 	}

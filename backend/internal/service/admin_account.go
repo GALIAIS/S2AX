@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -411,6 +412,17 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 // Grok media eligibility helpers live in account_grok_media_eligibility.go.
 
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
+	if !domain.IsConcretePlatform(input.Platform) {
+		return nil, infraerrors.BadRequest("INVALID_PLATFORM", "unsupported account platform")
+	}
+	if input.Platform == PlatformWorkBuddy || input.Platform == PlatformWorkBuddyAI {
+		if input.Type != AccountTypeOAuth {
+			return nil, infraerrors.BadRequest("WORKBUDDY_OAUTH_REQUIRED", "WorkBuddy requires OAuth credentials")
+		}
+		if err := ValidateWorkBuddyCredentials(input.Credentials); err != nil {
+			return nil, infraerrors.BadRequest("WORKBUDDY_CREDENTIALS_INVALID", err.Error())
+		}
+	}
 	if input.Platform == PlatformTypeSafe && input.Type != AccountTypeAPIKey {
 		return nil, errors.New("typesafe accounts only support apikey credentials")
 	}
@@ -583,6 +595,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err != nil {
 		return nil, err
 	}
+	if !domain.IsConcretePlatform(account.Platform) {
+		return nil, infraerrors.BadRequest("INVALID_PLATFORM", "unsupported account platform")
+	}
 	if account.Platform == PlatformTypeSafe && input.Type != "" && input.Type != AccountTypeAPIKey {
 		return nil, errors.New("typesafe accounts only support apikey credentials")
 	}
@@ -615,6 +630,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	previousProbeIdentity := upstreamBillingProbeIdentity(account)
 	previousOllamaUsageIdentity := ollamaCloudUsageIdentity(account)
 	previousOpenCodeUsageIdentity := openCodeGoUsageIdentity(account)
+	previousWorkBuddyUID, previousWorkBuddyEnterprise := account.GetCredential("uid"), account.GetCredential("enterprise_id")
 	// 安全/身份不变量(影子账号):通用更新路径被 edit/re-auth/refresh/batch 共用,
 	// 必须在此守住,否则仅在创建时的保证可被这些路径绕过。
 	if account.IsCredentialShadow() {
@@ -668,6 +684,14 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 		// Strip SSO/password residue that must never sit next to OAuth tokens.
 		account.Credentials = SanitizeStoredCredentials(account.Platform, account.Credentials)
+	}
+	if account.IsWorkBuddy() {
+		if account.Type != AccountTypeOAuth {
+			return nil, infraerrors.BadRequest("WORKBUDDY_OAUTH_REQUIRED", "WorkBuddy requires OAuth credentials")
+		}
+		if err := ValidateWorkBuddyCredentials(account.Credentials); err != nil {
+			return nil, infraerrors.BadRequest("WORKBUDDY_CREDENTIALS_INVALID", err.Error())
+		}
 	}
 	// Extra 使用 map：需要区分“未提供(nil)”与“显式清空({})”。
 	// 关闭配额限制时前端会删除 quota_* 键并提交 extra:{}，此时也必须落库。
@@ -869,6 +893,10 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
+	if account.IsWorkBuddy() && (account.GetCredential("uid") != previousWorkBuddyUID || account.GetCredential("enterprise_id") != previousWorkBuddyEnterprise) {
+		account.Extra = shallowCopyMap(account.Extra)
+		delete(account.Extra, UpstreamModelMetadataExtraKey)
+	}
 	billingSettingsAppliedAtomically := false
 	updater := s.accountBillingRepo
 	if updater == nil {

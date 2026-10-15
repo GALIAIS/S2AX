@@ -459,6 +459,7 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
+	workBuddyService         *WorkBuddyService
 	accountRepo              AccountRepository
 	usageLogRepo             UsageLogRepository
 	usageBillingRepo         UsageBillingRepository
@@ -1226,6 +1227,16 @@ func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Acco
 			return "", "", err
 		}
 		account = credAccount
+	}
+	if account.IsWorkBuddy() {
+		if s.workBuddyService == nil {
+			return "", "", errors.New("WorkBuddy service is unavailable")
+		}
+		fresh, err := s.workBuddyService.FreshAccount(ctx, account)
+		if err != nil {
+			return "", "", err
+		}
+		return fresh.GetCredential("access_token"), "oauth", nil
 	}
 	switch account.Type {
 	case AccountTypeOAuth:

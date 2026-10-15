@@ -36,6 +36,18 @@
       "litellm_provider": "xai"
     },
     {
+      "id": "workbuddy",
+      "display_name": "WorkBuddy",
+      "gateway": "openai",
+      "cn_provider": false
+    },
+    {
+      "id": "workbuddy_ai",
+      "display_name": "WorkBuddy AI",
+      "gateway": "openai",
+      "cn_provider": false
+    },
+    {
       "id": "kimi",
       "display_name": "Kimi",
       "gateway": "openai",
@@ -293,6 +305,8 @@
     "openai",
     "antigravity",
     "grok",
+    "workbuddy",
+    "workbuddy_ai",
     "kimi",
     "zhipu",
     "deepseek",

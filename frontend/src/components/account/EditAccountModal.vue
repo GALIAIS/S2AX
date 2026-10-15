@@ -27,6 +27,14 @@
       </div>
 
       <!-- API Key fields (only for apikey type) -->
+      <WorkBuddyAuthForm
+        v-if="show && isWorkBuddyPlatform(account.platform)"
+        :key="account.id"
+        v-model="workBuddyCredentials"
+        existing
+        :platform="account.platform === 'workbuddy_ai' ? 'workbuddy_ai' : 'workbuddy'"
+        :proxy-id="form.proxy_id"
+      />
       <div v-if="account.type === 'apikey'" class="space-y-4">
         <!-- Devin：直连 Codeium GetChatMessage，无 HTTP base_url 概念 -->
         <div v-if="account.platform === 'devin'" class="rounded-lg border border-violet-200 bg-violet-50 p-3 dark:border-violet-800 dark:bg-violet-900/20">
@@ -778,7 +786,7 @@
 
       <!-- OpenAI/Grok OAuth Model Mapping (OAuth 类型没有 apikey 容器，需要独立的模型映射区域) -->
       <div
-        v-if="(account.platform === 'openai' || account.platform === 'grok') && account.type === 'oauth'"
+        v-if="(account.platform === 'openai' || account.platform === 'grok' || isWorkBuddyPlatform(account.platform)) && account.type === 'oauth'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
@@ -3185,6 +3193,9 @@
 </template>
 
 <script setup lang="ts">
+import WorkBuddyAuthForm from './WorkBuddyAuthForm.vue'
+import { isWorkBuddyPlatform } from '@/api/admin/workbuddy'
+import type { WorkBuddyCredentials } from '@/api/admin/workbuddy'
 import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -3440,6 +3451,8 @@ interface TempUnschedRuleForm {
 
 // State
 const submitting = ref(false)
+const workBuddyCredentials = ref<WorkBuddyCredentials | null>(null)
+watch(() => [props.account?.id, props.show], () => { workBuddyCredentials.value = null })
 const editBaseUrl = ref('https://api.anthropic.com')
 const editApiKey = ref('')
 
@@ -5583,12 +5596,18 @@ const handleSubmit = async () => {
     }
 
     // OpenAI/Grok OAuth: persist model mapping to credentials
-    if ((props.account.platform === 'openai' || props.account.platform === 'grok') && props.account.type === 'oauth') {
+    if ((props.account.platform === 'openai' || props.account.platform === 'grok' || isWorkBuddyPlatform(props.account.platform)) && props.account.type === 'oauth') {
       const currentCredentials = isSparkShadow.value
         ? {}
         : (updatePayload.credentials as Record<string, unknown>) ||
           ((props.account.credentials as Record<string, unknown>) || {})
       const newCredentials: Record<string, unknown> = { ...currentCredentials }
+      if (isWorkBuddyPlatform(props.account.platform) && workBuddyCredentials.value) {
+        for (const key of ['access_token', 'refresh_token', 'expires_at', 'refresh_expires_at', 'uid', 'domain', 'enterprise_id', 'account_type', 'nickname', 'token_type']) {
+          delete newCredentials[key]
+        }
+        Object.assign(newCredentials, { refresh_token: '' }, workBuddyCredentials.value)
+      }
       if (props.account.platform === 'openai') {
         applyOpenAIModelMappingCredentials(newCredentials)
       } else {

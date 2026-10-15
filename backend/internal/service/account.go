@@ -247,6 +247,10 @@ func (a *Account) IsOAuth() bool {
 	return a.Type == AccountTypeOAuth || a.Type == AccountTypeSetupToken
 }
 
+func (a *Account) IsWorkBuddy() bool {
+	return a != nil && (a.Platform == PlatformWorkBuddy || a.Platform == PlatformWorkBuddyAI)
+}
+
 // IsPrivacySet 检查账号的 privacy 是否已成功设置。
 // OpenAI: privacy_mode == "training_off"
 // Antigravity: privacy_mode == "privacy_set"

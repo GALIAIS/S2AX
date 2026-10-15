@@ -187,6 +187,23 @@
             TypeSafe / Jev
           </button>
         </div>
+        <div class="mt-2 flex flex-wrap rounded-lg bg-gray-100 p-1 dark:bg-dark-700">
+          <button
+            v-for="platform in workBuddyPlatforms"
+            :key="platform"
+            type="button"
+            @click="form.platform = platform"
+            :class="[
+              'flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium transition-all',
+              form.platform === platform
+                ? 'bg-white text-cyan-700 shadow-sm dark:bg-dark-600 dark:text-cyan-300'
+                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+            ]"
+          >
+            <PlatformIcon :platform="platform" size="sm" />
+            {{ platform === 'workbuddy_ai' ? 'WorkBuddy AI' : 'WorkBuddy' }}
+          </button>
+        </div>
         <!-- 国产厂商：Kimi / Zhipu GLM / DeepSeek / MiniMax -->
         <div class="mt-2 flex flex-wrap rounded-lg bg-gray-100 p-1 dark:bg-dark-700" data-testid="platform-row-cn">
           <button
@@ -1435,6 +1452,13 @@
       </div>
 
       <!-- API Key input (only for apikey type, excluding Antigravity which has its own fields) -->
+      <WorkBuddyAuthForm
+        v-if="show && isWorkBuddyPlatform(form.platform)"
+        :key="form.platform"
+        v-model="workBuddyCredentials"
+        :platform="form.platform === 'workbuddy_ai' ? 'workbuddy_ai' : 'workbuddy'"
+        :proxy-id="form.proxy_id"
+      />
       <div v-if="form.type === 'apikey' && form.platform !== 'antigravity'" class="space-y-4">
         <!-- Devin：直连 Codeium GetChatMessage，无 HTTP base_url 概念 -->
         <div v-if="form.platform === 'devin'" class="rounded-lg border border-violet-200 bg-violet-50 p-3 dark:border-violet-800 dark:bg-violet-900/20">
@@ -2398,7 +2422,7 @@
 
       <!-- OpenAI OAuth Model Mapping (OAuth 类型没有 apikey 容器，需要独立的模型映射区域) -->
       <div
-        v-if="(form.platform === 'openai' || form.platform === 'grok') && isOAuthFlow"
+        v-if="((form.platform === 'openai' || form.platform === 'grok') && isOAuthFlow) || isWorkBuddyPlatform(form.platform)"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
@@ -4026,6 +4050,9 @@
 </template>
 
 <script setup lang="ts">
+import WorkBuddyAuthForm from './WorkBuddyAuthForm.vue'
+import { isWorkBuddyPlatform } from '@/api/admin/workbuddy'
+import type { WorkBuddyCredentials } from '@/api/admin/workbuddy'
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -4516,6 +4543,10 @@ function onCnPresetSelect(preset: { mode: CnAccountMode; protocol: CnApiProtocol
 }
 
 const syncPreviewCredentials = computed(() => {
+  if (isWorkBuddyPlatform(form.platform)) {
+    if (!workBuddyCredentials.value) return undefined
+    return { platform: form.platform, type: 'oauth', credentials: workBuddyCredentials.value, proxy_id: form.proxy_id }
+  }
   if (!apiKeyValue.value) return undefined
   const baseUrl = isMultiProtocolPlatform.value && apiProtocol.value === 'adaptive'
     ? adaptiveBaseUrls.value.chat_completions.trim() || apiKeyBaseUrl.value.trim()
@@ -4926,7 +4957,10 @@ const form = reactive({
 })
 
 // Helper to check if current type needs OAuth flow
+const workBuddyPlatforms = ['workbuddy', 'workbuddy_ai'] as const
+const workBuddyCredentials = ref<WorkBuddyCredentials | null>(null)
 const isOAuthFlow = computed(() => {
+  if (isWorkBuddyPlatform(form.platform)) return false
   // Antigravity upstream 类型不需要 OAuth 流程
   if (form.platform === 'antigravity' && antigravityAccountType.value === 'upstream') {
     return false
@@ -5026,6 +5060,15 @@ watch(
 watch(
   () => form.platform,
   (newPlatform) => {
+    workBuddyCredentials.value = null
+    if (isWorkBuddyPlatform(newPlatform)) {
+      accountCategory.value = 'oauth-based'
+      addMethod.value = 'oauth'
+      form.type = 'oauth'
+      form.concurrency = 1
+      form.load_factor = null
+      modelRestrictionMode.value = 'mapping'
+    }
     // Reset base URL based on platform
     if (isMultiProtocolApiKeyPlatform(newPlatform)) {
       const mode = newPlatform === 'opencode_go' ? openCodeAccountMode.value : accountMode.value
@@ -5457,7 +5500,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
       Object.values(modelMapping).some((target) =>
         typeof target === 'string' && target.trim() !== '' && !target.includes('*')
       )
-    if (upstreamModelsPreviewed.value || hasConcreteMappedTarget) {
+    if (upstreamModelsPreviewed.value || hasConcreteMappedTarget || isWorkBuddyPlatform(payload.platform)) {
       try {
         const result = await adminAPI.accounts.syncUpstreamModels(account.id)
         const warnings = result.warnings ?? []
@@ -5850,6 +5893,21 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 }
 
 const handleSubmit = async () => {
+  if (isWorkBuddyPlatform(form.platform)) {
+    if (!form.name.trim()) {
+      appStore.showError(t('admin.accounts.pleaseEnterAccountName'))
+      return
+    }
+    if (!workBuddyCredentials.value) {
+      appStore.showError(t('admin.accounts.workbuddy.signInRequired'))
+      return
+    }
+    const credentials = { ...workBuddyCredentials.value }
+    const mapping = buildModelMappingObject('combined', allowedModels.value, modelMappings.value)
+    if (mapping) credentials.model_mapping = mapping
+    await createAccountAndFinish(form.platform, 'oauth', credentials)
+    return
+  }
   // For OAuth-based type, handle OAuth flow (goes to step 2)
   if (isOAuthFlow.value) {
     if (!isGrokSSOInputMethod.value && !form.name.trim()) {

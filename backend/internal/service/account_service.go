@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 )
@@ -224,6 +225,17 @@ func NewAccountService(accountRepo AccountRepository, groupRepo GroupRepository)
 
 // Create 创建账号
 func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (*Account, error) {
+	if !domain.IsConcretePlatform(req.Platform) {
+		return nil, infraerrors.BadRequest("INVALID_PLATFORM", "unsupported account platform")
+	}
+	if req.Platform == PlatformWorkBuddy || req.Platform == PlatformWorkBuddyAI {
+		if req.Type != AccountTypeOAuth {
+			return nil, errors.New("WorkBuddy requires OAuth credentials")
+		}
+		if err := ValidateWorkBuddyCredentials(req.Credentials); err != nil {
+			return nil, err
+		}
+	}
 	if req.Platform == PlatformTypeSafe && req.Type != AccountTypeAPIKey {
 		return nil, errors.New("typesafe accounts only support apikey credentials")
 	}
@@ -323,6 +335,9 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 	if err != nil {
 		return nil, fmt.Errorf("get account: %w", err)
 	}
+	if !domain.IsConcretePlatform(account.Platform) {
+		return nil, infraerrors.BadRequest("INVALID_PLATFORM", "unsupported account platform")
+	}
 
 	// 更新字段
 	if req.Name != nil {
@@ -333,6 +348,11 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 	}
 
 	if req.Credentials != nil {
+		if account.IsWorkBuddy() {
+			if err := ValidateWorkBuddyCredentials(*req.Credentials); err != nil {
+				return nil, err
+			}
+		}
 		account.Credentials = SanitizeStoredCredentials(account.Platform, *req.Credentials)
 	}
 
@@ -522,6 +542,8 @@ func (s *AccountService) TestCredentials(ctx context.Context, id int64) error {
 	case PlatformTypeSafe:
 		// TypeSafe credentials are API keys; inference failures drive health and cooldown state.
 		return nil
+	case PlatformWorkBuddy, PlatformWorkBuddyAI:
+		return ValidateWorkBuddyCredentials(account.Credentials)
 	case PlatformDevin:
 		// Devin：凭证为 session token（或经 API key 换发），实际可用性经 ACP 转发路径验证。
 		return nil

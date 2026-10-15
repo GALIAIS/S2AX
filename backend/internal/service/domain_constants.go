@@ -43,6 +43,8 @@ const (
 	PlatformGemini      = domain.PlatformGemini
 	PlatformAntigravity = domain.PlatformAntigravity
 	PlatformGrok        = domain.PlatformGrok
+	PlatformWorkBuddy   = domain.PlatformWorkBuddy
+	PlatformWorkBuddyAI = domain.PlatformWorkBuddyAI
 	// 国产 OpenAI 兼容供应商（与 grok 一样经 OpenAI 网关转发）。
 	PlatformDevin       = domain.PlatformDevin
 	PlatformKimi        = domain.PlatformKimi

@@ -1395,6 +1395,13 @@ func (h *AccountHandler) PreviewFromCRS(c *gin.Context) {
 // refreshSingleAccount refreshes credentials for a single OAuth account.
 // Returns (updatedAccount, warning, error) where warning is used for Antigravity ProjectIDMissing scenario.
 func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *service.Account) (*service.Account, string, error) {
+	if account.IsWorkBuddy() {
+		if h.accountTestService.WorkBuddy() == nil {
+			return nil, "", fmt.Errorf("WorkBuddy service is unavailable")
+		}
+		fresh, err := h.accountTestService.WorkBuddy().RefreshAccount(ctx, account)
+		return fresh, "", err
+	}
 	if !account.IsOAuth() {
 		return nil, "", infraerrors.BadRequest("NOT_OAUTH", "cannot refresh non-OAuth account")
 	}
@@ -2808,7 +2815,20 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 		return
 	}
 
+	if account.IsWorkBuddy() {
+		models, err := h.accountTestService.FetchOpenAIAccountModels(c.Request.Context(), account)
+		if err != nil {
+			response.Error(c, 502, "Failed to fetch WorkBuddy models: "+err.Error())
+			return
+		}
+		response.Success(c, models)
+		return
+	}
 	// Handle OpenAI accounts
+	if !domain.IsConcretePlatform(account.Platform) {
+		response.BadRequest(c, "Unsupported account platform")
+		return
+	}
 	if account.IsOpenAI() {
 		// Prefer the shared, account-keyed upstream catalog. If discovery fails,
 		// retain the legacy local catalog below so the test dialog remains usable.
@@ -3116,7 +3136,9 @@ func (h *AccountHandler) SyncUpstreamModelsPreview(c *gin.Context) {
 		Platform     string            `json:"platform" binding:"required"`
 		Type         string            `json:"type" binding:"required"`
 		BaseURL      string            `json:"base_url"`
-		APIKey       string            `json:"api_key" binding:"required"`
+		APIKey       string            `json:"api_key"`
+		Credentials  map[string]any    `json:"credentials"`
+		ProxyID      *int64            `json:"proxy_id"`
 		ModelMapping map[string]string `json:"model_mapping"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -3136,6 +3158,17 @@ func (h *AccountHandler) SyncUpstreamModelsPreview(c *gin.Context) {
 			"base_url":      req.BaseURL,
 			"model_mapping": modelMapping,
 		},
+	}
+	if tempAccount.IsWorkBuddy() {
+		if req.Type != service.AccountTypeOAuth {
+			response.BadRequest(c, "WorkBuddy requires OAuth credentials")
+			return
+		}
+		tempAccount.Credentials = req.Credentials
+		tempAccount.ProxyID = req.ProxyID
+	} else if strings.TrimSpace(req.APIKey) == "" {
+		response.BadRequest(c, "api_key is required")
+		return
 	}
 
 	if h.accountTestService == nil {

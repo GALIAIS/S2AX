@@ -140,6 +140,10 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 
 // openAIChatCompletionsTargetURL 解析账号的（非 Grok）Chat Completions 上游端点。
 func (s *OpenAIGatewayService) openAIChatCompletionsTargetURL(account *Account) (string, error) {
+	if account.IsWorkBuddy() {
+		endpoint, err := workBuddyEndpoint(account.Platform)
+		return endpoint + "/v2/chat/completions", err
+	}
 	baseURL := account.GetOpenAIBaseURL()
 	if baseURL == "" {
 		baseURL = "https://api.openai.com"
@@ -154,6 +158,10 @@ func (s *OpenAIGatewayService) openAIChatCompletionsTargetURL(account *Account) 
 // resolveCCFallbackTarget 解析两条 CC 回退路径共用的账号凭证与上游端点
 // （回退路径仅面向 APIKey 账号，凭证恒为 openai api_key）。
 func (s *OpenAIGatewayService) resolveCCFallbackTarget(account *Account) (apiKey string, targetURL string, err error) {
+	if account.IsWorkBuddy() {
+		targetURL, err = s.openAIChatCompletionsTargetURL(account)
+		return account.GetCredential("access_token"), targetURL, err
+	}
 	apiKey = strings.TrimSpace(account.GetOpenAIProtocolAPIKey())
 	if apiKey == "" {
 		return "", "", fmt.Errorf("account %d missing api_key", account.ID)
@@ -182,6 +190,20 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	userAgent string,
 	grokCacheIdentity string,
 ) (*http.Response, error) {
+	if account.IsWorkBuddy() {
+		SetActualOpenAIUpstreamEndpoint(c, "/v2/chat/completions")
+		if s.workBuddyService == nil {
+			return nil, errors.New("WorkBuddy service is unavailable")
+		}
+		secret := ""
+		if s.cfg != nil {
+			secret = s.cfg.JWT.Secret
+		}
+		if secret == "" {
+			return nil, errors.New("WorkBuddy session isolation requires a configured JWT secret")
+		}
+		return s.workBuddyService.Chat(ctx, c, account, body, stream, secret)
+	}
 	// DeepSeek thinking mode 要求历史 assistant 回传 reasoning_content。
 	// Responses→CC 回退在加密-only / 缺 reasoning item 且缓存未命中时会漏掉该
 	// 字段，上游 400 "The `reasoning_content` in the thinking mode must be

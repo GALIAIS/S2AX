@@ -1339,6 +1339,8 @@ function generateRoutedCodexFiles(
     gemini: 'Gemini',
     antigravity: 'Antigravity',
     grok: 'Grok',
+    workbuddy: 'WorkBuddy',
+    workbuddy_ai: 'WorkBuddy AI',
     kimi: 'Kimi',
     zhipu: 'Zhipu',
     deepseek: 'DeepSeek',

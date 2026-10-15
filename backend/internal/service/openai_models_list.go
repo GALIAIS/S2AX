@@ -39,6 +39,20 @@ func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, accoun
 		}
 		return &OpenAIModelsResponse{Body: body, ETag: codexModelsManifestBodyETag(body)}, nil
 	}
+	if credentialAccount.IsWorkBuddy() {
+		if s.workBuddyService == nil {
+			return nil, fmt.Errorf("WorkBuddy service is unavailable")
+		}
+		catalog, err := s.workBuddyService.Models(ctx, credentialAccount)
+		if err != nil {
+			return nil, err
+		}
+		body, err := workBuddyModelsBody(catalog)
+		if err != nil {
+			return nil, err
+		}
+		return &OpenAIModelsResponse{Body: body, ETag: codexModelsManifestBodyETag(body)}, nil
+	}
 	req, err := buildOpenAIAPIKeyModelsRequest(ctx, credentialAccount, s.validateUpstreamBaseURL)
 	if err != nil {
 		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_MODELS_REQUEST_INVALID", "cannot build upstream model list request: %v", err)

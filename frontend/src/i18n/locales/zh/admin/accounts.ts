@@ -1,5 +1,25 @@
 export default {
     accounts: {
+      workbuddy: {
+        authHint: '通过浏览器授权，将 WorkBuddy 账号接入中转。国内版和国际版分别授权，企业账号保留所属企业。',
+        signIn: '生成登录链接',
+        openLogin: '打开授权页面',
+        waiting: '等待浏览器完成授权（5 分钟内有效）',
+        ready: '凭证已就绪，保存账号后生效',
+        keepCredentials: '已有凭证保持有效；需要更换登录时重新授权。',
+        importTitle: '导入明文桌面登录 JSON',
+        importHint: '粘贴包含 auth 和 account 的登录 JSON。5.6+ 加密令牌无法导入，请使用浏览器授权。复制桌面刷新令牌可能与桌面端相互挤出登录，推荐独立浏览器授权。',
+        importAction: '导入凭证',
+        authError: 'WorkBuddy 授权失败，请重试',
+        expired: '授权已过期，请重新生成登录链接',
+        signInRequired: '请先完成 WorkBuddy 授权或导入凭证',
+        credits: '积分',
+        used: '已用',
+        remaining: '剩余',
+        resets: '重置于',
+        expiryUnavailable: '套餐到期信息暂不可用',
+        usageError: '获取 WorkBuddy 积分失败'
+      },
       title: '账号管理',
       description: '管理 AI 平台账号和 Cookie',
       createAccount: '添加账号',

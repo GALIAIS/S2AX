@@ -57,6 +57,7 @@ func ProvideEmailQueueService(emailService *EmailService) *EmailQueueService {
 // 通过 provider 适配保留 NewOpenAIGatewayService 的既有参数契约，避免测试和
 // 扩展调用方因新增可选依赖而被迫改造；生产装配仍能使用数据库模板和 Codex 默认模板。
 func ProvideOpenAIGatewayService(
+	workBuddyService *WorkBuddyService,
 	accountRepo AccountRepository,
 	usageLogRepo UsageLogRepository,
 	usageBillingRepo UsageBillingRepository,
@@ -106,6 +107,7 @@ func ProvideOpenAIGatewayService(
 		userPlatformQuotaRepo,
 	)
 	svc.SetTLSFingerprintProfileService(tlsFPProfileService)
+	svc.workBuddyService = workBuddyService
 	return svc
 }
 
@@ -176,6 +178,7 @@ func ProvideOpenAIOAuthService(
 
 // ProvideTokenRefreshService creates and starts TokenRefreshService
 func ProvideTokenRefreshService(
+	workBuddyService *WorkBuddyService,
 	accountRepo AccountRepository,
 	oauthService *OAuthService,
 	openaiOAuthService *OpenAIOAuthService,
@@ -199,6 +202,9 @@ func ProvideTokenRefreshService(
 	// 调用侧显式注入后台刷新策略，避免策略漂移
 	svc.SetRefreshPolicy(DefaultBackgroundRefreshPolicy())
 	svc.SetAccountRuntimeBlocker(runtimeBlocker)
+	svc.registrations = append(svc.registrations,
+		tokenRefreshRegistration{platform: PlatformWorkBuddy, refresher: workBuddyService, executor: workBuddyService},
+		tokenRefreshRegistration{platform: PlatformWorkBuddyAI, refresher: workBuddyService, executor: workBuddyService})
 	svc.Start()
 	return svc
 }
@@ -1014,6 +1020,7 @@ func ProvideSharedQuotaPoolService(repo SharedQuotaPoolRepository, accountRepo A
 
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
+	NewWorkBuddyService,
 	// Core services
 	ProvideAuthService,
 	NewPasskeyService,
