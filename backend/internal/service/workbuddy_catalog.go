@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"slices"
 	"strings"
@@ -240,7 +241,7 @@ func (s *WorkBuddyService) Usage(ctx context.Context, account *Account) (*WorkBu
 			out.ExpiryWarning = "WorkBuddy package expiry is unavailable"
 		}
 	}
-	out.Remaining = max(0, out.Total-out.Used)
+	out.Remaining = math.Max(0, out.Total-out.Used)
 	return out, nil
 }
 

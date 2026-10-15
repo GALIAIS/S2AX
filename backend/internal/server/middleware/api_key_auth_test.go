@@ -57,6 +57,7 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 	group := &service.Group{
 		ID:               42,
 		Name:             "sub",
+		Platform:         service.PlatformAnthropic,
 		Status:           service.StatusActive,
 		Hydrated:         true,
 		SubscriptionType: service.SubscriptionTypeSubscription,
@@ -339,6 +340,7 @@ func TestAPIKeyAuthRejectsExclusiveGroupWhenUserNoLongerAllowed(t *testing.T) {
 	group := &service.Group{
 		ID:          202,
 		Name:        "exclusive",
+		Platform:    service.PlatformAnthropic,
 		Status:      service.StatusActive,
 		IsExclusive: true,
 		Hydrated:    true,
@@ -1224,6 +1226,7 @@ func TestAPIKeyAuthBillingInfoSkipsBillingAndSideEffects(t *testing.T) {
 	group := &service.Group{
 		ID:               42,
 		Name:             "subscription",
+		Platform:         service.PlatformAnthropic,
 		Status:           service.StatusActive,
 		Hydrated:         true,
 		SubscriptionType: service.SubscriptionTypeSubscription,
